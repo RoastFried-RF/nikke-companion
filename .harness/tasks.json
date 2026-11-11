@@ -20,7 +20,23 @@
           "name": "selftest",
           "cmd": "node scripts/harness-selftest.mjs"
         }
-      ]
+      ],
+      "deps": [],
+      "protected": [],
+      "manual_checks": [],
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": null,
+      "evidence": {
+        "run": ".harness/runs/20261111T170750-H-001-a1-manual",
+        "verified_tree": "8cbbff934b0862401bffcd58cec94e16a5892bd9",
+        "verified_at": "2026-11-11T17:08:05.684Z",
+        "commit": null
+      }
     },
     {
       "id": "P-001",
@@ -39,7 +55,12 @@
           "name": "integration",
           "cmd": "node --test tests/integration/"
         }
-      ]
+      ],
+      "protected": [],
+      "manual_checks": [],
+      "status": "pending",
+      "attempts": 0,
+      "agent_errors": 0
     },
     {
       "id": "P-002",
@@ -58,7 +79,12 @@
           "name": "unit",
           "cmd": "node --test tests/unit/account.test.mjs"
         }
-      ]
+      ],
+      "protected": [],
+      "manual_checks": [],
+      "status": "pending",
+      "attempts": 0,
+      "agent_errors": 0
     },
     {
       "id": "P-003",
@@ -87,7 +113,11 @@
       ],
       "manual_checks": [
         "실제 계정 데이터로 돌린 결과를 인게임 솔로 레이드 기록과 대조"
-      ]
+      ],
+      "protected": [],
+      "status": "pending",
+      "attempts": 0,
+      "agent_errors": 0
     },
     {
       "id": "P-004",
@@ -116,7 +146,11 @@
       ],
       "protected": [
         "tests/unit/format.acceptance.test.mjs"
-      ]
+      ],
+      "manual_checks": [],
+      "status": "pending",
+      "attempts": 0,
+      "agent_errors": 0
     },
     {
       "id": "H-002",
@@ -134,7 +168,12 @@
           "cmd": "node scripts/check-real-agent-run.mjs"
         }
       ],
-      "manual": true
+      "manual": true,
+      "protected": [],
+      "manual_checks": [],
+      "status": "pending",
+      "attempts": 0,
+      "agent_errors": 0
     },
     {
       "id": "P-005",
@@ -160,7 +199,12 @@
           "name": "integration",
           "cmd": "node --test tests/integration/"
         }
-      ]
+      ],
+      "protected": [],
+      "manual_checks": [],
+      "status": "pending",
+      "attempts": 0,
+      "agent_errors": 0
     },
     {
       "id": "P-006",
@@ -184,7 +228,12 @@
           "name": "integration",
           "cmd": "node --test tests/integration/"
         }
-      ]
+      ],
+      "protected": [],
+      "manual_checks": [],
+      "status": "pending",
+      "attempts": 0,
+      "agent_errors": 0
     },
     {
       "id": "P-007",
@@ -204,7 +253,12 @@
           "name": "unit",
           "cmd": "node --test tests/unit/"
         }
-      ]
+      ],
+      "protected": [],
+      "manual_checks": [],
+      "status": "pending",
+      "attempts": 0,
+      "agent_errors": 0
     },
     {
       "id": "P-008",
@@ -227,7 +281,11 @@
       ],
       "manual_checks": [
         "사용자가 자기 계정으로 받은 프로필 파일을 변환해 인게임 육성 상태와 대조"
-      ]
+      ],
+      "protected": [],
+      "status": "pending",
+      "attempts": 0,
+      "agent_errors": 0
     },
     {
       "id": "P-009",
@@ -263,7 +321,11 @@
         "실제 니케 PC판 위에서 오버레이가 보인다(창 모드·전체 화면)",
         "클릭 통과 상태에서 게임 입력을 방해하지 않는다",
         "Alt+Tab·창 이동·크기 변경 뒤에도 동작한다"
-      ]
+      ],
+      "protected": [],
+      "status": "pending",
+      "attempts": 0,
+      "agent_errors": 0
     }
   ]
 }
