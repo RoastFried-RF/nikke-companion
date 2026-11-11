@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// 오버레이 화면: 상태 표시, 계산 실행(추천·비교), 결과 파일 불러오기, 순위.
+// 오버레이 화면: 상태 표시, 게임 창(상태·화면 저장·붙이기), 계산 실행(추천·비교), 결과 파일 불러오기, 순위.
 // 계산은 루트의 src/core가 하고(ComputePanel → lib/compute.ts), 이미 만든 비교 결과 파일도 읽어 보여 준다.
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import ComputePanel from './components/ComputePanel.vue';
+import GamePanel from './components/GamePanel.vue';
 import OverlayStatus from './components/OverlayStatus.vue';
 import ReportView from './components/ReportView.vue';
 import { errorMessage, loadReport, onOverlayState, overlayStatus, quitApp, startupReportPath } from './lib/backend';
@@ -139,6 +140,8 @@ onBeforeUnmount(() => {
     </header>
 
     <OverlayStatus :state="overlay" />
+
+    <GamePanel />
 
     <ComputePanel :disabled="loading" @start="onComputeStart" @done="onComputeDone" @fail="onComputeFail" />
 

@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../src/App.vue';
 import * as backend from '../src/lib/backend';
-import type { CompareReport, OverlaySnapshot } from '../src/types';
+import type { CompareReport, GameSnapshot, OverlaySnapshot } from '../src/types';
 import fixture from './fixtures/compare.sample.json';
 
 vi.mock('../src/lib/backend', async (importOriginal) => ({
@@ -13,11 +13,22 @@ vi.mock('../src/lib/backend', async (importOriginal) => ({
   startupReportPath: vi.fn(),
   quitApp: vi.fn(),
   onOverlayState: vi.fn(),
+  gameWindowStatus: vi.fn(),
+  setFollowGame: vi.fn(),
+  captureGame: vi.fn(),
+  onGameWindow: vi.fn(),
+  onGameCapture: vi.fn(),
 }));
 
 const sample = fixture as unknown as CompareReport;
 const api = vi.mocked(backend);
 const interactive: OverlaySnapshot = { visible: true, click_through: false, shortcut_problems: [] };
+const noGame: GameSnapshot = {
+  state: 'missing',
+  window: null,
+  message: '게임 창을 찾을 수 없다. 니케 PC판(nikke.exe)이 실행 중인지 확인하라',
+  follow: false,
+};
 
 /** Rust가 보내는 상태 이벤트를 흉내 낸다. */
 let emitOverlayState: (state: OverlaySnapshot) => void = () => {};
@@ -40,6 +51,10 @@ beforeEach(() => {
     emitOverlayState = handler;
     return unlisten;
   });
+  api.gameWindowStatus.mockResolvedValue(noGame);
+  api.setFollowGame.mockResolvedValue(noGame);
+  api.onGameWindow.mockResolvedValue(() => {});
+  api.onGameCapture.mockResolvedValue(() => {});
 });
 
 describe('오버레이 화면', () => {
@@ -151,6 +166,15 @@ describe('오버레이 화면', () => {
     const w = await render();
     w.unmount();
     expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it('게임 창 칸이 있고 게임 창 상태를 보인다', async () => {
+    const w = await render();
+    expect(w.find('[data-testid="game-panel"]').exists()).toBe(true);
+    expect(api.gameWindowStatus).toHaveBeenCalledTimes(1);
+    expect(w.find('[data-testid="game-state"]').text()).toBe('게임 창: 없음');
+    // 게임이 없다는 것은 오류가 아니다 — 화면 전체의 오류 칸은 비어 있다.
+    expect(w.find('[data-testid="error"]').exists()).toBe(false);
   });
 
   it('창 끌기 영역이 있다', async () => {

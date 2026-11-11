@@ -5,12 +5,15 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
+  CaptureRecord,
   CompareReport,
   EngineCatalog,
   EngineProgress,
   EngineRequest,
   EngineRow,
   EngineVersion,
+  GameCaptureOutcome,
+  GameSnapshot,
   OverlaySnapshot,
 } from '../types';
 
@@ -19,6 +22,12 @@ export const OVERLAY_STATE_EVENT = 'overlay-state';
 
 /** 엔진 계산이 한 건 끝날 때마다 Rust가 보내는 이벤트 이름(src-tauri/src/lib.rs의 ENGINE_PROGRESS_EVENT). */
 export const ENGINE_PROGRESS_EVENT = 'engine-progress';
+
+/** 게임 창 상태가 바뀔 때 Rust가 보내는 이벤트 이름(src-tauri/src/lib.rs의 GAME_WINDOW_EVENT). */
+export const GAME_WINDOW_EVENT = 'game-window';
+
+/** 단축키(Alt+Shift+S)로 게임 화면을 저장한 결과를 Rust가 보내는 이벤트 이름(GAME_CAPTURE_EVENT). */
+export const GAME_CAPTURE_EVENT = 'game-capture';
 
 /** 비교 결과 파일을 읽는다. 실패하면 한국어 오류 문장으로 거부된다. */
 export function loadReport(path: string): Promise<CompareReport> {
@@ -63,6 +72,31 @@ export function readJsonFile(path: string): Promise<unknown> {
 /** 파일 고르기 창으로 JSON 파일 하나를 고른다. 취소하면 null. */
 export function pickJsonFile(title: string): Promise<string | null> {
   return invoke<string | null>('pick_json_file', { title });
+}
+
+/** 게임 창의 현재 상태(찾음/없음/최소화/런처만, 화면 영역)와 붙이기 여부. */
+export function gameWindowStatus(): Promise<GameSnapshot> {
+  return invoke<GameSnapshot>('game_window_status');
+}
+
+/** 붙이기를 켜거나 끈다. 켜면 오버레이가 게임 창의 오른쪽 위 안쪽에서 게임 창을 따라다닌다. */
+export function setFollowGame(enabled: boolean): Promise<GameSnapshot> {
+  return invoke<GameSnapshot>('set_follow_game', { enabled });
+}
+
+/** 지금 게임 화면을 PNG로 저장한다. 저장할 폴더는 Rust가 정한다. 실패하면 한국어 오류 문장으로 거부된다. */
+export function captureGame(label: string | null = null): Promise<CaptureRecord> {
+  return invoke<CaptureRecord>('capture_game', { label });
+}
+
+/** 게임 창 상태가 바뀔 때마다 불린다. 돌려받은 함수로 구독을 끊는다. */
+export function onGameWindow(handler: (snapshot: GameSnapshot) => void): Promise<UnlistenFn> {
+  return listen<GameSnapshot>(GAME_WINDOW_EVENT, (event) => handler(event.payload));
+}
+
+/** 단축키로 게임 화면을 저장할 때마다 결과(캡처 또는 오류)와 함께 불린다. */
+export function onGameCapture(handler: (outcome: GameCaptureOutcome) => void): Promise<UnlistenFn> {
+  return listen<GameCaptureOutcome>(GAME_CAPTURE_EVENT, (event) => handler(event.payload));
 }
 
 /** 엔진 배치가 한 건 끝날 때마다 불린다. 돌려받은 함수로 구독을 끊는다. */

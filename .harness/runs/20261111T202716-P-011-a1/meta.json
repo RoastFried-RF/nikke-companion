@@ -1,0 +1,30 @@
+{
+  "task": "P-011",
+  "attempt": 1,
+  "resumed": false,
+  "run": ".harness/runs/20261111T202716-P-011-a1",
+  "agent": {
+    "ok": true,
+    "effort": "high",
+    "exit_code": 0,
+    "signal": null,
+    "duration_ms": 2370826,
+    "result": {
+      "is_error": false,
+      "error": null,
+      "num_turns": 194,
+      "total_cost_usd": 15.446666955000001,
+      "models": [
+        "claude-fable-5-2",
+        "claude-haiku-5-5"
+      ],
+      "session_id": "7723c5f5-0b8d-4462-83cf-841e328858c3"
+    }
+  },
+  "verify": {
+    "passed": false,
+    "reason": "검증 실패: live-game(exit 101)",
+    "tree": "b1042e0159a54ed3fa2f7f5c4de4171d14ede2a5"
+  },
+  "outcome": "verify_failed"
+}

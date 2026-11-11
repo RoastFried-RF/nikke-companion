@@ -21,6 +21,11 @@ vi.mock('../src/lib/backend', async (importOriginal) => ({
   readJsonFile: vi.fn(),
   pickJsonFile: vi.fn(),
   onEngineProgress: vi.fn(),
+  gameWindowStatus: vi.fn(),
+  setFollowGame: vi.fn(),
+  captureGame: vi.fn(),
+  onGameWindow: vi.fn(),
+  onGameCapture: vi.fn(),
 }));
 
 const api = vi.mocked(backend);
@@ -83,6 +88,10 @@ beforeEach(() => {
     return structuredClone(documents[path]);
   });
   api.pickJsonFile.mockResolvedValue(null);
+  // 게임 창 칸(GamePanel)은 이 흐름과 무관하다 — 게임이 없는 상태로 둔다.
+  api.gameWindowStatus.mockResolvedValue({ state: 'missing', window: null, message: '게임 창을 찾을 수 없다', follow: false });
+  api.onGameWindow.mockResolvedValue(() => {});
+  api.onGameCapture.mockResolvedValue(() => {});
   api.onEngineProgress.mockImplementation(async (handler) => {
     emitProgress = handler;
     return unlistenProgress;

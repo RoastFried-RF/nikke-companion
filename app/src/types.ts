@@ -89,6 +89,64 @@ export interface EngineRuntime {
   runBatch(requests: EngineRequest[], options?: { concurrency?: number }): Promise<EngineRow[]>;
 }
 
+/** 화면 위의 사각형(물리 픽셀). x·y는 화면 좌표의 왼쪽 위다. */
+export interface ScreenRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** 게임 창의 정보(src-tauri/src/game_window.rs의 GameWindowInfo). 좌표와 크기는 물리 픽셀이다. */
+export interface GameWindowInfo {
+  hwnd: number;
+  pid: number;
+  process_name: string;
+  title: string;
+  /** 제목 표시줄·테두리를 뺀 게임 화면 영역. */
+  client: ScreenRect;
+  /** 창 전체에서 보이는 부분. */
+  frame: ScreenRect;
+  minimized: boolean;
+  /** 지금 입력을 받는 창인가. */
+  foreground: boolean;
+  /** 창이 놓인 모니터의 배율(1 = 100%). */
+  scale_factor: number;
+}
+
+/** 게임 창의 상태(src-tauri/src/game_window.rs의 GameWindowState). */
+export type GameWindowState = 'found' | 'minimized' | 'launcher_only' | 'missing' | 'unavailable';
+
+/** Rust가 넘기는 게임 창 상태와 붙이기 여부(src-tauri/src/lib.rs의 GameSnapshot). */
+export interface GameSnapshot {
+  state: GameWindowState;
+  /** `found`·`minimized`일 때만 있다. */
+  window: GameWindowInfo | null;
+  /** 한국어 설명. */
+  message: string;
+  /** 오버레이를 게임 창에 붙여 따라가게 하는 중인가. */
+  follow: boolean;
+}
+
+/** 저장한 캡처 하나(src-tauri/src/capture.rs의 CaptureRecord). */
+export interface CaptureRecord {
+  /** 저장한 PNG의 절대 경로. */
+  path: string;
+  width: number;
+  height: number;
+  /** 찍은 시각(UTC, ISO 8601). */
+  captured_at: string;
+  /** 캡처 방식. 지금은 Windows.Graphics.Capture 하나뿐이다. */
+  method: 'wgc';
+  window: GameWindowInfo;
+}
+
+/** 단축키로 저장한 결과(src-tauri/src/lib.rs의 GameCaptureOutcome). 둘 중 하나만 있다. */
+export interface GameCaptureOutcome {
+  capture: CaptureRecord | null;
+  error: string | null;
+}
+
 /** Rust 쪽 오버레이 상태(src-tauri/src/lib.rs의 OverlaySnapshot). */
 export interface OverlaySnapshot {
   visible: boolean;

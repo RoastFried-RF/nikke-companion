@@ -4,23 +4,39 @@
 //! - `overlay_state`: 보임/숨김·클릭 통과의 전환 규칙, 시작 위치 계산
 //! - `report`: 비교 결과 JSON 읽기와 형식 확인, 입력 JSON 파일 읽기
 //! - `engine`: 계산 엔진(vendor/nikke-calc) 프로세스 실행·카탈로그·버전. 계산 로직은 없다
+//! - `game_window`: 게임 창을 고르는 규칙, 창 정보, 오버레이를 게임 창에 붙이는 위치 계산
+//! - `capture`: 캡처한 프레임의 판정(빈 화면)·파일 이름·PNG 저장
+//! - `capture_cli`: 명령줄 도구 `nikke-capture`의 동작
+//! - `game_win32`(비공개): 위 규칙에 값을 대 주는 Win32 호출 — 창 열거, 창 사각형, Windows.Graphics.Capture
 //!
 //! 편성 비교·추천의 계산은 화면 쪽의 `src/core`(JS)가 하고, 여기서는 엔진 프로세스만 대신 띄운다.
-//! 네트워크 요청은 하지 않는다. 게임 창 추적·화면 캡처는 다음 작업이다.
+//! 네트워크 요청은 하지 않는다.
+//!
+//! 게임은 읽기만 한다: 게임 창을 옮기거나 크기를 바꾸거나 앞으로 가져오지 않고, 입력을 보내지 않는다.
+//! 붙이기가 옮기는 것은 오버레이 창뿐이다.
 
+pub mod capture;
+pub mod capture_cli;
 pub mod engine;
+#[cfg(windows)]
+mod game_win32;
+pub mod game_window;
 pub mod overlay_state;
 pub mod report;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewWindow};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+use capture::CaptureRecord;
+use game_window::{follow_move, follow_target, GameError, GameWindowInfo, GameWindowStatus};
 use overlay_state::{top_right_position, OverlayAction, OverlayState, Transition};
 
 /// tauri.conf.json의 창 label.
@@ -32,25 +48,49 @@ pub const OVERLAY_STATE_EVENT: &str = "overlay-state";
 /// 엔진 계산이 한 건 끝날 때마다 화면으로 보내는 이벤트. 프런트의 `ENGINE_PROGRESS_EVENT`와 같아야 한다.
 pub const ENGINE_PROGRESS_EVENT: &str = "engine-progress";
 
+/// 게임 창 상태(찾음·없음·최소화, 크기, 붙이기 여부)가 바뀔 때 화면으로 보내는 이벤트.
+/// 프런트의 `GAME_WINDOW_EVENT`와 같아야 한다.
+pub const GAME_WINDOW_EVENT: &str = "game-window";
+
+/// 단축키로 게임 화면을 저장한 결과(경로 또는 오류)를 화면으로 보내는 이벤트.
+/// 프런트의 `GAME_CAPTURE_EVENT`와 같아야 한다.
+pub const GAME_CAPTURE_EVENT: &str = "game-capture";
+
 /// 엔진 설정 파일 이름. 앱 설정 폴더(`%APPDATA%/<identifier>`)에 둔다.
 const SETTINGS_FILE: &str = "settings.json";
 
 /// 시작할 때 화면 가장자리에서 띄우는 거리(논리 픽셀).
 const SCREEN_MARGIN: f64 = 24.0;
 
-/// 전역 단축키. 둘 다 Alt+Shift 조합이다.
-const SHORTCUTS: [ShortcutDef; 2] = [
+/// 붙이기를 켰을 때 게임 화면 가장자리에서 띄우는 거리(논리 픽셀).
+const ATTACH_MARGIN: f64 = 12.0;
+
+/// 붙이기가 켜져 있을 때 게임 창의 위치를 다시 읽는 간격.
+const FOLLOW_INTERVAL: Duration = Duration::from_millis(50);
+/// 붙이기가 꺼져 있을 때 게임 창 상태를 다시 읽는 간격.
+const IDLE_INTERVAL: Duration = Duration::from_millis(1000);
+/// 붙이기 중에 창 목록을 처음부터 다시 훑는 간격(그 사이에는 찾아 둔 창만 다시 읽는다).
+const RESCAN_INTERVAL: Duration = Duration::from_millis(1000);
+
+/// 전역 단축키. 모두 Alt+Shift 조합이다.
+const SHORTCUTS: [ShortcutDef; 3] = [
     ShortcutDef {
         keys: "Alt+Shift+C",
         what: "클릭 통과 전환",
         code: Code::KeyC,
-        action: OverlayAction::ToggleClickThrough,
+        action: ShortcutAction::Overlay(OverlayAction::ToggleClickThrough),
     },
     ShortcutDef {
         keys: "Alt+Shift+O",
         what: "창 숨김/보임",
         code: Code::KeyO,
-        action: OverlayAction::ToggleVisibility,
+        action: ShortcutAction::Overlay(OverlayAction::ToggleVisibility),
+    },
+    ShortcutDef {
+        keys: "Alt+Shift+S",
+        what: "게임 화면 저장",
+        code: Code::KeyS,
+        action: ShortcutAction::CaptureGame,
     },
 ];
 
@@ -58,7 +98,16 @@ struct ShortcutDef {
     keys: &'static str,
     what: &'static str,
     code: Code,
-    action: OverlayAction,
+    action: ShortcutAction,
+}
+
+/// 단축키가 하는 일.
+#[derive(Debug, Clone, Copy)]
+enum ShortcutAction {
+    /// 오버레이 창의 상태를 바꾼다.
+    Overlay(OverlayAction),
+    /// 지금 게임 화면을 저장한다.
+    CaptureGame,
 }
 
 /// 앱이 들고 있는 오버레이 상태.
@@ -80,6 +129,35 @@ impl Drop for BusyGuard<'_> {
     fn drop(&mut self) {
         self.0.store(false, Ordering::Release);
     }
+}
+
+/// 게임 창 추적 상태.
+#[derive(Default)]
+struct GameTracker {
+    /// 오버레이를 게임 창에 붙여 따라가게 할지.
+    follow: AtomicBool,
+    /// 캡처가 돌고 있는지. 단축키와 단추가 겹쳐도 한 번에 하나만 찍는다.
+    capturing: AtomicBool,
+    /// 추적 스레드. 붙이기를 바꾸면 깨워서 바로 반영한다.
+    thread: Mutex<Option<thread::Thread>>,
+}
+
+/// 화면에 넘기는 게임 창 상태. 프런트의 `GameSnapshot`(src/types.ts)과 같아야 한다.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+struct GameSnapshot {
+    #[serde(flatten)]
+    status: GameWindowStatus,
+    /// 붙이기가 켜져 있는가.
+    follow: bool,
+}
+
+/// 단축키로 저장한 결과. 프런트의 `GameCaptureOutcome`(src/types.ts)과 같아야 한다.
+#[derive(Debug, Clone, Serialize)]
+struct GameCaptureOutcome {
+    /// 저장한 캡처. 실패했으면 null.
+    capture: Option<CaptureRecord>,
+    /// 한국어 오류 문장. 성공했으면 null.
+    error: Option<String>,
 }
 
 /// 화면에 넘기는 진행 상황. 프런트의 `EngineProgress`(src/types.ts)와 같아야 한다.
@@ -227,6 +305,149 @@ fn pick_json_file_dialog(_window: &WebviewWindow, _title: &str) -> Result<Option
     Err("파일 고르기 창은 Windows에서만 쓸 수 있다. 경로를 직접 넣어라".to_string())
 }
 
+/// 게임 화면을 찍어 캡처 폴더(환경 변수 NIKKE_CAPTURE_DIR → 저장소의 data/captures)에 저장한다.
+/// 화면은 저장할 곳을 정하지 못한다 — 라벨만 넘기고, 라벨은 파일 이름에 안전한 글자만 남는다.
+fn save_game_capture(app: &AppHandle, label: Option<&str>) -> Result<CaptureRecord, GameError> {
+    let tracker = app.state::<GameTracker>();
+    if tracker.capturing.swap(true, Ordering::AcqRel) {
+        return Err(GameError::Busy);
+    }
+    let _guard = BusyGuard(&tracker.capturing);
+    let dir = capture::default_capture_dir()?;
+    capture::capture_game_to_dir(&dir, label)
+}
+
+fn game_snapshot(app: &AppHandle, status: GameWindowStatus) -> GameSnapshot {
+    GameSnapshot {
+        status,
+        follow: app.state::<GameTracker>().follow.load(Ordering::Acquire),
+    }
+}
+
+/// 붙이기 여부를 바꾸고, 추적 스레드를 깨워 바로 반영하게 한다.
+fn wake_tracker(app: &AppHandle, follow: bool) {
+    let tracker = app.state::<GameTracker>();
+    tracker.follow.store(follow, Ordering::Release);
+    let thread = lock(&tracker.thread).clone();
+    if let Some(thread) = thread {
+        thread.unpark();
+    }
+}
+
+/// 게임 창의 현재 상태(찾음/없음/최소화/런처만, 화면 영역의 위치와 크기)와 붙이기 여부.
+#[tauri::command]
+async fn game_window_status(app: AppHandle) -> Result<GameSnapshot, String> {
+    blocking(move || Ok(game_snapshot(&app, game_window::locate()))).await
+}
+
+/// 붙이기를 켜거나 끈다. 켜면 오버레이가 게임 창의 오른쪽 위 안쪽으로 가서 게임 창을 따라다니고,
+/// 끄면 그 자리에 머문다. 옮기는 것은 오버레이 창뿐이다.
+#[tauri::command]
+async fn set_follow_game(app: AppHandle, enabled: bool) -> Result<GameSnapshot, String> {
+    wake_tracker(&app, enabled);
+    blocking(move || Ok(game_snapshot(&app, game_window::locate()))).await
+}
+
+/// 지금 게임 화면을 PNG로 저장하고 기록(`{path, width, height, captured_at, method, window}`)을 돌려준다.
+/// 실패하면 한국어 오류 문장.
+#[tauri::command]
+async fn capture_game(app: AppHandle, label: Option<String>) -> Result<CaptureRecord, String> {
+    blocking(move || save_game_capture(&app, label.as_deref()).map_err(|e| e.to_string())).await
+}
+
+/// 단축키로 게임 화면을 저장한다. 단축키 처리를 막지 않게 따로 돌리고, 결과는 이벤트로 알린다.
+fn capture_from_shortcut(app: &AppHandle) {
+    let app = app.clone();
+    thread::spawn(move || {
+        let outcome = match save_game_capture(&app, None) {
+            Ok(record) => GameCaptureOutcome {
+                capture: Some(record),
+                error: None,
+            },
+            Err(e) => GameCaptureOutcome {
+                capture: None,
+                error: Some(e.to_string()),
+            },
+        };
+        if let Err(e) = app.emit(GAME_CAPTURE_EVENT, outcome) {
+            eprintln!("캡처 결과를 화면에 알리지 못했다: {e}");
+        }
+    });
+}
+
+/// 오버레이 창의 바깥 너비와 붙이기 여백(물리 픽셀). 창을 읽지 못하면 `None`.
+fn overlay_metrics(window: &WebviewWindow) -> Option<(u32, u32)> {
+    let width = window.outer_size().ok()?.width;
+    let scale = window.scale_factor().ok()?;
+    Some((width, (ATTACH_MARGIN * scale).round().max(0.0) as u32))
+}
+
+/// 게임 창을 지켜본다: 상태가 바뀌면 화면에 알리고, 붙이기가 켜져 있으면 오버레이를 게임 창에 맞춰 옮긴다.
+/// 게임 창은 읽기만 한다.
+fn track_game(app: AppHandle) {
+    let tracker = app.state::<GameTracker>();
+    let mut emitted: Option<GameSnapshot> = None;
+    let mut applied: Option<(i32, i32)> = None;
+    let mut known: Option<GameWindowInfo> = None;
+    let mut scanned_at: Option<Instant> = None;
+    loop {
+        let follow = tracker.follow.load(Ordering::Acquire);
+        // 붙이기 중에는 찾아 둔 창만 가볍게 다시 읽고, 가끔 창 목록을 처음부터 훑는다.
+        let fresh = scanned_at.is_some_and(|at| at.elapsed() < RESCAN_INTERVAL);
+        let refreshed = known
+            .as_ref()
+            .filter(|_| follow && fresh)
+            .and_then(game_window::refresh_game_window);
+        let status = match refreshed {
+            Some(window) => GameWindowStatus::from_window(window),
+            None => {
+                scanned_at = Some(Instant::now());
+                game_window::locate()
+            }
+        };
+        known = status.window.clone();
+
+        if !follow {
+            // 꺼져 있는 동안에는 옮기지 않는다. 다시 켜면 처음부터 자리를 잡는다.
+            applied = None;
+        } else if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+            let target = overlay_metrics(&window)
+                .and_then(|(width, margin)| follow_target(follow, &status, width, margin));
+            if let Some((x, y)) = follow_move(target, applied) {
+                match window.set_position(PhysicalPosition::new(x, y)) {
+                    Ok(()) => applied = Some((x, y)),
+                    Err(e) => eprintln!("오버레이를 게임 창에 맞춰 옮기지 못했다: {e}"),
+                }
+            }
+        }
+
+        let snapshot = GameSnapshot { status, follow };
+        if emitted.as_ref() != Some(&snapshot) {
+            if let Err(e) = app.emit(GAME_WINDOW_EVENT, snapshot.clone()) {
+                eprintln!("게임 창 상태를 화면에 알리지 못했다: {e}");
+            }
+            emitted = Some(snapshot);
+        }
+        thread::park_timeout(if follow {
+            FOLLOW_INTERVAL
+        } else {
+            IDLE_INTERVAL
+        });
+    }
+}
+
+/// 게임 창 추적 스레드를 띄운다.
+fn start_game_tracker(app: &AppHandle) {
+    let handle = app.clone();
+    match thread::Builder::new()
+        .name("game-tracker".to_string())
+        .spawn(move || track_game(handle))
+    {
+        Ok(joined) => *lock(&app.state::<GameTracker>().thread) = Some(joined.thread().clone()),
+        Err(e) => eprintln!("게임 창 추적을 시작하지 못했다: {e}"),
+    }
+}
+
 /// 현재 오버레이 상태.
 #[tauri::command]
 fn overlay_status(overlay: State<'_, Overlay>) -> OverlaySnapshot {
@@ -292,7 +513,10 @@ fn register_shortcuts(app: &AppHandle) {
             .global_shortcut()
             .on_shortcut(shortcut, move |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
-                    handle_action(app, action);
+                    match action {
+                        ShortcutAction::Overlay(action) => handle_action(app, action),
+                        ShortcutAction::CaptureGame => capture_from_shortcut(app),
+                    }
                 }
             });
         if let Err(e) = registered {
@@ -332,6 +556,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Overlay::default())
         .manage(EngineBusy::default())
+        .manage(GameTracker::default())
         .invoke_handler(tauri::generate_handler![
             load_report,
             overlay_status,
@@ -341,7 +566,10 @@ pub fn run() {
             engine_version,
             engine_run_batch,
             read_json_file,
-            pick_json_file
+            pick_json_file,
+            game_window_status,
+            set_follow_game,
+            capture_game
         ])
         .setup(|app| {
             let window = app
@@ -353,6 +581,7 @@ pub fn run() {
             }
             window.show()?;
             register_shortcuts(app.handle());
+            start_game_tracker(app.handle());
             Ok(())
         })
         .run(tauri::generate_context!())

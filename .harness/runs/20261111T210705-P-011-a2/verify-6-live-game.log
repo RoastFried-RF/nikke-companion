@@ -1,0 +1,51 @@
+$ cargo test --manifest-path app/src-tauri/Cargo.toml --test live_game -- --ignored
+
+running 5 tests
+test captures_game_content_even_when_another_window_covers_it ... FAILED
+test captures_the_client_area_without_touching_the_game_window ... FAILED
+test cli_prints_window_info_and_saves_a_capture ... FAILED
+test finds_the_game_window_and_not_the_launcher ... FAILED
+test saves_a_png_that_matches_the_client_area ... FAILED
+
+failures:
+
+---- captures_game_content_even_when_another_window_covers_it stdout ----
+
+thread 'captures_game_content_even_when_another_window_covers_it' (12988) panicked at tests\live_game.rs:68:5:
+게임 창이 최소화돼 있다 — 창을 띄운 뒤에 돌려라: GameWindowInfo { hwnd: 3345878, pid: 24812, process_name: "nikke.exe", title: "NIKKE", client: ScreenRect { x: -32000, y: -32000, width: 0, height: 0 }, frame: ScreenRect { x: -31993, y: -32000, width: 146, height: 28 }, minimized: true, foreground: false, scale_factor: 1.0 }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- captures_the_client_area_without_touching_the_game_window stdout ----
+
+thread 'captures_the_client_area_without_touching_the_game_window' (44016) panicked at tests\live_game.rs:68:5:
+게임 창이 최소화돼 있다 — 창을 띄운 뒤에 돌려라: GameWindowInfo { hwnd: 3345878, pid: 24812, process_name: "nikke.exe", title: "NIKKE", client: ScreenRect { x: -32000, y: -32000, width: 0, height: 0 }, frame: ScreenRect { x: -31993, y: -32000, width: 146, height: 28 }, minimized: true, foreground: false, scale_factor: 1.0 }
+
+---- cli_prints_window_info_and_saves_a_capture stdout ----
+
+thread 'cli_prints_window_info_and_saves_a_capture' (46284) panicked at tests\live_game.rs:68:5:
+게임 창이 최소화돼 있다 — 창을 띄운 뒤에 돌려라: GameWindowInfo { hwnd: 3345878, pid: 24812, process_name: "nikke.exe", title: "NIKKE", client: ScreenRect { x: -32000, y: -32000, width: 0, height: 0 }, frame: ScreenRect { x: -31993, y: -32000, width: 146, height: 28 }, minimized: true, foreground: false, scale_factor: 1.0 }
+
+---- finds_the_game_window_and_not_the_launcher stdout ----
+
+thread 'finds_the_game_window_and_not_the_launcher' (19348) panicked at tests\live_game.rs:68:5:
+게임 창이 최소화돼 있다 — 창을 띄운 뒤에 돌려라: GameWindowInfo { hwnd: 3345878, pid: 24812, process_name: "nikke.exe", title: "NIKKE", client: ScreenRect { x: -32000, y: -32000, width: 0, height: 0 }, frame: ScreenRect { x: -31993, y: -32000, width: 146, height: 28 }, minimized: true, foreground: false, scale_factor: 1.0 }
+
+---- saves_a_png_that_matches_the_client_area stdout ----
+
+thread 'saves_a_png_that_matches_the_client_area' (43936) panicked at tests\live_game.rs:68:5:
+게임 창이 최소화돼 있다 — 창을 띄운 뒤에 돌려라: GameWindowInfo { hwnd: 3345878, pid: 24812, process_name: "nikke.exe", title: "NIKKE", client: ScreenRect { x: -32000, y: -32000, width: 0, height: 0 }, frame: ScreenRect { x: -31993, y: -32000, width: 146, height: 28 }, minimized: true, foreground: false, scale_factor: 1.0 }
+
+
+failures:
+    captures_game_content_even_when_another_window_covers_it
+    captures_the_client_area_without_touching_the_game_window
+    cli_prints_window_info_and_saves_a_capture
+    finds_the_game_window_and_not_the_launcher
+    saves_a_png_that_matches_the_client_area
+
+test result: FAILED. 0 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.28s
+     Running tests\live_game.rs (app\src-tauri\target\debug\deps\live_game-b6c173744d3c9bf5.exe)
+error: test failed, to rerun pass `--test live_game`

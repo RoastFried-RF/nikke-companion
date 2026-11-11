@@ -1,0 +1,72 @@
+{
+  "task": "P-011",
+  "started_at": "2026-11-11T21:30:29.070Z",
+  "head": "15ac8daa4024c9ccae2b132725920e9a9341eb80",
+  "tree": "b6dc0e437dfffa89e6c4e23fd2ee526ee98cab39",
+  "dirty": true,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "unit",
+      "cmd": "node --test tests/unit/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 2672,
+      "log": "verify-1-unit.log"
+    },
+    {
+      "name": "install",
+      "cmd": "npm --prefix app install",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 1813,
+      "log": "verify-2-install.log"
+    },
+    {
+      "name": "frontend-build",
+      "cmd": "npm --prefix app run build",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 2201,
+      "log": "verify-3-frontend-build.log"
+    },
+    {
+      "name": "frontend-test",
+      "cmd": "npm --prefix app test",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 1941,
+      "log": "verify-4-frontend-test.log"
+    },
+    {
+      "name": "rust-test",
+      "cmd": "cargo test --manifest-path app/src-tauri/Cargo.toml",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 8548,
+      "log": "verify-5-rust-test.log"
+    },
+    {
+      "name": "live-game",
+      "cmd": "cargo test --manifest-path app/src-tauri/Cargo.toml --test live_game -- --ignored",
+      "exit_code": 101,
+      "timed_out": false,
+      "duration_ms": 615,
+      "log": "verify-6-live-game.log",
+      "tail": "\nthread 'captures_game_content_even_when_another_window_covers_it' (12988) panicked at tests\\live_game.rs:68:5:\n게임 창이 최소화돼 있다 — 창을 띄운 뒤에 돌려라: GameWindowInfo { hwnd: 3345878, pid: 24812, process_name: \"nikke.exe\", title: \"NIKKE\", client: ScreenRect { x: -32000, y: -32000, width: 0, height: 0 }, frame: ScreenRect { x: -31993, y: -32000, width: 146, height: 28 }, minimized: true, foreground: false, scale_factor: 1.0 }\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n---- captures_the_client_area_without_touching_the_game_window stdout ----\n\nthread 'captures_the_client_area_without_touching_the_game_window' (44016) panicked at tests\\live_game.rs:68:5:\n게임 창이 최소화돼 있다 — 창을 띄운 뒤에 돌려라: GameWindowInfo { hwnd: 3345878, pid: 24812, process_name: \"nikke.exe\", title: \"NIKKE\", client: ScreenRect { x: -32000, y: -32000, width: 0, height: 0 }, frame: ScreenRect { x: -31993, y: -32000, width: 146, height: 28 }, minimized: true, foreground: false, scale_factor: 1.0 }\n\n---- cli_prints_window_info_and_saves_a_capture stdout ----\n\nthread 'cli_prints_window_info_and_saves_a_capture' (46284) panicked at tests\\live_game.rs:68:5:\n게임 창이 최소화돼 있다 — 창을 띄운 뒤에 돌려라: GameWindowInfo { hwnd: 3345878, pid: 24812, process_name: \"nikke.exe\", title: \"NIKKE\", client: ScreenRect { x: -32000, y: -32000, width: 0, height: 0 }, frame: ScreenRect { x: -31993, y: -32000, width: 146, height: 28 }, minimized: true, foreground: false, scale_factor: 1.0 }\n\n---- finds_the_game_window_and_not_the_launcher stdout ----\n\nthread 'finds_the_game_window_and_not_the_launcher' (19348) panicked at tests\\live_game.rs:68:5:\n게임 창이 최소화돼 있다 — 창을 띄운 뒤에 돌려라: GameWindowInfo { hwnd: 3345878, pid: 24812, process_name: \"nikke.exe\", title: \"NIKKE\", client: ScreenRect { x: -32000, y: -32000, width: 0, height: 0 }, frame: ScreenRect { x: -31993, y: -32000, width: 146, height: 28 }, minimized: true, foreground: false, scale_factor: 1.0 }\n\n---- saves_a_png_that_matches_the_client_area stdout ----\n\nthread 'saves_a_png_that_matches_the_client_area' (43936) panicked at tests\\live_game.rs:68:5:\n게임 창이 최소화돼 있다 — 창을 띄운 뒤에 돌려라: GameWindowInfo { hwnd: 3345878, pid: 24812, process_name: \"nikke.exe\", title: \"NIKKE\", client: ScreenRect { x: -32000, y: -32000, width: 0, height: 0 }, frame: ScreenRect { x: -31993, y: -32000, width: 146, height: 28 }, minimized: true, foreground: false, scale_factor: 1.0 }\n\n\nfailures:\n    captures_game_content_even_when_another_window_covers_it\n    captures_the_client_area_without_touching_the_game_window\n    cli_prints_window_info_and_saves_a_capture\n    finds_the_game_window_and_not_the_launcher\n    saves_a_png_that_matches_the_client_area\n\ntest result: FAILED. 0 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s\n\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.28s\n     Running tests\\live_game.rs (app\\src-tauri\\target\\debug\\deps\\live_game-b6c173744d3c9bf5.exe)\nerror: test failed, to rerun pass `--test live_game`\n"
+    },
+    {
+      "name": "live-capture-cli",
+      "cmd": "cargo run --quiet --manifest-path app/src-tauri/Cargo.toml --bin nikke-capture -- --info",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 563,
+      "log": "verify-7-live-capture-cli.log"
+    }
+  ],
+  "passed": false,
+  "reason": "검증 실패: live-game(exit 101)",
+  "env_skipped": [],
+  "tree_after": "b6dc0e437dfffa89e6c4e23fd2ee526ee98cab39",
+  "finished_at": "2026-11-11T21:30:47.697Z"
+}

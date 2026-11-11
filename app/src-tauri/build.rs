@@ -12,6 +12,9 @@ fn main() {
             "engine_run_batch",
             "read_json_file",
             "pick_json_file",
+            "game_window_status",
+            "set_follow_game",
+            "capture_game",
         ]),
     );
     tauri_build::try_build(attributes).expect("tauri-build 실패");

@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "니케 컴패니언 오버레이"
 edition = "2021"
 publish = false
+# 실행 파일이 둘이다(오버레이 + 명령줄 캡처 도구 src/bin/nikke-capture.rs). `cargo run`·`tauri dev`는 오버레이를 띄운다.
+default-run = "nikke-companion"
 
 # 라이브러리와 실행 파일의 이름이 같으면 Windows에서 .pdb가 겹친다.
 [lib]
@@ -18,6 +20,35 @@ tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 # preserve_order: 엔진 데이터의 키 순서(니케·보스 프리셋)를 파일 그대로 화면에 넘긴다 — Node 런타임과 같은 순서.
 serde_json = { version = "1", features = ["preserve_order"] }
+# 캡처한 게임 화면을 PNG로 저장한다(이미 Tauri가 끌어오는 크레이트와 같은 판).
+png = "0.18"
 
 [target."cfg(windows)".dependencies]
 rfd = { version = "0.18.0", default-features = false }
+# 게임 창 찾기·창 정보·화면 캡처(src/game_win32.rs). Tauri가 이미 쓰는 판과 같다 — 기능만 더 켠다.
+# 표준 창 API만 쓴다: 창 열거, 창 사각형, DWM, Windows.Graphics.Capture.
+windows = { version = "0.62", features = [
+    "Foundation",
+    "Graphics",
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_SystemInformation",
+    "Win32_System_WinRT",
+    "Win32_System_WinRT_Direct3D11",
+    "Win32_System_WinRT_Graphics_Capture",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target."cfg(windows)".dev-dependencies]
+# tests/live_game.rs·tests/live_capture.rs가 테스트용 창(가리개, 찍을 창)을 만들 때만 쓴다(앱 코드에는 필요 없다).
+windows = { version = "0.62", features = ["Win32_System_LibraryLoader"] }

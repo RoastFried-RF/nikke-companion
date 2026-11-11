@@ -62,3 +62,8 @@
 {"at":"2026-11-11T19:28:18.470Z","event":"reverify","task":"P-008","passed":true,"tree":"b620d6aa76fdc9af5c885669bd258bd567e31ca3","reason":null}
 {"at":"2026-11-11T19:28:35.448Z","event":"reverify","task":"P-009","passed":true,"tree":"b620d6aa76fdc9af5c885669bd258bd567e31ca3","reason":null}
 {"at":"2026-11-11T19:29:09.984Z","event":"reverify","task":"P-010","passed":true,"tree":"b620d6aa76fdc9af5c885669bd258bd567e31ca3","reason":null}
+{"at":"2026-11-11T20:27:16.630Z","event":"session_start","model":"claude-fable-5-2","head":"15ac8daa4024c9ccae2b132725920e9a9341eb80","git_status":[]}
+{"at":"2026-11-11T21:07:05.692Z","event":"verify_failed","task":"P-011","attempt":1,"run":".harness/runs/20261111T202716-P-011-a1","tree":"b1042e0159a54ed3fa2f7f5c4de4171d14ede2a5","reason":"검증 실패: live-game(exit 101)"}
+{"at":"2026-11-11T21:30:47.699Z","event":"verify_failed","task":"P-011","attempt":2,"run":".harness/runs/20261111T210705-P-011-a2","tree":"b6dc0e437dfffa89e6c4e23fd2ee526ee98cab39","reason":"검증 실패: live-game(exit 101)"}
+{"at":"2026-11-11T22:02:43.922Z","event":"verify_failed","task":"P-011","attempt":3,"run":".harness/runs/20261111T213047-P-011-a3","tree":"b6dc0e437dfffa89e6c4e23fd2ee526ee98cab39","reason":"검증 실패: live-game(exit 101)"}
+{"at":"2026-11-11T22:02:43.950Z","event":"session_end","stop_reason":"한도 도달: 반복 3회","tasks":{"done":["H-001","P-001","P-002","P-003","P-004","H-002","P-005","P-006","P-007","P-008","P-009","P-010"],"blocked":["P-011"]}}
