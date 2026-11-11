@@ -219,11 +219,19 @@
       "manual": true,
       "protected": [],
       "manual_checks": [],
-      "status": "blocked",
-      "attempts": 0,
+      "status": "done",
+      "attempts": 1,
       "agent_errors": 0,
-      "blocked_reason": "Claude Code CLI 인증 실패: 401 OAuth access token is invalid (2026-11-12, .harness/runs/20261111T170854-P-004-a1)",
-      "resume_condition": "사용자가 터미널에서 claude auth login으로 재로그인 → node scripts/autopilot.mjs --task P-004 → node scripts/verify.mjs H-002 --record"
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": null,
+      "evidence": {
+        "run": ".harness/runs/20261111T171553-H-002-a1-manual",
+        "verified_tree": "75211f1cc80d56b8ac29c40d4f47d4933918e087",
+        "verified_at": "2026-11-11T17:15:54.097Z",
+        "commit": null
+      }
     },
     {
       "id": "P-005",

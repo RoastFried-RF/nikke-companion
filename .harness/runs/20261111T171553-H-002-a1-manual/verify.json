@@ -1,0 +1,22 @@
+{
+  "task": "H-002",
+  "started_at": "2026-11-11T17:15:53.824Z",
+  "head": "985e27d8052becc2bb12d3d6a5ac361414ee3973",
+  "tree": "75211f1cc80d56b8ac29c40d4f47d4933918e087",
+  "dirty": true,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "real-run",
+      "cmd": "node scripts/check-real-agent-run.mjs",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 68,
+      "log": "verify-1-real-run.log"
+    }
+  ],
+  "passed": true,
+  "reason": null,
+  "tree_after": "75211f1cc80d56b8ac29c40d4f47d4933918e087",
+  "finished_at": "2026-11-11T17:15:54.097Z"
+}
