@@ -1,0 +1,76 @@
+$ cargo test --manifest-path app/src-tauri/Cargo.toml
+
+running 43 tests
+test engine::tests::chunks_are_round_robin_and_never_more_than_four ... ok
+test engine::tests::catalog_of_a_folder_without_data_is_an_error ... ok
+test engine::tests::empty_batch_does_not_start_the_engine ... ok
+test engine::tests::a_configured_folder_that_is_not_the_engine_is_an_error ... ok
+test engine::tests::every_error_message_is_korean ... ok
+test engine::tests::environment_overrides_settings_file_which_overrides_defaults ... ok
+test engine::tests::row_index_accepts_only_request_numbers ... ok
+test engine::tests::missing_settings_file_means_defaults ... ok
+test engine::tests::settings_file_fields_are_optional ... ok
+test engine::tests::finds_the_engine_by_walking_up_from_the_executable ... ok
+test engine::tests::settings_file_rejects_unknown_fields_and_broken_json ... ok
+test overlay_state::tests::apply_does_not_mutate_the_original ... ok
+test overlay_state::tests::click_through_toggle_is_ignored_while_hidden ... ok
+test overlay_state::tests::click_through_toggles_on_and_off_while_visible ... ok
+test overlay_state::tests::hide_then_show_restores_click_through_mode ... ok
+test overlay_state::tests::only_changed_fields_are_reported ... ok
+test engine::tests::config_defaults_to_repo_engine_and_path_python ... ok
+test overlay_state::tests::serializes_with_snake_case_fields ... ok
+test overlay_state::tests::starts_visible_and_interactive ... ok
+test overlay_state::tests::top_right_never_leaves_the_work_area ... ok
+test overlay_state::tests::top_right_places_window_inside_the_work_area ... ok
+test report::tests::empty_path_and_directory_are_errors ... ok
+test report::tests::missing_file_is_a_korean_error ... ok
+test overlay_state::tests::visibility_toggles_and_keeps_click_through ... ok
+test report::tests::every_error_message_is_korean ... ok
+test report::tests::missing_schema_version_is_an_error ... ok
+test report::tests::path_input_is_trimmed_and_unquoted ... ok
+test report::tests::other_result_kinds_are_rejected ... ok
+test report::tests::reads_the_sample_report_made_by_the_real_cli ... ok
+test report::tests::non_utf8_is_an_error ... ok
+test report::tests::required_fields_are_checked ... ok
+test report::tests::schema_version_mismatch_names_both_versions ... ok
+test report::tests::startup_path_is_the_first_non_option_argument ... ok
+test report::tests::non_json_is_a_korean_error_with_position ... ok
+test report::tests::suggest_results_are_accepted ... ok
+test report::tests::returns_the_document_unchanged ... ok
+test report::tests::schema_version_must_be_the_number_one ... ok
+test report::tests::top_level_must_be_an_object ... ok
+test engine::tests::a_python_that_cannot_start_is_reported ... ok
+test report::tests::truncated_and_empty_json_are_reported ... ok
+test report::tests::reads_any_json_file_without_report_checks ... ok
+test report::tests::utf8_bom_is_accepted ... ok
+test engine::tests::version_of_a_non_repository_has_no_commit ... ok
+
+test result: ok. 43 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 6 tests
+test engine_runs_in_its_folder_with_utf8_and_batch_arguments ... ok
+test a_crashed_engine_process_fails_the_batch_and_stops_the_others ... ok
+test output_that_is_not_json_or_misses_a_request_is_an_error ... ok
+test real_engine_keeps_input_order_isolates_row_errors_and_is_deterministic ... ok
+test a_stuck_engine_is_stopped_at_the_time_limit ... ok
+test rust_command_and_node_runtime_give_the_same_total_damage ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.23s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running unittests src\lib.rs (app\src-tauri\target\debug\deps\nikke_companion_lib-65094d0d39d09dff.exe)
+     Running unittests src\main.rs (app\src-tauri\target\debug\deps\nikke_companion-8d72e2955534d17f.exe)
+     Running tests\engine_batch.rs (app\src-tauri\target\debug\deps\engine_batch-9ba10cd193a39055.exe)
+   Doc-tests nikke_companion_lib
