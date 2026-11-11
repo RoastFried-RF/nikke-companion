@@ -1,0 +1,23 @@
+{
+  "task": "P-004",
+  "attempt": 1,
+  "resumed": false,
+  "run": ".harness/runs/20261111T170854-P-004-a1",
+  "agent": {
+    "ok": false,
+    "error": "에이전트 종료 코드 1 — Failed to authenticate. API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"OAuth access token is invalid.\"},\"request_id\":\"req_011CgwWWWhuw8HSi1ZAkgwzv\"}",
+    "effort": "high",
+    "exit_code": 1,
+    "signal": null,
+    "duration_ms": 3676,
+    "result": {
+      "is_error": true,
+      "error": "Failed to authenticate. API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"OAuth access token is invalid.\"},\"request_id\":\"req_011CgwWWWhuw8HSi1ZAkgwzv\"}",
+      "num_turns": 1,
+      "total_cost_usd": 0,
+      "models": [],
+      "session_id": "ad6be75e-4163-4d36-b3e8-d2330785edc1"
+    }
+  },
+  "outcome": "agent_error"
+}

@@ -35,7 +35,9 @@
         "run": ".harness/runs/20261111T170750-H-001-a1-manual",
         "verified_tree": "8cbbff934b0862401bffcd58cec94e16a5892bd9",
         "verified_at": "2026-11-11T17:08:05.684Z",
-        "commit": null
+        "commit": null,
+        "reverified_tree": "569214b0e88794ea2ad96d95d52ccefd62ae7571",
+        "reverified_at": "2026-11-11T17:09:48.729Z"
       }
     },
     {
@@ -69,7 +71,9 @@
         "run": ".harness/runs/20261111T170806-P-001-a1-manual",
         "verified_tree": "8cbbff934b0862401bffcd58cec94e16a5892bd9",
         "verified_at": "2026-11-11T17:08:25.994Z",
-        "commit": null
+        "commit": null,
+        "reverified_tree": "569214b0e88794ea2ad96d95d52ccefd62ae7571",
+        "reverified_at": "2026-11-11T17:10:08.497Z"
       }
     },
     {
@@ -103,7 +107,9 @@
         "run": ".harness/runs/20261111T170826-P-002-a1-manual",
         "verified_tree": "8cbbff934b0862401bffcd58cec94e16a5892bd9",
         "verified_at": "2026-11-11T17:08:26.646Z",
-        "commit": null
+        "commit": null,
+        "reverified_tree": "569214b0e88794ea2ad96d95d52ccefd62ae7571",
+        "reverified_at": "2026-11-11T17:10:08.850Z"
       }
     },
     {
@@ -146,7 +152,9 @@
         "run": ".harness/runs/20261111T170826-P-003-a1-manual",
         "verified_tree": "8cbbff934b0862401bffcd58cec94e16a5892bd9",
         "verified_at": "2026-11-11T17:08:47.050Z",
-        "commit": null
+        "commit": null,
+        "reverified_tree": "569214b0e88794ea2ad96d95d52ccefd62ae7571",
+        "reverified_at": "2026-11-11T17:10:28.704Z"
       }
     },
     {
@@ -180,7 +188,7 @@
       "manual_checks": [],
       "status": "pending",
       "attempts": 0,
-      "agent_errors": 0
+      "agent_errors": 2
     },
     {
       "id": "H-002",
@@ -201,9 +209,11 @@
       "manual": true,
       "protected": [],
       "manual_checks": [],
-      "status": "pending",
+      "status": "blocked",
       "attempts": 0,
-      "agent_errors": 0
+      "agent_errors": 0,
+      "blocked_reason": "Claude Code CLI 인증 실패: 401 OAuth access token is invalid (2026-11-12, .harness/runs/20261111T170854-P-004-a1)",
+      "resume_condition": "사용자가 터미널에서 claude auth login으로 재로그인 → node scripts/autopilot.mjs --task P-004 → node scripts/verify.mjs H-002 --record"
     },
     {
       "id": "P-005",

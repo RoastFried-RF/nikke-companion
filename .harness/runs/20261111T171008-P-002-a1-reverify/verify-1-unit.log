@@ -1,0 +1,42 @@
+$ node --test tests/unit/account.test.mjs
+TAP version 13
+# Subtest: 올바른 계정은 통과하고 검증용 데이터임을 경고로 알린다
+ok 1 - 올바른 계정은 통과하고 검증용 데이터임을 경고로 알린다
+  ---
+  duration_ms: 0.9431
+  ...
+# Subtest: 검증용 여부를 밝히지 않으면 오류다
+ok 2 - 검증용 여부를 밝히지 않으면 오류다
+  ---
+  duration_ms: 0.1054
+  ...
+# Subtest: 엔진이 모르는 니케 이름은 경로와 함께 오류다
+ok 3 - 엔진이 모르는 니케 이름은 경로와 함께 오류다
+  ---
+  duration_ms: 0.4191
+  ...
+# Subtest: 범위를 벗어난 값과 모르는 칸을 잡는다
+ok 4 - 범위를 벗어난 값과 모르는 칸을 잡는다
+  ---
+  duration_ms: 0.569
+  ...
+# Subtest: 값을 적은 칸을 미확인으로 표시하면 오류다
+ok 5 - 값을 적은 칸을 미확인으로 표시하면 오류다
+  ---
+  duration_ms: 0.1125
+  ...
+# Subtest: 엔진 프로필에는 편성 멤버의 육성 칸만 싣고 base는 ungrown이다
+ok 6 - 엔진 프로필에는 편성 멤버의 육성 칸만 싣고 base는 ungrown이다
+  ---
+  duration_ms: 0.2156
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 62.968
+

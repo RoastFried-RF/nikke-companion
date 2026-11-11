@@ -1,0 +1,22 @@
+{
+  "task": "P-002",
+  "started_at": "2026-11-11T17:10:08.499Z",
+  "head": "842518ffb49c20bd7dba2d4f3a1d70846c0b59c8",
+  "tree": "569214b0e88794ea2ad96d95d52ccefd62ae7571",
+  "dirty": true,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "unit",
+      "cmd": "node --test tests/unit/account.test.mjs",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 128,
+      "log": "verify-1-unit.log"
+    }
+  ],
+  "passed": true,
+  "reason": null,
+  "tree_after": "569214b0e88794ea2ad96d95d52ccefd62ae7571",
+  "finished_at": "2026-11-11T17:10:08.850Z"
+}
