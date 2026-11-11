@@ -1,1 +1,3 @@
 {"at":"2026-11-11T17:08:05.688Z","event":"manual_verify","task":"H-001","passed":true,"tree":"8cbbff934b0862401bffcd58cec94e16a5892bd9","reason":null}
+{"at":"2026-11-11T17:08:05.881Z","event":"checkpoint","task":"H-001","commit":"af20979e0830c27f96238cf5d63cbb4f0d407a99","tree":"8cbbff934b0862401bffcd58cec94e16a5892bd9"}
+{"at":"2026-11-11T17:08:25.998Z","event":"manual_verify","task":"P-001","passed":true,"tree":"8cbbff934b0862401bffcd58cec94e16a5892bd9","reason":null}
