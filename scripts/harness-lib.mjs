@@ -27,8 +27,19 @@ export const DEFAULT_CONFIG = {
   limits: { max_iterations: 10, max_minutes: 180, max_consecutive_agent_errors: 2 },
   defaults: { max_attempts: 3 },
   verify_timeout_minutes: 15,
+  env_path_prepend: [],
   commit_trailer: 'Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>',
 };
+
+// 검증 명령과 에이전트가 쓰는 환경. 이 세션이 시작된 뒤에 설치된 도구(예: cargo)는 PATH에 없을 수 있어
+// config.env_path_prepend의 폴더를 앞에 붙인다(`~`는 홈 폴더, 없는 폴더는 건너뛴다).
+export function harnessEnv(config, extra = {}) {
+  const dirs = (config.env_path_prepend ?? [])
+    .map((d) => path.resolve(d.replace(/^~(?=$|[\/])/, os.homedir())))
+    .filter((d) => fs.existsSync(d));
+  const key = Object.keys(process.env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+  return { ...process.env, [key]: [...dirs, process.env[key] ?? ''].join(path.delimiter), ...extra };
+}
 
 export function now() {
   return new Date().toISOString();
@@ -178,7 +189,7 @@ export function runVerify(task, runDir, config) {
       encoding: 'utf8',
       timeout: (v.timeout_minutes ?? config.verify_timeout_minutes) * 60_000,
       maxBuffer: 64 * 1024 * 1024,
-      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
+      env: harnessEnv(config, { PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' }),
     });
     const log = `verify-${i + 1}-${(v.name ?? 'cmd').replace(/[^\w.-]+/g, '_')}.log`;
     const text = `$ ${v.cmd}\n${r.stdout ?? ''}\n${r.stderr ?? ''}`;

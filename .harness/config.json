@@ -3,21 +3,39 @@
     "command": "claude",
     "args": [
       "-p",
-      "--model", "claude-fable-5-2",
-      "--effort", "{effort}",
-      "--permission-mode", "acceptEdits",
-      "--allowedTools", "Bash(node *)", "Bash(npm *)", "Bash(python *)", "Bash(git status*)", "Bash(git diff*)", "Bash(git log*)",
-      "--output-format", "json"
+      "--model",
+      "claude-fable-5-2",
+      "--effort",
+      "{effort}",
+      "--permission-mode",
+      "acceptEdits",
+      "--allowedTools",
+      "Bash(node *)",
+      "Bash(npm *)",
+      "Bash(python *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(rustc *)",
+      "Bash(npx *)",
+      "Bash(cargo *)",
+      "--output-format",
+      "json"
     ],
     "model": "claude-fable-5-2",
     "default_effort": "high",
-    "timeout_minutes": 45
+    "timeout_minutes": 60
   },
   "limits": {
     "max_iterations": 10,
     "max_minutes": 180,
     "max_consecutive_agent_errors": 2
   },
-  "defaults": { "max_attempts": 3 },
-  "verify_timeout_minutes": 15
+  "defaults": {
+    "max_attempts": 3
+  },
+  "verify_timeout_minutes": 15,
+  "env_path_prepend": [
+    "~/.cargo/bin"
+  ]
 }

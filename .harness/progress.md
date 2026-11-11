@@ -8,7 +8,7 @@
   성장 투자 비교(`growth`), 엔진 데이터 변경 감지(`detect-changes`), 프로필 파일 가져오기(`import-profile`).
 - 하네스가 실제 Fable 5.2(`claude-fable-5-2`, effort high)로 작업 5건(P-004~P-008)을 구현·검증·체크포인트까지 끝냈다.
   전부 첫 시도에 통과했다.
-- 남은 작업: P-009 Electron 오버레이 골격.
+- 남은 작업: P-009 Tauri 오버레이 골격, P-010 오버레이에서 계산 실행.
 
 ## 구현한 것
 
@@ -49,13 +49,20 @@
 
 ## 차단
 
-없다. (2026-11-12 CLI 인증 실패는 사용자 재로그인으로 해결됐다.)
+**Rust 툴체인이 없다 (P-009, P-010)**
+- 2026-11-12 사용자 결정으로 데스크톱 앱을 Electron에서 Tauri v2로 바꿨다(`docs/spec.md` §5).
+  진행 중이던 Electron 실행은 산출물이 생기기 전에 멈췄다.
+- 이 PC에 `cargo`·`rustc`가 없다. MSVC 빌드 도구(VS 2022, VC 14.44)와 WebView2는 있다.
+- 재개 조건: 사용자가 `winget install Rustlang.Rustup`으로 설치한다. 하네스는 `~/.cargo/bin`을 PATH 앞에
+  붙이므로(`.harness/config.json`의 `env_path_prepend`) 앱을 다시 켜지 않아도 된다.
+- 재개 방법: `node scripts/autopilot.mjs --task P-009` → 결과 점검 → `node scripts/autopilot.mjs --task P-010`
 
 ## 다음 작업
 
-1. P-009 Electron 오버레이 골격 — `app/` 폴더, npm 의존성 설치 필요, 실제 게임 위 확인은 사용자 몫.
-   `node scripts/autopilot.mjs --task P-009`
-2. 이후 후보(작업 목록에 아직 없다): 게임 창 추적·캡처, 재화 제약을 넣은 성장 추천, 티어 산출 규칙,
+1. P-009 Tauri 오버레이 골격 — `app/` 폴더(Tauri v2 + Vue 3 + Vite + TS). 투명·항상 위 창, 단축키로 클릭 통과,
+   비교 결과 JSON을 읽어 순위 표시. 실제 게임 위 확인은 사용자 몫.
+2. P-010 코어 런타임 분리 + 오버레이에서 편성 비교·추천 실행 — 엔진 호출부를 Rust 명령으로 옮긴다.
+3. 이후 후보(작업 목록에 아직 없다): 게임 창 추적·캡처, 재화 제약을 넣은 성장 추천, 티어 산출 규칙,
    유니온 레이드(5덱 배분), 편성 탐색 고도화(배치 순서·시너지).
 
 ## 자율 실행 기록

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   ROOT, LOCK_FILE, loadTasks, saveTasks, loadConfig, readJson, writeJson, appendLog, now,
-  gitHead, gitStatusLines, isAlive, depsDone, maxAttempts, runVerify, completeTask, newRunDir,
+  gitHead, gitStatusLines, isAlive, harnessEnv, depsDone, maxAttempts, runVerify, completeTask, newRunDir,
   summarize,
 } from './harness-lib.mjs';
 
@@ -149,7 +149,7 @@ function runAgent(task, prompt, runDir) {
     const out = fs.openSync(logFile, 'w');
     let child;
     try {
-      child = spawn(config.agent.command, args, { cwd: ROOT, stdio: ['pipe', out, out], windowsHide: true });
+      child = spawn(config.agent.command, args, { cwd: ROOT, stdio: ['pipe', out, out], windowsHide: true, env: harnessEnv(config) });
     } catch (e) {
       fs.closeSync(out);
       resolve({ ok: false, error: `실행 실패: ${e.message}`, effort, duration_ms: 0 });
