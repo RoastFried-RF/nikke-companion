@@ -192,8 +192,11 @@ test('후보마다 적용 전후 총딜·증가량·증가율을 내고 증가�
     assert.equal(req.sim.expected, true);
     assert.equal(req.profile.base, 'ungrown');
   }
-  assert.deepEqual(log[0].profile.chars.마, { skill_levels: [1, 1, 1] });
-  assert.deepEqual(log[2].profile.chars.마, { skill_levels: [1, 1, 1], breakthrough: 3 });
+  // 적지 않은 칸은 미육성 값으로 채워 넘긴다(toEngineEntry). 후보가 바꾼 칸만 달라져야 한다.
+  assert.deepEqual(log[0].profile.chars.마.skill_levels, [1, 1, 1]);
+  assert.equal(log[0].profile.chars.마.breakthrough, 0);
+  assert.deepEqual({ ...log[2].profile.chars.마, breakthrough: 0 }, log[0].profile.chars.마);
+  assert.equal(log[2].profile.chars.마.breakthrough, 3);
   assert.equal(report.generated_at, '2026-11-12T00:00:00.000Z');
   assert.equal(report.engine.commit, 'abc');
 });

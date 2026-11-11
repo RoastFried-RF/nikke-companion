@@ -1,54 +1,74 @@
 # 진행 상황
 
-마지막 갱신: 2026-11-12 (첫 세션, 대화형 Fable 5.2)
+마지막 갱신: 2026-11-12 (대화형 세션 + 자율 실행 2회)
 
 ## 지금 상태
 
-- 단계 1(계산 경로)의 첫 경로가 실제 엔진으로 동작한다:
-  `계정 상태 → 전투 조건 → nikke-calc → 편성 비교 → CLI 표·JSON`.
-- 최소 하네스가 동작한다(자체 검증 11개 시나리오 통과).
-- **실제 모델로 하네스를 돌리는 것은 막혀 있다.** 아래 "차단" 참고.
+- 단계 1(계산 경로)이 실제 엔진으로 동작한다: 편성 비교(`compare`), 후보 편성 추천(`suggest`),
+  성장 투자 비교(`growth`), 엔진 데이터 변경 감지(`detect-changes`), 프로필 파일 가져오기(`import-profile`).
+- 하네스가 실제 Fable 5.2(`claude-fable-5-2`, effort high)로 작업 5건(P-004~P-008)을 구현·검증·체크포인트까지 끝냈다.
+  전부 첫 시도에 통과했다.
+- 남은 작업: P-009 Electron 오버레이 골격.
 
 ## 구현한 것
 
-| 작업 | 내용 | 검증 |
+| 작업 | 내용 | 만든 쪽 |
 |---|---|---|
-| H-001 | `scripts/autopilot.mjs` · `verify.mjs` · `harness-lib.mjs` · `harness-selftest.mjs` | `node scripts/harness-selftest.mjs` 통과 |
-| P-001 | `src/core/engine.mjs` — nikke-calc 병렬 배치 호출 | 통합 테스트 통과 |
-| P-002 | `src/core/account.mjs` · `condition.mjs` · `docs/data-model.md` | 단위 테스트 통과 |
-| P-003 | `src/core/compare.mjs` · `render.mjs` · `src/cli.mjs` · `data/samples/` | 단위 15건 + 실제 엔진 통합 5건 통과 |
+| H-001 | 하네스: `scripts/autopilot.mjs` · `verify.mjs` · `harness-lib.mjs` · `harness-selftest.mjs` | 대화형 |
+| P-001 | `src/core/engine.mjs` — nikke-calc 병렬 배치 호출 | 대화형 |
+| P-002 | `src/core/account.mjs` · `condition.mjs` | 대화형 |
+| P-003 | `src/core/compare.mjs` · `render.mjs` · `src/cli.mjs` | 대화형 |
+| P-004 | `src/core/format.mjs` — 억·만 단위 표기 | 자율 |
+| H-002 | 실제 모델로 하네스 1회전 확인 | 기록 |
+| P-005 | `src/core/candidates.mjs` — 후보 편성 생성 + `suggest` | 자율 |
+| P-006 | `src/core/growth.mjs` — 성장 투자 비교 + `growth` | 자율 |
+| P-007 | `src/tier/detect.mjs` — 신규·변경 니케 감지 + `detect-changes` | 자율 |
+| P-008 | `src/core/import-profile.mjs` — 엔진 프로필 → 계정 상태 + `import-profile` | 자율 |
 
-결정과 근거: `docs/spec.md` §5, `docs/engine-selection.md`.
+검증: 단위 94건, 실제 엔진 통합 15건, 하네스 자체 검증 11개 시나리오 통과. `node scripts/verify.mjs --status`로 확인한다.
+
+## 이번에 고친 결함 (2026-11-12)
+
+**비워 둔 육성 칸이 만렙으로 계산되던 문제.** 엔진은 프로필에 항목이 있는 니케의 적지 않은 칸을 미육성이 아니라
+기본 스펙(돌파 3 · 스킬 10/10/10 · 오버로드 장비)으로 계산한다. P-002의 가정("적지 않은 칸 = 미육성")이 틀렸고,
+결과 메모는 "미육성 값으로 계산했다"고 사실과 다르게 말하고 있었다. P-008 에이전트가 발견해 `docs/data-model.md`에
+적어 두었다. `toEngineEntry`(`src/core/account.mjs`)가 적지 않은 칸을 미육성 값으로 채워 넘기도록 고쳤고,
+실제 엔진의 미육성 결과와 같은지 통합 테스트로 대조한다. 이 수정으로 단위 테스트 2건의 기대값을 바꿨다
+(프로필 내용을 글자 그대로 비교하던 `account.test.mjs`·`growth.test.mjs`의 단언 — 요구가 바뀐 것이지 약화가 아니다).
+샘플 계정의 수치도 달라졌다(A 편성 45.67억 → 34.63억).
 
 ## 미검증
 
-- **수치의 실전 정확도.** 샘플 계정은 검증용 데이터(`is_test_data: true`)다. 실제 계정·인게임 기록과
-  대조한 적이 없다 (P-003 `manual_checks`).
-- RapiLab·nikke_project는 README만 읽었다. 빌드·실행하지 않았다.
-- 오버레이·화면 캡처·계정 가져오기는 시작하지 않았다.
-- 하네스의 실제 모델 경로: 프롬프트 전달, 권한 설정(`--permission-mode acceptEdits` + `--allowedTools`),
-  결과 JSON의 모델·사용량 기록은 **실제 성공 실행으로 확인하지 못했다.**
+- **수치의 실전 정확도.** 샘플은 검증용 데이터다. 실제 계정·인게임 기록과 대조한 적이 없다(P-003 `manual_checks`).
+- **실제 계정 가져오기.** P-008은 사용자가 받아 둔 프로필 파일을 변환한다. 실제 계정 프로필로 돌려 보지 않았다
+  (P-008 `manual_checks`). 프로필을 받는 단계(엔진 `scraper/profile_fetch.py`, blablalink 로그인 세션 필요)는 사용자가 한다.
+- **후보 생성의 품질.** 투자 점수 상위만 후보로 쓴다. 덜 키운 강한 니케나 시너지 조합이 빠질 수 있다(결과에 표시된다).
+- **자율 실행 결과물의 코드 리뷰.** 테스트 통과와 샘플 실행만 확인했다. P-005~P-008 코드를 줄 단위로 검토하지 않았다.
+- RapiLab·nikke_project는 README만 읽었다.
+- 오버레이·화면 캡처는 시작하지 않았다.
 
 ## 차단
 
-**Claude Code CLI 인증 실패 (H-002, 그리고 autopilot으로 돌릴 모든 작업)**
-- 증상: `claude -p --model claude-fable-5-2 --effort high` → `401 OAuth access token is invalid`.
-  `claude auth status`는 로그인됨으로 나오지만 토큰이 무효다.
-- 하네스 동작: 2회 연속 모델 호출 실패로 기록하고 종료 코드 4로 멈췄다. P-004의 시도 횟수는 0 그대로다
-  (`.harness/runs/20261111T170854-P-004-a1/`).
-- 재개 조건: 사용자가 터미널에서 `claude auth login`으로 다시 로그인한다.
-  CLI가 2.1.114(2026-04)라 로그인 뒤에도 `claude-fable-5-2`를 모르면 `claude update`가 필요할 수 있다.
-- 재개 방법:
-  1. `node scripts/autopilot.mjs --task P-004` — 작은 실제 작업 1건
-  2. `node scripts/verify.mjs H-002 --record` — 실제 모델 실행 기록 확인
-  3. `node scripts/autopilot.mjs` — 나머지 작업
+없다. (2026-11-12 CLI 인증 실패는 사용자 재로그인으로 해결됐다.)
 
 ## 다음 작업
 
-1. P-004 대미지 단위 표기 (수락 테스트 `tests/unit/format.acceptance.test.mjs`가 이미 있다. 지금은 이 테스트가
-   실패하므로 `node --test tests/unit/` 전체는 P-004 전까지 실패한다 — 의도된 상태)
-2. P-005 후보 편성 생성기 → P-006 성장 투자 비교 → P-007 신규 니케 감지 → P-008 계정 가져오기
-3. P-009 Electron 오버레이 골격 (실제 게임 위 확인 필요)
+1. P-009 Electron 오버레이 골격 — `app/` 폴더, npm 의존성 설치 필요, 실제 게임 위 확인은 사용자 몫.
+   `node scripts/autopilot.mjs --task P-009`
+2. 이후 후보(작업 목록에 아직 없다): 게임 창 추적·캡처, 재화 제약을 넣은 성장 추천, 티어 산출 규칙,
+   유니온 레이드(5덱 배분), 편성 탐색 고도화(배치 순서·시너지).
+
+## 자율 실행 기록
+
+CLI가 보고한 값이다(구독 사용 시 실제 청구액과 다를 수 있다).
+
+| 작업 | 시간 | 턴 | CLI 보고 비용 |
+|---|---|---|---|
+| P-004 | 1.4분 | 12 | $0.77 |
+| P-005 | 6.0분 | 31 | $2.79 |
+| P-006 | 6.6분 | 48 | $3.76 |
+| P-007 | 5.9분 | 45 | $3.20 |
+| P-008 | 12.7분 | 75 | $6.97 |
 
 ## 알아 둘 것
 
@@ -56,11 +76,10 @@
 - Windows 콘솔은 cp949다. 엔진을 직접 부를 때 `PYTHONUTF8=1`이 필요하다(어댑터는 자동 설정).
 - Windows에서는 autopilot이 죽으면 에이전트 프로세스도 함께 끝난다. POSIX에서는 남을 수 있어
   재시작 시 확인한다(`--kill-orphan`).
+- 같은 5명이라도 배치 순서에 따라 총딜이 달라진다(샘플 A 편성: 34.63억 ↔ 순서만 바꾼 후보 38.69억). 엔진이 자리로
+  카메라·버스트 순서를 정하기 때문이다. 후보 생성기는 배치 순서를 하나만 만든다 — 탐색 고도화 때 다룰 것.
 - `.refs/`는 후보 저장소를 얕게 복제한 참고용 폴더다(gitignore). 지워도 된다.
-- **엔진은 인라인 프로필에 항목이 있는 니케의 적지 않은 칸을 미육성이 아니라 기본 스펙으로 계산한다**(P-008에서 실제 엔진으로
-  확인: `base: "ungrown"`에서 빈 항목 `{}`의 총딜 = 기본 스펙 총딜. 미육성은 항목이 아예 없는 이름에만 쓰인다 —
-  `runner/spec.py` `build_char`·`GrowthProfile.layer`. 엔진 문서 SIM-JSON §육성의 설명과 다르다). `toEngineProfile`은
-  미육성 값을 채우지 않으므로 "적지 않은 칸·미확인 칸은 미육성 값으로 계산"이라는 우리 문서·메모는 지금 사실이 아니다. 미해결.
+- 하네스 설정(`.harness/config.json`)의 권한: `acceptEdits` + `node`·`npm`·`python`·`git status/diff/log`만 허용.
 
 ## 최근 작업 메모
 

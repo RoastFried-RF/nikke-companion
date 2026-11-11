@@ -1,7 +1,7 @@
 // 성장 투자 비교: 업그레이드 후보를 계정 상태에 가상 적용 → 기준 편성의 총딜 변화 → 증가율 순위.
 // 원래 계정 문서는 바꾸지 않는다(후보마다 복사본에 적용한다). 재화·비용은 다루지 않는다 — 후보는 입력이다.
 // 형식 설명은 docs/data-model.md §성장 투자 비교.
-import { validateAccount, toEngineProfile, GROWTH_FIELDS } from './account.mjs';
+import { validateAccount, toEngineProfile, GROWTH_FIELDS, overloadOptionId as overloadId } from './account.mjs';
 import { validateCondition, toEngineBase, assumptionsOf } from './condition.mjs';
 import { InputError, squadProblems, squadNotes } from './compare.mjs';
 import { runBatch as defaultRunBatch, loadCatalog, engineVersion } from './engine.mjs';
@@ -14,21 +14,6 @@ const UNGROWN_SKILLS = [1, 1, 1];
 const UPGRADE_KEYS = ['name', 'note', 'nikke', 'set', 'add', 'changes'];
 const CHANGE_KEYS = ['nikke', 'set', 'add'];
 
-// 오버로드 옵션의 엔진 키 ↔ 인게임 이름(vendor/nikke-calc/docs/SIM-JSON.md §육성). 옵션 이름을 검사하려는 게
-// 아니라, 계정에 "우월 코드 대미지"로 적힌 옵션에 후보가 "우월코드"로 더해도 같은 옵션으로 합치기 위한 표다.
-// 여기 없는 이름은 글자 그대로만 비교하고, 맞는 이름인지는 엔진이 판정한다.
-const OVERLOAD_OPTIONS = {
-  atk_pct: '공격력',
-  element_bonus: '우월 코드 대미지',
-  max_ammo_pct: '최대 장탄 수',
-  crit_rate: '크리티컬 확률',
-  crit_dmg: '크리티컬 대미지',
-  charge_speed_pct: '차지 속도',
-  charge_dmg_pct: '차지 대미지',
-  accuracy_pct: '명중률',
-  def_pct: '방어력',
-};
-
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isNonNegInt = (v) => Number.isInteger(v) && v >= 0;
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -40,15 +25,6 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 export function gainRate(before, after) {
   if (!Number.isFinite(before) || !Number.isFinite(after) || before <= 0) return null;
   return (after - before) / before;
-}
-
-/** 오버로드 옵션 이름 → 엔진 키. 공백은 무시하고, 앞부분만 적어도 하나로 정해지면 받는다. 못 정하면 null. */
-function overloadId(name) {
-  const s = String(name).replace(/\s+/g, '');
-  if (s === '') return null;
-  if (Object.hasOwn(OVERLOAD_OPTIONS, s)) return s;
-  const hits = Object.entries(OVERLOAD_OPTIONS).filter(([, ko]) => ko.replace(/\s+/g, '').startsWith(s));
-  return hits.length === 1 ? hits[0][0] : null;
 }
 
 /** 이미 적혀 있는 같은 옵션의 키(표기가 달라도). 없으면 후보가 쓴 이름 그대로. */

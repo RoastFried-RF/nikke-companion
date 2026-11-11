@@ -8,6 +8,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { compareSquads } from '../../src/core/compare.mjs';
 import { runBatch, loadCatalog, engineVersion } from '../../src/core/engine.mjs';
+import { toEngineProfile } from '../../src/core/account.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const sample = (f) => JSON.parse(fs.readFileSync(path.join(ROOT, 'data/samples', f), 'utf8'));
@@ -63,6 +64,20 @@ test('육성 상태가 결과에 반영된다: 스킬 레벨을 낮추면 총딜
     compareSquads({ account: weaker, condition, squads: squad }),
   ]);
   assert.ok(b.ranking[0].total_damage < a.ranking[0].total_damage);
+});
+
+test('빈 항목으로 보유한 니케는 엔진의 미육성과 같은 값으로 계산된다 (만렙으로 계산되지 않는다)', async () => {
+  const squad = ['나가', '크라운'];
+  const acct = { schema_version: 1, is_test_data: true, nikkes: { 나가: {}, 크라운: { unknown: ['overload', 'skill_levels'] } } };
+  const sim = { expected: true, duration: 60 };
+  const [ours, engineUngrown, engineDefault] = await runBatch([
+    { squad, sim, profile: toEngineProfile(acct, squad) },
+    { squad, sim, profile: { base: 'ungrown', chars: {} } },
+    { squad, sim },
+  ]);
+  assert.equal(ours.error, undefined, JSON.stringify(ours.error));
+  assert.equal(ours.total_damage, engineUngrown.total_damage, '우리가 채운 미육성 값이 엔진의 UNGROWN과 달라졌다');
+  assert.ok(ours.total_damage < engineDefault.total_damage);
 });
 
 test('CLI: 표를 출력하고 결과 JSON을 쓴다. 입력 오류는 종료 코드 2', () => {
