@@ -17,6 +17,10 @@ export function renderReport(report) {
   out.push(`엔진: ${report.engine?.repo ?? '?'} @ ${report.engine?.commit?.slice(0, 8) ?? '버전 미확인'}`);
   out.push('가정:');
   for (const a of report.assumptions) out.push(`  - ${a}`);
+  if (report.suggestion) {
+    const s = report.suggestion;
+    out.push(`후보: 조합 ${s.considered}개 중 ${s.generated}개 생성 → ${s.simulated}개 계산 → 상위 ${s.shown}개 표시`);
+  }
   out.push('');
 
   if (report.ranking.length === 0) out.push('계산된 편성이 없다.');

@@ -1,10 +1,18 @@
 #!/usr/bin/env node
 // 명령줄 진입점.
 //   node src/cli.mjs compare --account <계정.json> --condition <조건.json> --squads <편성.json> [--json <결과.json>]
+//   node src/cli.mjs suggest --account <계정.json> --condition <조건.json> [--limit <후보 수>] [--top <표시 수>] [--json <결과.json>]
 // 종료 코드: 0 성공 · 1 실행 오류 · 2 입력 오류
 import fs from 'node:fs';
+import { suggestSquads } from './core/candidates.mjs';
 import { compareSquads, InputError } from './core/compare.mjs';
 import { renderReport } from './core/render.mjs';
+
+const USAGE = [
+  '사용법:',
+  '  node src/cli.mjs compare --account <계정.json> --condition <조건.json> --squads <편성.json> [--json <결과.json>]',
+  '  node src/cli.mjs suggest --account <계정.json> --condition <조건.json> [--limit <후보 수, 기본 30>] [--top <표시 수, 기본 5>] [--json <결과.json>]',
+].join('\n');
 
 function parseArgs(argv) {
   const opts = {};
@@ -23,20 +31,36 @@ function readJsonFile(label, file) {
   }
 }
 
+/** 선택 인자인 양의 정수. 주지 않았으면 undefined(기본값은 받는 쪽이 정한다). */
+function readCount(label, value) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
+    throw new InputError('인자가 잘못됐다', [{ path: `--${label}`, message: '1 이상의 정수여야 한다' }]);
+  }
+  return Number(value);
+}
+
 const [command, ...rest] = process.argv.slice(2);
 const opts = parseArgs(rest);
 
 try {
-  if (command !== 'compare') {
-    console.error('사용법: node src/cli.mjs compare --account <계정.json> --condition <조건.json> --squads <편성.json> [--json <결과.json>]');
+  let report;
+  if (command === 'compare') {
+    const squadsDoc = readJsonFile('squads', opts.squads);
+    report = await compareSquads({
+      account: readJsonFile('account', opts.account),
+      condition: readJsonFile('condition', opts.condition),
+      squads: Array.isArray(squadsDoc) ? squadsDoc : squadsDoc.squads,
+    });
+  } else if (command === 'suggest') {
+    report = await suggestSquads(
+      { account: readJsonFile('account', opts.account), condition: readJsonFile('condition', opts.condition) },
+      { limit: readCount('limit', opts.limit), top: readCount('top', opts.top) },
+    );
+  } else {
+    console.error(USAGE);
     process.exit(2);
   }
-  const squadsDoc = readJsonFile('squads', opts.squads);
-  const report = await compareSquads({
-    account: readJsonFile('account', opts.account),
-    condition: readJsonFile('condition', opts.condition),
-    squads: Array.isArray(squadsDoc) ? squadsDoc : squadsDoc.squads,
-  });
   if (typeof opts.json === 'string') fs.writeFileSync(opts.json, JSON.stringify(report, null, 2) + '\n', 'utf8');
   console.log(renderReport(report));
 } catch (e) {
