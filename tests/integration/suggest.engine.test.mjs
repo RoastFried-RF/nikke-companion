@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { generateCandidates } from '../../src/core/candidates.mjs';
-import { loadCatalog, engineVersion } from '../../src/core/engine.mjs';
+import { loadCatalog, engineVersion } from '../../src/runtime/node.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const ACCOUNT = 'data/samples/account.sample.json';

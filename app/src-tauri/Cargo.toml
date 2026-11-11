@@ -16,4 +16,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order: 엔진 데이터의 키 순서(니케·보스 프리셋)를 파일 그대로 화면에 넘긴다 — Node 런타임과 같은 순서.
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[target."cfg(windows)".dependencies]
+rfd = { version = "0.18.0", default-features = false }

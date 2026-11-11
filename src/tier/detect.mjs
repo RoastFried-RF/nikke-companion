@@ -4,7 +4,7 @@
 // 형식 설명은 docs/data-model.md §데이터 변경 감지.
 import { spawnSync } from 'node:child_process';
 import { InputError } from '../core/compare.mjs';
-import { DEFAULT_ENGINE_DIR } from '../core/engine.mjs';
+import { DEFAULT_ENGINE_DIR } from '../runtime/node.mjs';
 
 export const CHANGES_SCHEMA_VERSION = 1;
 export const DATA_FILES = { nikkes: 'data/parsed_nikke.json', skills: 'data/parsed_skills.json' };

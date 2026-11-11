@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "overlay",
-  "description": "오버레이 창이 쓰는 것만 허용한다: 상태 이벤트 듣기, 창 끌기, 앱 명령 네 개. 파일·셸·네트워크 권한은 없다.",
+  "description": "오버레이 창이 쓰는 것만 허용한다: 상태·진행 이벤트 듣기, 창 끌기, 앱 명령 아홉 개(결과 읽기·상태·끝내기, 엔진 카탈로그·버전·배치 실행, JSON 파일 읽기·고르기). 파일·셸·네트워크 플러그인 권한은 없다.",
   "windows": ["main"],
   "permissions": [
     "core:event:allow-listen",
@@ -10,6 +10,11 @@
     "allow-load-report",
     "allow-overlay-status",
     "allow-startup-report-path",
-    "allow-quit-app"
+    "allow-quit-app",
+    "allow-engine-catalog",
+    "allow-engine-version",
+    "allow-engine-run-batch",
+    "allow-read-json-file",
+    "allow-pick-json-file"
   ]
 }

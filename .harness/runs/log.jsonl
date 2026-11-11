@@ -46,3 +46,4 @@
 {"at":"2026-11-11T19:00:31.150Z","event":"checkpoint","task":"P-009","commit":"f9e716aae856087ffb4ef369c41099360d88cbe9","tree":"3001d4d9663e18d7d30577b7f9dee0b86e535625"}
 {"at":"2026-11-11T19:00:31.180Z","event":"verified","task":"P-009","attempt":1,"run":".harness/runs/20261111T184052-P-009-a1","tree":"3001d4d9663e18d7d30577b7f9dee0b86e535625","reason":null}
 {"at":"2026-11-11T19:00:31.214Z","event":"session_end","stop_reason":"진행할 수 있는 작업이 없다(차단 또는 선행 작업 대기)","tasks":{"done":["H-001","P-001","P-002","P-003","P-004","H-002","P-005","P-006","P-007","P-008","P-009"],"pending":["P-010"]}}
+{"at":"2026-11-11T19:05:31.762Z","event":"session_start","model":"claude-fable-5-2","head":"61d77d1344c7aea56215f19f4a30947f60107d37","git_status":[]}

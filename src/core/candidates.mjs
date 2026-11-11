@@ -3,7 +3,7 @@
 // 형식 설명은 docs/data-model.md §후보 생성.
 import { validateAccount, unconfirmedFields } from './account.mjs';
 import { compareSquads, InputError, SQUAD_SIZE } from './compare.mjs';
-import { loadCatalog } from './engine.mjs';
+import { engineAccess } from './runtime.mjs';
 
 export const DEFAULT_LIMIT = 30;
 export const DEFAULT_TOP = 5;
@@ -190,7 +190,7 @@ export function generateCandidates(account, catalog, options = {}) {
 export async function suggestSquads({ account, condition }, options = {}, deps = {}) {
   const top = options.top ?? DEFAULT_TOP;
   if (!isPositiveInt(top)) throw new InputError('추천 옵션이 잘못됐다', [{ path: '/top', message: 'top은 1 이상의 정수여야 한다' }]);
-  const catalog = deps.catalog ?? loadCatalog(deps.engineDir);
+  const catalog = await engineAccess(deps).catalog();
   const a = validateAccount(account, catalog);
   if (!a.ok) throw new InputError('계정 상태가 잘못됐다', a.errors);
 

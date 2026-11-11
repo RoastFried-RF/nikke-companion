@@ -62,6 +62,33 @@ export interface CompareReport {
   suggestion?: SuggestionSummary;
 }
 
+/** 엔진 배치의 진행 상황(src-tauri/src/lib.rs의 EngineProgress). */
+export interface EngineProgress {
+  done: number;
+  total: number;
+}
+
+/** 엔진이 아는 니케와 보스 프리셋. 계산 코드(src/core)가 이름·버스트 단계 확인에 쓴다. */
+export interface EngineCatalog {
+  nikkes: Record<string, Record<string, unknown>>;
+  bosses: string[];
+}
+
+/** 엔진 요청·결과 한 건. 모양은 엔진의 JSON 계약이고 화면 코드는 해석하지 않는다. */
+export type EngineRequest = Record<string, unknown>;
+export type EngineRow = Record<string, unknown>;
+
+/**
+ * 계산 코드에 넘기는 런타임(루트 src/core/runtime.mjs의 계약).
+ * Node CLI는 src/runtime/node.mjs를, 이 앱은 Rust 명령을 부르는 lib/runtime.ts를 넘긴다.
+ */
+export interface EngineRuntime {
+  loadCatalog(): Promise<EngineCatalog> | EngineCatalog;
+  engineVersion(): Promise<EngineVersion> | EngineVersion;
+  /** 결과는 입력 순서 그대로다. 줄마다 결과 또는 `{error}`. */
+  runBatch(requests: EngineRequest[], options?: { concurrency?: number }): Promise<EngineRow[]>;
+}
+
 /** Rust 쪽 오버레이 상태(src-tauri/src/lib.rs의 OverlaySnapshot). */
 export interface OverlaySnapshot {
   visible: boolean;

@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { compareSquads } from '../../src/core/compare.mjs';
-import { runBatch, loadCatalog, engineVersion } from '../../src/core/engine.mjs';
+import { runBatch, loadCatalog, engineVersion, nodeRuntime } from '../../src/runtime/node.mjs';
 import { toEngineProfile } from '../../src/core/account.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -15,6 +15,8 @@ const sample = (f) => JSON.parse(fs.readFileSync(path.join(ROOT, 'data/samples',
 const account = sample('account.sample.json');
 const condition = sample('condition.solo-raid.json');
 const { squads } = sample('squads.sample.json');
+// 계산 모듈은 엔진을 직접 부르지 않는다 — Node 런타임을 넘긴다.
+const deps = { runtime: nodeRuntime };
 
 test('엔진 카탈로그에 샘플 계정의 니케와 보스 프리셋이 있다', () => {
   const catalog = loadCatalog();
@@ -37,7 +39,7 @@ test('배치는 입력 순서를 지키고, 한 건의 오류가 다른 건을 �
 });
 
 test('샘플 계정으로 편성 비교가 끝까지 돈다: 순위·제외·엔진 버전·결정론', async () => {
-  const first = await compareSquads({ account, condition, squads });
+  const first = await compareSquads({ account, condition, squads }, deps);
   assert.equal(first.ranking.length, 3);
   assert.deepEqual(first.rejected.map((r) => r.name).sort(), ['D 미보유 포함', 'E 중복']);
   assert.equal(first.failed.length, 0);
@@ -51,7 +53,7 @@ test('샘플 계정으로 편성 비교가 끝까지 돈다: 순위·제외·엔
   // 추천 결과에 미보유 니케가 섞이지 않는다.
   for (const r of first.ranking) for (const m of r.members) assert.ok(m.name in account.nikkes, m.name);
 
-  const second = await compareSquads({ account, condition, squads });
+  const second = await compareSquads({ account, condition, squads }, deps);
   assert.deepEqual(second.ranking.map((r) => [r.name, r.total_damage]), first.ranking.map((r) => [r.name, r.total_damage]), '같은 입력이면 같은 수치가 나와야 한다');
 });
 
@@ -60,8 +62,8 @@ test('육성 상태가 결과에 반영된다: 스킬 레벨을 낮추면 총딜
   const weaker = structuredClone(account);
   weaker.nikkes['라피 : 레드 후드'].skill_levels = [1, 1, 1];
   const [a, b] = await Promise.all([
-    compareSquads({ account, condition, squads: squad }),
-    compareSquads({ account: weaker, condition, squads: squad }),
+    compareSquads({ account, condition, squads: squad }, deps),
+    compareSquads({ account: weaker, condition, squads: squad }, deps),
   ]);
   assert.ok(b.ranking[0].total_damage < a.ranking[0].total_damage);
 });

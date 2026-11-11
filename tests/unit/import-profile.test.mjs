@@ -8,7 +8,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { validateAccount, toEngineProfile, GROWTH_FIELDS } from '../../src/core/account.mjs';
 import { InputError } from '../../src/core/compare.mjs';
-import { loadCatalog } from '../../src/core/engine.mjs';
+import { loadCatalog } from '../../src/runtime/node.mjs';
 import {
   importProfile, importProfileFile, loadOptionTable, accountFileName, DEFAULT_ACCOUNTS_DIR, IMPORT_FORMAT,
 } from '../../src/core/import-profile.mjs';

@@ -9,7 +9,8 @@
 - 하네스가 실제 Fable 5.2(`claude-fable-5-2`, effort high)로 작업 6건(P-004~P-009)을 구현·검증·체크포인트까지 끝냈다.
   전부 첫 시도에 통과했다.
 - Tauri 오버레이 골격(P-009)이 빌드·테스트를 통과하고 창이 뜬다. 눈으로 하는 확인은 남아 있다.
-- 남은 작업: P-010 오버레이에서 계산 실행.
+- 오버레이에서 추천·비교를 실행한다(P-010): 계산은 웹뷰 안의 `src/core`, 엔진 프로세스는 Rust 명령이 띄운다.
+  앱에서 눌러 보는 확인은 사람 몫이다(P-010 `manual_checks`).
 
 ## 구현한 것
 
@@ -26,8 +27,9 @@
 | P-007 | `src/tier/detect.mjs` — 신규·변경 니케 감지 + `detect-changes` | 자율 |
 | P-008 | `src/core/import-profile.mjs` — 엔진 프로필 → 계정 상태 + `import-profile` | 자율 |
 | P-009 | `app/` — Tauri v2 + Vue 3 오버레이 골격(투명·항상 위, 단축키, 비교 결과 표시) | 자율 |
+| P-010 | `src/core/runtime.mjs`(런타임 계약) · `src/runtime/node.mjs`(옛 `src/core/engine.mjs`) · `app/src-tauri/src/engine.rs` · 오버레이 계산 실행 | 자율 |
 
-검증: 단위 94건, 실제 엔진 통합 15건, 앱 프런트 55건, Rust 28건, 하네스 자체 검증 11개 시나리오 통과. `node scripts/verify.mjs --status`로 확인한다.
+검증: 단위 102건, 실제 엔진 통합 15건, 앱 프런트 87건, Rust 49건(단위 43 + 실제 엔진·Node 대조 통합 6), 하네스 자체 검증 11개 시나리오 통과. `node scripts/verify.mjs --status`로 확인한다.
 
 ## 이번에 고친 결함 (2026-11-12)
 
@@ -57,7 +59,8 @@
 
 1. **사용자 확인 (P-009 `manual_checks`)**: 오버레이가 화면에 제대로 그려지는지, `Alt+Shift+C` 클릭 통과와
    `Alt+Shift+O` 숨김이 동작하는지, 실제 니케 위에서 보이는지.
-2. P-010 코어 런타임 분리 + 오버레이에서 편성 비교·추천 실행 — `node scripts/autopilot.mjs --task P-010`
+2. **사용자 확인 (P-010 `manual_checks`)**: `npm --prefix app run tauri dev` → 샘플 경로가 채워진 채로 `추천 실행` →
+   순위가 보이는지, `고르기` 창이 오버레이 위에 뜨는지. 실제 계정 파일로 돌려 인게임 기록과 대조.
 3. 이후 후보(작업 목록에 아직 없다): 게임 창 추적·캡처, 재화 제약을 넣은 성장 추천, 티어 산출 규칙,
    유니온 레이드(5덱 배분), 편성 탐색 고도화(배치 순서·시너지).
 
@@ -114,4 +117,7 @@ CLI가 보고한 값이다(구독 사용 시 실제 청구액과 다를 수 있�
 - P-009 (2026-11-12): `app/`에 Tauri v2(2.12.5) + Vue 3 + Vite + TS 오버레이 골격. Rust: `overlay_state.rs`(보임·클릭 통과 전환 규칙 + 오른쪽 위 위치 계산, 창 API 없음)·`report.rs`(`load_report`: 형식 확인 + 한국어 오류)·`lib.rs`(투명·무테·항상 위·작업 표시줄 숨김 창, 전역 단축키 Alt+Shift+C/O, 상태 이벤트). 화면: `ReportView.vue`·`OverlayStatus.vue`·`App.vue`, 단위 표기는 루트 `src/core/format.mjs`를 `@core` 별칭으로 가져온다. 권한은 `capabilities/overlay.json`(이벤트 듣기·창 끌기·앱 명령 4개)뿐, CSP는 IPC만 허용. 사용법은 `app/README.md`.
 - 검증: 하네스 명령 6개 통과(vitest 55건 — 실제 CLI로 만든 `app/tests/fixtures/compare.sample.json` 입력, Rust 28건, 루트 단위 94건). 추가로 `npm --prefix app run tauri build`로 만든 실행 파일을 잠깐 띄워 WebView2 디버깅 포트로 페이지를 읽었다: 실행 인자로 준 샘플이 실제 `load_report`로 읽혀 순위가 그려지고, 단축키 2개가 등록되고, 외부 fetch는 CSP에 막히고 capability에 없는 명령은 거부됐다. 개발 실행 경로(Vite 서버 + 디버그 실행 파일)도 같은 방법으로 샘플이 그려지는 것을 봤다. **단축키를 눌러 본 것은 아니다.**
 - 남은 문제: `manual_checks` 5개는 그대로 사람 몫(실제 니케 위 표시, 클릭 통과 중 게임 입력, Alt+Tab 뒤 동작). `Alt+Shift+O`로 다시 보일 때 창 라이브러리(tao)가 창을 활성화해 게임의 키보드 포커스를 가져갈 수 있다 — 게임 위에서 확인 필요, 고치려면 Win32로 직접 보여야 한다(P-010 이후). `npm --prefix app install`이 루트에서 돌면 `app/package.json`에 `"nikke-companion": "file:.."`을 매번 적는다(npm 10 동작, 지워도 다시 생겨 그대로 둠 — 앱은 쓰지 않는다). 설치 파일은 만들지 않는다(`bundle.active: false`). 결과 파일은 경로를 손으로 넣는다(파일 고르기 창은 P-010).
+- P-010 (2026-11-12): 계산 모듈이 엔진을 `deps.runtime`(계약: `src/core/runtime.mjs`)으로 받게 하고 Node 구현을 `src/runtime/node.mjs`로 옮겼다(`src/core/engine.mjs` 삭제 — CLI·기존 테스트는 import 경로와 런타임 주입만 바꿨다). Rust `engine.rs` + 명령 `engine_catalog`·`engine_version`·`engine_run_batch`(최대 4개 프로세스, id로 순서 복원, 줄 단위 오류, 시간 제한, 한 프로세스가 죽으면 나머지도 멈춤, 진행 이벤트)·`read_json_file`·`pick_json_file`(rfd — 대화 상자 플러그인·권한 없음), 엔진 폴더·python은 환경 변수 `NIKKE_ENGINE_DIR`·`NIKKE_PYTHON` → `%APPDATA%\local.nikke-companion.overlay\settings.json` → 저장소의 `vendor/nikke-calc` 순(화면에서는 못 바꾼다). 화면: `ComputePanel.vue`·`lib/compute.ts`·`lib/runtime.ts`로 추천·비교 실행, 진행 건수·경과 시간, 오류 표시.
+- 검증: 하네스 명령 6개 통과(루트 단위 102건 — `core-runtime.test.mjs`가 node: import 정적 검사, 통합 15건, vitest 87건, Rust 49건 — `tests/engine_batch.rs`가 실제 엔진으로 순서·오류 격리·결정론을, `node_runtime_reference.mjs`로 Node 런타임과 total_damage·멤버 딜·카탈로그·버전 일치를 확인). `cargo clippy` 경고 없음. 추가로 개발용 실행 파일 + Vite 서버를 띄워 WebView2 디버깅 포트로 `추천 실행`을 눌렀다: 샘플 계정 후보 6개가 7초에 끝나 1위 39.72억(3,972,224,195) — 같은 인자의 `node src/cli.mjs suggest`와 3위까지 수치가 같았다.
+- 남은 문제: `manual_checks` 2개는 사람 몫이고, **파일 고르기 창은 띄워 보지 못했다**(오버레이가 항상 위라 뒤에 가려지는지 확인 필요 — 가려지면 경로를 직접 넣으면 된다). 릴리스 빌드(`tauri build`) 실행 파일로는 계산을 돌려 보지 않았다. 계산을 중간에 멈추는 단추와 성장 비교(`growth`) 화면은 없다. `rfd`(0.18, Windows 전용 의존성)와 `serde_json`의 `preserve_order`를 더했다.
 - (P-004) 남은 점: `formatDamage`는 안전한 정수(약 9,007조)를 넘는 값도 RangeError로 본다. 표의 열 맞춤은 한글을 두 칸으로 세는 방식이라 글꼴에 따라 어긋날 수 있다.

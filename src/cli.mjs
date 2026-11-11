@@ -12,6 +12,7 @@ import { compareSquads, InputError } from './core/compare.mjs';
 import { compareGrowth } from './core/growth.mjs';
 import { importProfileFile } from './core/import-profile.mjs';
 import { renderReport, renderGrowthReport, renderImportReport } from './core/render.mjs';
+import { nodeRuntime } from './runtime/node.mjs';
 import { detectChanges } from './tier/detect.mjs';
 
 const USAGE = [
@@ -72,6 +73,8 @@ function pickSquad(squadsDoc, name) {
 
 const [command, ...rest] = process.argv.slice(2);
 const opts = parseArgs(rest);
+// 계산 모듈은 엔진을 직접 부르지 않는다. 여기서 Node 런타임을 넘긴다.
+const deps = { runtime: nodeRuntime };
 
 try {
   let report;
@@ -83,7 +86,7 @@ try {
       condition: readJsonFile('condition', opts.condition),
       squad: pickSquad(readJsonFile('squads', opts.squads), opts.squad),
       upgrades: Array.isArray(upgradesDoc) ? upgradesDoc : upgradesDoc?.upgrades,
-    });
+    }, deps);
     render = renderGrowthReport;
   } else if (command === 'compare') {
     const squadsDoc = readJsonFile('squads', opts.squads);
@@ -91,7 +94,7 @@ try {
       account: readJsonFile('account', opts.account),
       condition: readJsonFile('condition', opts.condition),
       squads: Array.isArray(squadsDoc) ? squadsDoc : squadsDoc.squads,
-    });
+    }, deps);
   } else if (command === 'detect-changes') {
     // 엔진을 부르지 않는다. 결과는 표가 아니라 JSON 그대로 낸다(다음 단계의 입력).
     if (opts.engine === true) throw new InputError('인자가 빠졌다', [{ path: '--engine', message: '엔진 저장소 경로가 필요하다' }]);
@@ -109,6 +112,7 @@ try {
     report = await suggestSquads(
       { account: readJsonFile('account', opts.account), condition: readJsonFile('condition', opts.condition) },
       { limit: readCount('limit', opts.limit), top: readCount('top', opts.top) },
+      deps,
     );
   } else {
     console.error(USAGE);

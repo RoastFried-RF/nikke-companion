@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { engineVersion } from '../../src/core/engine.mjs';
+import { engineVersion } from '../../src/runtime/node.mjs';
 import { gainRate } from '../../src/core/growth.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));

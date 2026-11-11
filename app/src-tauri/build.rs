@@ -7,6 +7,11 @@ fn main() {
             "overlay_status",
             "startup_report_path",
             "quit_app",
+            "engine_catalog",
+            "engine_version",
+            "engine_run_batch",
+            "read_json_file",
+            "pick_json_file",
         ]),
     );
     tauri_build::try_build(attributes).expect("tauri-build 실패");

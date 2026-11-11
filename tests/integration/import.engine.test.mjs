@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { toEngineProfile, validateAccount } from '../../src/core/account.mjs';
 import { compareSquads } from '../../src/core/compare.mjs';
 import { toEngineBase } from '../../src/core/condition.mjs';
-import { runBatch, loadCatalog } from '../../src/core/engine.mjs';
+import { runBatch, loadCatalog, nodeRuntime } from '../../src/runtime/node.mjs';
 import { importProfile } from '../../src/core/import-profile.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -26,7 +26,7 @@ test('샘플 프로필을 실제 엔진 데이터로 가져오면 모두 옮겨�
 
 test('가져온 계정으로 편성 비교가 끝까지 돌고, 엔진 프로필을 그대로 넘긴 계산과 총딜이 같다', async () => {
   const { account } = importProfile(profile);
-  const report = await compareSquads({ account, condition, squads: [{ name: '가져온 계정', members }] });
+  const report = await compareSquads({ account, condition, squads: [{ name: '가져온 계정', members }] }, { runtime: nodeRuntime });
   assert.deepEqual(report.failed, []);
   assert.deepEqual(report.rejected, []);
   assert.equal(report.ranking.length, 1);

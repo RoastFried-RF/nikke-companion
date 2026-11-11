@@ -1,0 +1,94 @@
+// 편성 추천·비교 실행: 파일 읽기 → 루트의 계산 코드(src/core) → 비교 결과.
+// 계산 규칙은 여기에 없다. suggestSquads·compareSquads에 런타임을 넘겨 부를 뿐이다(CLI의 suggest·compare와 같은 길).
+
+import { DEFAULT_LIMIT, DEFAULT_TOP, suggestSquads } from '@core/candidates.mjs';
+import { compareSquads, InputError } from '@core/compare.mjs';
+import type { CompareReport, EngineRuntime } from '../types';
+import { errorMessage, readJsonFile } from './backend';
+import { tauriRuntime } from './runtime';
+
+export { DEFAULT_LIMIT, DEFAULT_TOP };
+
+/** 계산에 필요한 바깥 일. 테스트에서 가짜로 바꿔 끼운다. */
+export interface ComputeDeps {
+  /** 엔진 실행·카탈로그·버전. 기본은 Rust 명령을 부르는 tauriRuntime. */
+  runtime: EngineRuntime;
+  /** JSON 파일 읽기. 기본은 Rust 명령 read_json_file. */
+  readJson: (path: string) => Promise<unknown>;
+  now?: () => Date;
+}
+
+export const defaultDeps: ComputeDeps = { runtime: tauriRuntime, readJson: readJsonFile };
+
+export interface SuggestInput {
+  accountPath: string;
+  conditionPath: string;
+  /** 계산할 후보 편성 수. 주지 않으면 계산 코드의 기본값. */
+  limit?: number;
+  /** 표시할 상위 편성 수. 주지 않으면 계산 코드의 기본값. */
+  top?: number;
+}
+
+export interface CompareInput {
+  accountPath: string;
+  conditionPath: string;
+  squadsPath: string;
+}
+
+/** 화면에 그대로 보일 수 있는 문장을 가진 오류. */
+export class ComputeError extends Error {}
+
+async function readInput(deps: ComputeDeps, label: string, path: string): Promise<unknown> {
+  const target = path.trim();
+  if (!target) throw new ComputeError(`${label} 파일 경로를 넣어야 한다.`);
+  try {
+    return await deps.readJson(target);
+  } catch (e) {
+    throw new ComputeError(`${label} 파일 — ${errorMessage(e)}`);
+  }
+}
+
+/** 계산 코드가 던진 것을 화면 문장으로. CLI의 "입력 오류 — …" / "실행 오류 — …"와 같은 구분이다. */
+function asComputeError(e: unknown): ComputeError {
+  if (e instanceof ComputeError) return e;
+  if (e instanceof InputError) return new ComputeError(`입력 오류 — ${e.message}`);
+  return new ComputeError(`실행 오류 — ${errorMessage(e)}`);
+}
+
+function coreDeps(deps: ComputeDeps): object {
+  return deps.now ? { runtime: deps.runtime, now: deps.now } : { runtime: deps.runtime };
+}
+
+/** 계정 + 전투 조건 → 후보 편성 생성 → 엔진 비교 → 상위 편성. */
+export async function runSuggest(input: SuggestInput, deps: ComputeDeps = defaultDeps): Promise<CompareReport> {
+  try {
+    const account = await readInput(deps, '계정', input.accountPath);
+    const condition = await readInput(deps, '전투 조건', input.conditionPath);
+    const report = await suggestSquads(
+      { account: account as object, condition: condition as object },
+      { limit: input.limit, top: input.top },
+      coreDeps(deps),
+    );
+    return report as unknown as CompareReport;
+  } catch (e) {
+    throw asComputeError(e);
+  }
+}
+
+/** 계정 + 전투 조건 + 후보 편성 파일 → 엔진 비교 → 순위. */
+export async function runCompare(input: CompareInput, deps: ComputeDeps = defaultDeps): Promise<CompareReport> {
+  try {
+    const account = await readInput(deps, '계정', input.accountPath);
+    const condition = await readInput(deps, '전투 조건', input.conditionPath);
+    const squadsDoc = await readInput(deps, '편성', input.squadsPath);
+    // CLI와 같다: 편성 배열 그대로이거나 {squads: [...]}.
+    const squads = Array.isArray(squadsDoc) ? squadsDoc : (squadsDoc as { squads?: unknown } | null)?.squads;
+    const report = await compareSquads(
+      { account: account as object, condition: condition as object, squads: squads as { name?: string; members: string[] }[] },
+      coreDeps(deps),
+    );
+    return report as unknown as CompareReport;
+  } catch (e) {
+    throw asComputeError(e);
+  }
+}

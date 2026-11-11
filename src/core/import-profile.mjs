@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ACCOUNT_SCHEMA_VERSION, validateAccount } from './account.mjs';
 import { InputError } from './compare.mjs';
-import { DEFAULT_ENGINE_DIR, loadCatalog } from './engine.mjs';
+import { DEFAULT_ENGINE_DIR, loadCatalog } from '../runtime/node.mjs';
 
 export const IMPORT_REPORT_SCHEMA_VERSION = 1;
 export const IMPORT_FORMAT = 'nikke-calc profile';

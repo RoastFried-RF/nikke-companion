@@ -4,7 +4,10 @@ import { defineConfig } from 'vitest/config';
 
 const here = (relative: string) => fileURLToPath(new URL(relative, import.meta.url));
 
-export default defineConfig(({ command, mode }) => ({
+export default defineConfig(({ command, mode }) => {
+  // 개발 실행(tauri dev)에서만 샘플 경로를 입력란에 미리 채운다. 빌드와 테스트에서는 비운다.
+  const dev = command === 'serve' && mode !== 'test';
+  return {
   plugins: [vue()],
   // Tauri가 띄운 터미널에서 Rust 오류가 지워지지 않게 한다.
   clearScreen: false,
@@ -13,9 +16,16 @@ export default defineConfig(({ command, mode }) => ({
     alias: { '@core': here('../src/core') },
   },
   define: {
-    // 개발 실행(tauri dev)에서만 샘플 결과 경로를 입력란에 미리 채운다. 빌드와 테스트에서는 빈 문자열이다.
-    __DEV_SAMPLE_REPORT__: JSON.stringify(
-      command === 'serve' && mode !== 'test' ? here('./tests/fixtures/compare.sample.json') : '',
+    __DEV_SAMPLE_REPORT__: JSON.stringify(dev ? here('./tests/fixtures/compare.sample.json') : ''),
+    // 계산 실행 칸의 샘플 입력(검증용 데이터). 빌드와 테스트에서는 null이다.
+    __DEV_SAMPLES__: JSON.stringify(
+      dev
+        ? {
+            account: here('../data/samples/account.sample.json'),
+            condition: here('../data/samples/condition.solo-raid.json'),
+            squads: here('../data/samples/squads.sample.json'),
+          }
+        : null,
     ),
   },
   server: {
@@ -36,4 +46,5 @@ export default defineConfig(({ command, mode }) => ({
     environment: 'happy-dom',
     include: ['tests/**/*.test.ts'],
   },
-}));
+  };
+});

@@ -4,7 +4,7 @@
 import { validateAccount, toEngineProfile, GROWTH_FIELDS, overloadOptionId as overloadId } from './account.mjs';
 import { validateCondition, toEngineBase, assumptionsOf } from './condition.mjs';
 import { InputError, squadProblems, squadNotes } from './compare.mjs';
-import { runBatch as defaultRunBatch, loadCatalog, engineVersion } from './engine.mjs';
+import { engineAccess } from './runtime.mjs';
 
 export const GROWTH_REPORT_SCHEMA_VERSION = 1;
 
@@ -203,8 +203,8 @@ const memberRows = (members) => members.map((m) => ({ name: m.name, damage: m.da
  * @param {object} [deps] compareSquads와 같다
  */
 export async function compareGrowth({ account, condition, squad, upgrades }, deps = {}) {
-  const catalog = deps.catalog ?? loadCatalog(deps.engineDir);
-  const runBatch = deps.runBatch ?? defaultRunBatch;
+  const engine = engineAccess(deps);
+  const catalog = await engine.catalog();
 
   const a = validateAccount(account, catalog);
   if (!a.ok) throw new InputError('계정 상태가 잘못됐다', a.errors);
@@ -249,7 +249,7 @@ export async function compareGrowth({ account, condition, squad, upgrades }, dep
     { ...base, squad: members, profile: baseProfile },
     ...accepted.map((u) => ({ ...base, squad: members, profile: u.profile })),
   ];
-  const results = await runBatch(requests, { engineDir: deps.engineDir, concurrency: deps.concurrency });
+  const results = await engine.runBatch(requests, { concurrency: deps.concurrency });
 
   const before = results[0];
   if (before.error) {
@@ -290,7 +290,7 @@ export async function compareGrowth({ account, condition, squad, upgrades }, dep
     account: { name: account.name ?? null, is_test_data: account.is_test_data, updated_at: account.updated_at ?? null },
     condition,
     assumptions: assumptionsOf(condition),
-    engine: before.evaluator ?? engineVersion(deps.engineDir),
+    engine: before.evaluator ?? (await engine.version()),
     baseline: {
       name: squad.name ?? '기준 편성',
       members: memberRows(before.members),

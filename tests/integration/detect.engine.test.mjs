@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { engineVersion, loadCatalog } from '../../src/core/engine.mjs';
+import { engineVersion, loadCatalog } from '../../src/runtime/node.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const cli = (...args) => spawnSync(process.execPath, ['src/cli.mjs', 'detect-changes', ...args], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });

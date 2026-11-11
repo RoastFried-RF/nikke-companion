@@ -2,17 +2,22 @@
 //!
 //! 이 파일은 창·단축키·명령을 잇는 접착 코드다. 규칙은 창 API를 모르는 모듈에 있다:
 //! - `overlay_state`: 보임/숨김·클릭 통과의 전환 규칙, 시작 위치 계산
-//! - `report`: 비교 결과 JSON 읽기와 형식 확인
+//! - `report`: 비교 결과 JSON 읽기와 형식 확인, 입력 JSON 파일 읽기
+//! - `engine`: 계산 엔진(vendor/nikke-calc) 프로세스 실행·카탈로그·버전. 계산 로직은 없다
 //!
-//! 네트워크 요청은 하지 않는다. 엔진 호출·게임 창 추적·화면 캡처는 다음 작업이다.
+//! 편성 비교·추천의 계산은 화면 쪽의 `src/core`(JS)가 하고, 여기서는 엔진 프로세스만 대신 띄운다.
+//! 네트워크 요청은 하지 않는다. 게임 창 추적·화면 캡처는 다음 작업이다.
 
+pub mod engine;
 pub mod overlay_state;
 pub mod report;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use serde::Serialize;
+use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewWindow};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -23,6 +28,12 @@ const MAIN_WINDOW: &str = "main";
 
 /// 상태가 바뀔 때 화면으로 보내는 이벤트. 프런트의 `OVERLAY_STATE_EVENT`(src/lib/backend.ts)와 같아야 한다.
 pub const OVERLAY_STATE_EVENT: &str = "overlay-state";
+
+/// 엔진 계산이 한 건 끝날 때마다 화면으로 보내는 이벤트. 프런트의 `ENGINE_PROGRESS_EVENT`와 같아야 한다.
+pub const ENGINE_PROGRESS_EVENT: &str = "engine-progress";
+
+/// 엔진 설정 파일 이름. 앱 설정 폴더(`%APPDATA%/<identifier>`)에 둔다.
+const SETTINGS_FILE: &str = "settings.json";
 
 /// 시작할 때 화면 가장자리에서 띄우는 거리(논리 픽셀).
 const SCREEN_MARGIN: f64 = 24.0;
@@ -58,6 +69,26 @@ struct Overlay {
     shortcut_problems: Mutex<Vec<String>>,
 }
 
+/// 엔진 배치가 돌고 있는지. 화면이 두 번 눌러도 엔진 프로세스를 겹쳐 띄우지 않는다.
+#[derive(Default)]
+struct EngineBusy(AtomicBool);
+
+/// 배치가 끝나면(오류로 끝나도) 표시를 내린다.
+struct BusyGuard<'a>(&'a AtomicBool);
+
+impl Drop for BusyGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+/// 화면에 넘기는 진행 상황. 프런트의 `EngineProgress`(src/types.ts)와 같아야 한다.
+#[derive(Debug, Clone, Serialize)]
+struct EngineProgress {
+    done: usize,
+    total: usize,
+}
+
 /// 화면에 넘기는 상태. 프런트의 `OverlaySnapshot`(src/types.ts)과 같아야 한다.
 #[derive(Debug, Clone, Serialize)]
 struct OverlaySnapshot {
@@ -87,6 +118,113 @@ impl Overlay {
 async fn load_report(path: String) -> Result<serde_json::Value, String> {
     let path = report::clean_path_input(&path);
     report::load_report_file(Path::new(path)).map_err(|e| e.to_string())
+}
+
+/// 엔진 설정을 확정한다: 환경 변수 → 설정 파일 → 저장소 안의 vendor/nikke-calc.
+/// 화면은 이 값을 바꿀 수 없다(화면이 임의의 프로그램을 실행하게 만들 수 없다).
+fn engine_config(app: &AppHandle) -> Result<engine::EngineConfig, String> {
+    let settings_path = app
+        .path()
+        .app_config_dir()
+        .map(|dir| dir.join(SETTINGS_FILE))
+        .ok();
+    let settings = match &settings_path {
+        Some(path) => engine::load_settings_file(path).map_err(|e| e.to_string())?,
+        None => engine::EngineSettings::default(),
+    };
+    let mut search_from: Vec<PathBuf> = Vec::new();
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    {
+        search_from.push(dir);
+    }
+    if let Ok(dir) = std::env::current_dir() {
+        search_from.push(dir);
+    }
+    engine::resolve_config(&settings, |name| std::env::var(name).ok(), &search_from).map_err(|e| {
+        match (&e, &settings_path) {
+            (engine::EngineError::EngineDirNotFound, Some(path)) => {
+                format!("{e} (설정 파일: {})", path.display())
+            }
+            _ => e.to_string(),
+        }
+    })
+}
+
+/// 오래 걸리는 일을 화면 응답을 막지 않는 스레드에서 돌린다.
+async fn blocking<T, F>(work: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|e| format!("작업을 끝내지 못했다: {e}"))?
+}
+
+/// 엔진이 아는 니케와 보스 프리셋(`{nikkes, bosses}`).
+#[tauri::command]
+async fn engine_catalog(app: AppHandle) -> Result<Value, String> {
+    let config = engine_config(&app)?;
+    blocking(move || engine::catalog(&config.engine_dir).map_err(|e| e.to_string())).await
+}
+
+/// 엔진 버전(`{repo, commit}`). 커밋을 알 수 없으면 commit은 null.
+#[tauri::command]
+async fn engine_version(app: AppHandle) -> Result<Value, String> {
+    let config = engine_config(&app)?;
+    blocking(move || Ok(engine::version(&config.engine_dir))).await
+}
+
+/// 요청 여러 건을 엔진 배치로 돌린다. 결과는 입력 순서 그대로이고, 줄마다 결과 또는 `{error}`다.
+/// 한 건이 끝날 때마다 `engine-progress` 이벤트를 보낸다.
+#[tauri::command]
+async fn engine_run_batch(app: AppHandle, requests: Vec<Value>) -> Result<Vec<Value>, String> {
+    let config = engine_config(&app)?;
+    blocking(move || {
+        let busy = app.state::<EngineBusy>();
+        if busy.0.swap(true, Ordering::AcqRel) {
+            return Err(engine::EngineError::Busy.to_string());
+        }
+        let _guard = BusyGuard(&busy.0);
+        let progress = |done: usize, total: usize| {
+            // 진행 표시를 못 보내도 계산은 계속한다.
+            let _ = app.emit(ENGINE_PROGRESS_EVENT, EngineProgress { done, total });
+        };
+        engine::run_batch(&config, &requests, Some(&progress)).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// JSON 파일(계정 상태·전투 조건·후보 편성)을 읽어 내용 그대로 돌려준다. 실패하면 한국어 오류 문장.
+#[tauri::command]
+async fn read_json_file(path: String) -> Result<Value, String> {
+    let path = report::clean_path_input(&path).to_string();
+    blocking(move || report::read_json_file(Path::new(&path)).map_err(|e| e.to_string())).await
+}
+
+/// 파일 고르기 창을 띄워 JSON 파일 하나의 경로를 받는다. 취소하면 null.
+/// 화면에는 파일·대화 상자 권한을 주지 않고, 고르는 일만 이 명령이 대신한다.
+#[tauri::command]
+async fn pick_json_file(window: WebviewWindow, title: String) -> Result<Option<String>, String> {
+    blocking(move || pick_json_file_dialog(&window, &title)).await
+}
+
+#[cfg(windows)]
+fn pick_json_file_dialog(window: &WebviewWindow, title: &str) -> Result<Option<String>, String> {
+    // 오버레이는 항상 위 창이다. 대화 상자를 이 창의 자식으로 띄워야 뒤에 가려지지 않는다.
+    let picked = rfd::FileDialog::new()
+        .set_title(title)
+        .add_filter("JSON", &["json"])
+        .set_parent(window)
+        .pick_file();
+    Ok(picked.map(|path| path.display().to_string()))
+}
+
+#[cfg(not(windows))]
+fn pick_json_file_dialog(_window: &WebviewWindow, _title: &str) -> Result<Option<String>, String> {
+    Err("파일 고르기 창은 Windows에서만 쓸 수 있다. 경로를 직접 넣어라".to_string())
 }
 
 /// 현재 오버레이 상태.
@@ -193,11 +331,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Overlay::default())
+        .manage(EngineBusy::default())
         .invoke_handler(tauri::generate_handler![
             load_report,
             overlay_status,
             startup_report_path,
-            quit_app
+            quit_app,
+            engine_catalog,
+            engine_version,
+            engine_run_batch,
+            read_json_file,
+            pick_json_file
         ])
         .setup(|app| {
             let window = app

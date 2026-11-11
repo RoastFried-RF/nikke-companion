@@ -1,0 +1,62 @@
+{
+  "task": "P-010",
+  "started_at": "2026-11-11T19:25:08.924Z",
+  "head": "61d77d1344c7aea56215f19f4a30947f60107d37",
+  "tree": "b620d6aa76fdc9af5c885669bd258bd567e31ca3",
+  "dirty": true,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "unit",
+      "cmd": "node --test tests/unit/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 2591,
+      "log": "verify-1-unit.log"
+    },
+    {
+      "name": "integration",
+      "cmd": "node --test tests/integration/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 18663,
+      "log": "verify-2-integration.log"
+    },
+    {
+      "name": "install",
+      "cmd": "npm --prefix app install",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 868,
+      "log": "verify-3-install.log"
+    },
+    {
+      "name": "frontend-build",
+      "cmd": "npm --prefix app run build",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 2079,
+      "log": "verify-4-frontend-build.log"
+    },
+    {
+      "name": "frontend-test",
+      "cmd": "npm --prefix app test",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 1801,
+      "log": "verify-5-frontend-test.log"
+    },
+    {
+      "name": "rust-test",
+      "cmd": "cargo test --manifest-path app/src-tauri/Cargo.toml",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 8851,
+      "log": "verify-6-rust-test.log"
+    }
+  ],
+  "passed": true,
+  "reason": null,
+  "tree_after": "b620d6aa76fdc9af5c885669bd258bd567e31ca3",
+  "finished_at": "2026-11-11T19:25:44.217Z"
+}

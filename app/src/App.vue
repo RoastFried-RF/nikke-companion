@@ -1,6 +1,8 @@
 <script setup lang="ts">
-// 오버레이 화면: 상태 표시, 결과 파일 고르기, 순위. 계산은 하지 않는다 — 이미 만든 비교 결과 파일을 읽어 보여 준다.
+// 오버레이 화면: 상태 표시, 계산 실행(추천·비교), 결과 파일 불러오기, 순위.
+// 계산은 루트의 src/core가 하고(ComputePanel → lib/compute.ts), 이미 만든 비교 결과 파일도 읽어 보여 준다.
 import { onBeforeUnmount, onMounted, ref } from 'vue';
+import ComputePanel from './components/ComputePanel.vue';
 import OverlayStatus from './components/OverlayStatus.vue';
 import ReportView from './components/ReportView.vue';
 import { errorMessage, loadReport, onOverlayState, overlayStatus, quitApp, startupReportPath } from './lib/backend';
@@ -15,6 +17,8 @@ const report = ref<CompareReport | null>(null);
 const loadedPath = ref('');
 const error = ref('');
 const loading = ref(false);
+/** 엔진 계산이 도는 중. 그동안 결과 파일을 불러오지 않는다(끝난 계산이 불러온 결과를 덮지 않게). */
+const computing = ref(false);
 
 let unlisten: (() => void) | null = null;
 let unmounted = false;
@@ -37,7 +41,28 @@ function remember(value: string): void {
   }
 }
 
+function onComputeStart(): void {
+  // 늦게 끝나는 파일 읽기가 계산 결과를 덮지 않게 한다. 앞서 보이던 순위도 치운다(새 계산의 결과로 오해하지 않게).
+  loadSeq += 1;
+  loading.value = false;
+  computing.value = true;
+  error.value = '';
+  report.value = null;
+  loadedPath.value = '';
+}
+
+function onComputeDone(computed: CompareReport): void {
+  computing.value = false;
+  report.value = computed;
+}
+
+function onComputeFail(message: string): void {
+  computing.value = false;
+  error.value = message;
+}
+
 async function load(): Promise<void> {
+  if (computing.value) return;
   const target = path.value.trim();
   if (!target) {
     error.value = '비교 결과 파일 경로를 넣어야 한다.';
@@ -115,6 +140,8 @@ onBeforeUnmount(() => {
 
     <OverlayStatus :state="overlay" />
 
+    <ComputePanel :disabled="loading" @start="onComputeStart" @done="onComputeDone" @fail="onComputeFail" />
+
     <form class="loader" @submit.prevent="load">
       <input
         v-model="path"
@@ -126,7 +153,7 @@ onBeforeUnmount(() => {
         aria-label="비교 결과 JSON 파일 경로"
         data-testid="report-path"
       />
-      <button class="loader__button" type="submit" :disabled="loading" data-testid="load-report">
+      <button class="loader__button" type="submit" :disabled="loading || computing" data-testid="load-report">
         {{ loading ? '읽는 중…' : '불러오기' }}
       </button>
     </form>
@@ -135,9 +162,9 @@ onBeforeUnmount(() => {
 
     <main class="content">
       <ReportView v-if="report" :report="report" />
-      <p v-else-if="!loading && !error" class="hint" data-testid="hint">
-        비교 결과 파일(JSON)의 경로를 넣고 불러온다. 결과 파일은 저장소 루트에서
-        <code>node src/cli.mjs compare … --json 결과.json</code>으로 만든다.
+      <p v-else-if="!loading && !computing && !error" class="hint" data-testid="hint">
+        계정 파일과 전투 조건 파일을 골라 추천이나 비교를 실행한다. 이미 만든 비교 결과 파일(JSON)은 아래 칸에 경로를
+        넣어 불러온다 — 결과 파일은 저장소 루트에서 <code>node src/cli.mjs compare … --json 결과.json</code>으로 만든다.
       </p>
     </main>
   </div>

@@ -1,10 +1,13 @@
-// 계산 엔진(vendor/nikke-calc) 어댑터.
+// Node 런타임 — 계산 엔진(vendor/nikke-calc) 어댑터. CLI와 테스트가 쓴다.
+// 계산 모듈(src/core)은 이 파일을 import하지 않고 `deps.runtime`으로 받는다(src/core/runtime.mjs).
+// 데스크톱 앱에서는 같은 일을 Rust 명령(app/src-tauri/src/engine.rs)이 한다.
 // 엔진의 요청·결과 JSON 계약(vendor/nikke-calc/docs/SIM-JSON.md)만 쓴다. 엔진 코드는 고치지 않는다.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ENGINE_REPO } from '../core/runtime.mjs';
 
 export const DEFAULT_ENGINE_DIR = path.resolve(fileURLToPath(new URL('../../vendor/nikke-calc', import.meta.url)));
 
@@ -18,8 +21,8 @@ export function loadCatalog(engineDir = DEFAULT_ENGINE_DIR) {
 
 /** 엔진 버전. 결과에 함께 남겨 어떤 엔진으로 계산했는지 추적한다. */
 export function engineVersion(engineDir = DEFAULT_ENGINE_DIR) {
-  const r = spawnSync('git', ['-C', engineDir, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
-  return { repo: 'Jgaram/nikke-calc', commit: r.status === 0 ? r.stdout.trim() : null };
+  const r = spawnSync('git', ['-C', engineDir, 'rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true });
+  return { repo: ENGINE_REPO, commit: r.status === 0 ? r.stdout.trim() : null };
 }
 
 function runWorker(lines, { engineDir, python, timeoutMs }) {
@@ -90,3 +93,21 @@ export async function runBatch(requests, options = {}) {
   if (missing >= 0) throw new Error(`엔진이 요청 ${missing}의 결과를 돌려주지 않았다`);
   return results;
 }
+
+const defined = (o) => Object.fromEntries(Object.entries(o ?? {}).filter(([, v]) => v !== undefined));
+
+/**
+ * 계산 모듈에 넘기는 런타임 객체(src/core/runtime.mjs의 계약).
+ * @param {{engineDir?: string, python?: string, concurrency?: number, timeoutMs?: number}} [options]
+ */
+export function createNodeRuntime(options = {}) {
+  const fixed = defined(options);
+  return {
+    loadCatalog: () => loadCatalog(fixed.engineDir),
+    engineVersion: () => engineVersion(fixed.engineDir),
+    runBatch: (requests, perCall) => runBatch(requests, { ...fixed, ...defined(perCall) }),
+  };
+}
+
+/** 기본 설정(vendor/nikke-calc, PATH의 python)의 Node 런타임. */
+export const nodeRuntime = createNodeRuntime();

@@ -2,7 +2,7 @@
 // 형식 설명은 docs/data-model.md §비교 결과.
 import { validateAccount, toEngineProfile, unconfirmedFields } from './account.mjs';
 import { validateCondition, toEngineBase, assumptionsOf } from './condition.mjs';
-import { runBatch as defaultRunBatch, loadCatalog, engineVersion } from './engine.mjs';
+import { engineAccess } from './runtime.mjs';
 
 export const REPORT_SCHEMA_VERSION = 1;
 export const SQUAD_SIZE = 5;
@@ -50,11 +50,12 @@ export function squadNotes(squad, account, catalog) {
  * @param {object} input.account   계정 상태 문서
  * @param {object} input.condition 전투 조건 문서
  * @param {{name?: string, members: string[]}[]} input.squads 후보 편성
- * @param {object} [deps] 테스트에서 엔진을 바꿔 끼울 때 쓴다
+ * @param {object} [deps] `runtime`(src/core/runtime.mjs의 계약 — 엔진 실행·카탈로그·버전), `concurrency`, `now`.
+ *   `catalog`·`runBatch`를 직접 주면 런타임보다 먼저다(테스트에서 엔진을 바꿔 끼울 때 쓴다)
  */
 export async function compareSquads({ account, condition, squads }, deps = {}) {
-  const catalog = deps.catalog ?? loadCatalog(deps.engineDir);
-  const runBatch = deps.runBatch ?? defaultRunBatch;
+  const engine = engineAccess(deps);
+  const catalog = await engine.catalog();
 
   const a = validateAccount(account, catalog);
   if (!a.ok) throw new InputError('계정 상태가 잘못됐다', a.errors);
@@ -75,7 +76,7 @@ export async function compareSquads({ account, condition, squads }, deps = {}) {
 
   const base = toEngineBase(condition);
   const requests = accepted.map((s) => ({ ...base, squad: s.members, profile: toEngineProfile(account, s.members) }));
-  const results = await runBatch(requests, { engineDir: deps.engineDir, concurrency: deps.concurrency });
+  const results = await engine.runBatch(requests, { concurrency: deps.concurrency });
 
   const ranking = [];
   const failed = [];
@@ -110,7 +111,7 @@ export async function compareSquads({ account, condition, squads }, deps = {}) {
     account: { name: account.name ?? null, is_test_data: account.is_test_data, updated_at: account.updated_at ?? null },
     condition,
     assumptions: assumptionsOf(condition),
-    engine: evaluator ?? engineVersion(deps.engineDir),
+    engine: evaluator ?? (await engine.version()),
     ranking,
     rejected,
     failed,

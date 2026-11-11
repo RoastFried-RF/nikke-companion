@@ -92,6 +92,22 @@ pub fn first_path_arg<I: IntoIterator<Item = String>>(args: I) -> Option<String>
 
 /// 파일에서 비교 결과를 읽는다.
 pub fn load_report_file(path: &Path) -> Result<Value, ReportError> {
+    let (text, shown) = read_text_file(path)?;
+    parse_report(&text, &shown)
+}
+
+/// JSON 파일(계정·전투 조건·후보 편성)을 읽어 내용 그대로 돌려준다. 형식 확인은 계산 코드(`src/core`)가 한다.
+pub fn read_json_file(path: &Path) -> Result<Value, ReportError> {
+    let (text, shown) = read_text_file(path)?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    serde_json::from_str(text).map_err(|e| ReportError::InvalidJson {
+        path: shown,
+        detail: json_error_detail(&e),
+    })
+}
+
+/// 크기 한도 안의 UTF-8 텍스트 파일을 읽는다. 돌려주는 두 번째 값은 오류 문장에 넣을 경로다.
+fn read_text_file(path: &Path) -> Result<(String, String), ReportError> {
     let shown = path.display().to_string();
     if path.as_os_str().is_empty() {
         return Err(ReportError::EmptyPath);
@@ -110,7 +126,7 @@ pub fn load_report_file(path: &Path) -> Result<Value, ReportError> {
     let text = String::from_utf8(bytes).map_err(|_| ReportError::NotUtf8 {
         path: shown.clone(),
     })?;
-    parse_report(&text, &shown)
+    Ok((text, shown))
 }
 
 /// JSON 텍스트가 비교 결과인지 확인하고 값으로 돌려준다. `shown`은 오류 문장에 넣을 파일 이름이다.
@@ -427,6 +443,28 @@ mod tests {
             first_path_arg(args(&["\"C:\\a b\\r.json\""])),
             Some("C:\\a b\\r.json".to_string())
         );
+    }
+
+    #[test]
+    fn reads_any_json_file_without_report_checks() {
+        // 계정·조건·편성 파일은 비교 결과가 아니다. 내용 그대로 돌려주고 형식은 계산 코드가 본다.
+        let f = TempFile::with_bytes("\u{feff}{\"squads\": [{\"members\": [\"크라운\"]}]}".as_bytes());
+        let v = read_json_file(&f.0).expect("읽기");
+        assert_eq!(v["squads"][0]["members"][0], "크라운");
+
+        let list = TempFile::with_bytes(b"[1, 2]");
+        assert_eq!(read_json_file(&list.0).expect("읽기"), serde_json::json!([1, 2]));
+
+        let broken = TempFile::with_bytes(b"{\"a\": ");
+        assert!(matches!(
+            read_json_file(&broken.0),
+            Err(ReportError::InvalidJson { .. })
+        ));
+        assert!(matches!(
+            read_json_file(Path::new("없는-폴더/없음.json")),
+            Err(ReportError::NotFound { .. })
+        ));
+        assert_eq!(read_json_file(Path::new("")), Err(ReportError::EmptyPath));
     }
 
     #[test]

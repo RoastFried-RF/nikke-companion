@@ -1,0 +1,745 @@
+//! 계산 엔진(`vendor/nikke-calc`) 호출 — Node 런타임(`src/runtime/node.mjs`)과 같은 일을 한다.
+//!
+//! 여기에는 계산 로직이 없다. 엔진의 요청·결과 JSON 계약(`vendor/nikke-calc/docs/SIM-JSON.md`)대로
+//! `python -m runner.sim --batch`를 띄워 줄을 주고받을 뿐이다. 요청을 만들고 결과를 해석하는 것은
+//! 화면 쪽에서 도는 계산 모듈(`src/core`)이다. Tauri API를 모른다(명령은 `lib.rs`가 잇는다).
+
+use std::fmt;
+use std::fs;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use serde::Deserialize;
+use serde_json::{json, Value};
+
+/// 결과에 남기는 엔진 저장소 이름. `src/core/runtime.mjs`의 `ENGINE_REPO`와 같아야 한다.
+pub const ENGINE_REPO: &str = "Jgaram/nikke-calc";
+
+/// 동시에 띄우는 엔진 프로세스의 상한.
+pub const MAX_WORKERS: usize = 4;
+
+/// 엔진 프로세스 하나의 기본 시간 제한(Node 런타임과 같다).
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+/// 엔진 폴더를 지정하는 환경 변수.
+pub const ENV_ENGINE_DIR: &str = "NIKKE_ENGINE_DIR";
+/// python 실행 파일을 지정하는 환경 변수(Node 런타임과 같은 이름).
+pub const ENV_PYTHON: &str = "NIKKE_PYTHON";
+
+/// 엔진 폴더임을 확인하는 파일.
+const ENGINE_MARKER: &str = "runner/sim.py";
+/// 저장소 루트에서 본 엔진 폴더.
+const ENGINE_SUBDIR: &str = "vendor/nikke-calc";
+
+/// 설정 파일(`settings.json`)의 내용. 적지 않은 칸은 환경 변수와 기본값으로 정한다.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EngineSettings {
+    /// 엔진 폴더(`runner/sim.py`가 있는 곳).
+    pub engine_dir: Option<String>,
+    /// python 실행 파일 이름 또는 경로.
+    pub python: Option<String>,
+    /// 동시에 띄울 엔진 프로세스 수(1~4).
+    pub concurrency: Option<usize>,
+    /// 엔진 프로세스 하나의 시간 제한(초).
+    pub timeout_seconds: Option<u64>,
+}
+
+/// 엔진을 부를 때 쓰는 확정된 값.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EngineConfig {
+    pub engine_dir: PathBuf,
+    pub python: String,
+    pub concurrency: usize,
+    pub timeout: Duration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EngineError {
+    SettingsUnreadable { path: String, detail: String },
+    SettingsInvalid { path: String, detail: String },
+    EngineDirNotFound,
+    NotAnEngineDir { path: String },
+    DataUnreadable { path: String, detail: String },
+    DataInvalid { path: String, detail: String },
+    Spawn { python: String, detail: String },
+    Timeout { seconds: u64 },
+    Io { detail: String },
+    BadOutput { line: String },
+    Exit { code: String, detail: String },
+    MissingResult { index: usize },
+    Cancelled,
+    Busy,
+}
+
+impl fmt::Display for EngineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SettingsUnreadable { path, detail } => {
+                write!(f, "설정 파일을 읽을 수 없다: {path} ({detail})")
+            }
+            Self::SettingsInvalid { path, detail } => write!(
+                f,
+                "설정 파일의 형식이 잘못됐다: {path} ({detail}). 쓸 수 있는 칸: engine_dir, python, concurrency, timeout_seconds"
+            ),
+            Self::EngineDirNotFound => write!(
+                f,
+                "엔진 폴더(vendor/nikke-calc)를 찾을 수 없다. 설정 파일의 engine_dir 또는 환경 변수 {ENV_ENGINE_DIR}로 지정하라"
+            ),
+            Self::NotAnEngineDir { path } => write!(
+                f,
+                "엔진 폴더가 아니다({ENGINE_MARKER}가 없다): {path}. 서브모듈을 받았는지 확인하라"
+            ),
+            Self::DataUnreadable { path, detail } => {
+                write!(f, "엔진 데이터를 읽을 수 없다: {path} ({detail})")
+            }
+            Self::DataInvalid { path, detail } => {
+                write!(f, "엔진 데이터의 형식이 다르다: {path} ({detail})")
+            }
+            Self::Spawn { python, detail } => {
+                write!(f, "엔진을 실행할 수 없다 ({python}): {detail}")
+            }
+            Self::Timeout { seconds } => write!(f, "엔진 시간 초과 ({seconds}초)"),
+            Self::Io { detail } => write!(f, "엔진과 주고받는 중 오류가 났다: {detail}"),
+            Self::BadOutput { line } => write!(f, "엔진 출력이 JSON이 아니다: {line}"),
+            Self::Exit { code, detail } => write!(f, "엔진 종료 코드 {code}: {detail}"),
+            Self::MissingResult { index } => {
+                write!(f, "엔진이 요청 {index}의 결과를 돌려주지 않았다")
+            }
+            Self::Cancelled => write!(f, "다른 엔진 프로세스의 오류로 계산을 멈췄다"),
+            Self::Busy => write!(f, "이미 계산 중이다. 끝난 뒤에 다시 실행하라"),
+        }
+    }
+}
+
+impl std::error::Error for EngineError {}
+
+// ── 설정 ─────────────────────────────────────────────────────────────────────
+
+/// 설정 파일을 읽는다. 파일이 없으면 빈 설정이다(환경 변수와 기본값을 쓴다).
+pub fn load_settings_file(path: &Path) -> Result<EngineSettings, EngineError> {
+    let shown = path.display().to_string();
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(EngineSettings::default()),
+        Err(e) => {
+            return Err(EngineError::SettingsUnreadable {
+                path: shown,
+                detail: e.to_string(),
+            })
+        }
+    };
+    parse_settings(&text).map_err(|detail| EngineError::SettingsInvalid {
+        path: shown,
+        detail,
+    })
+}
+
+/// 설정 파일 내용을 읽는다. 모르는 칸은 오타일 수 있어 오류로 본다.
+pub fn parse_settings(text: &str) -> Result<EngineSettings, String> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    if text.trim().is_empty() {
+        return Ok(EngineSettings::default());
+    }
+    serde_json::from_str(text).map_err(|e| e.to_string())
+}
+
+/// 이 PC에서 쓸 기본 동시 실행 수: 코어 하나를 남기고 최대 4개(Node 런타임과 같은 규칙).
+pub fn default_concurrency() -> usize {
+    let cores = thread::available_parallelism().map_or(1, usize::from);
+    cores.saturating_sub(1).clamp(1, MAX_WORKERS)
+}
+
+fn is_engine_dir(dir: &Path) -> bool {
+    dir.join(ENGINE_MARKER).is_file()
+}
+
+/// 주어진 폴더들에서 위로 올라가며 `vendor/nikke-calc`를 찾는다(저장소 안에서 실행할 때의 기본값).
+pub fn find_engine_dir(start_dirs: &[PathBuf]) -> Option<PathBuf> {
+    start_dirs
+        .iter()
+        .flat_map(|start| start.ancestors())
+        .map(|dir| dir.join(ENGINE_SUBDIR))
+        .find(|candidate| is_engine_dir(candidate))
+}
+
+fn non_empty(value: Option<String>) -> Option<String> {
+    value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// 설정을 확정한다. 우선순위: 환경 변수 → 설정 파일 → 기본값(엔진 폴더는 `search_from`에서 위로 찾는다).
+pub fn resolve_config(
+    settings: &EngineSettings,
+    env: impl Fn(&str) -> Option<String>,
+    search_from: &[PathBuf],
+) -> Result<EngineConfig, EngineError> {
+    let configured =
+        non_empty(env(ENV_ENGINE_DIR)).or_else(|| non_empty(settings.engine_dir.clone()));
+    let engine_dir = match configured {
+        Some(dir) => {
+            let dir = PathBuf::from(dir);
+            if !is_engine_dir(&dir) {
+                return Err(EngineError::NotAnEngineDir {
+                    path: dir.display().to_string(),
+                });
+            }
+            dir
+        }
+        None => find_engine_dir(search_from).ok_or(EngineError::EngineDirNotFound)?,
+    };
+    let python = non_empty(env(ENV_PYTHON))
+        .or_else(|| non_empty(settings.python.clone()))
+        .unwrap_or_else(|| "python".to_string());
+    let concurrency = settings
+        .concurrency
+        .unwrap_or_else(default_concurrency)
+        .clamp(1, MAX_WORKERS);
+    let timeout = settings
+        .timeout_seconds
+        .filter(|s| *s > 0)
+        .map_or(DEFAULT_TIMEOUT, Duration::from_secs);
+    Ok(EngineConfig {
+        engine_dir,
+        python,
+        concurrency,
+        timeout,
+    })
+}
+
+// ── 카탈로그·버전 ─────────────────────────────────────────────────────────────
+
+fn read_engine_json(engine_dir: &Path, relative: &str) -> Result<Value, EngineError> {
+    let path = engine_dir.join(relative);
+    let shown = path.display().to_string();
+    let text = fs::read_to_string(&path).map_err(|e| EngineError::DataUnreadable {
+        path: shown.clone(),
+        detail: e.to_string(),
+    })?;
+    serde_json::from_str(text.strip_prefix('\u{feff}').unwrap_or(&text)).map_err(|e| {
+        EngineError::DataInvalid {
+            path: shown,
+            detail: e.to_string(),
+        }
+    })
+}
+
+/// 엔진이 아는 니케와 보스 프리셋: `{nikkes, bosses}`. Node 런타임의 `loadCatalog`와 같은 값이다
+/// (키 순서도 파일 그대로 — serde_json의 `preserve_order`).
+pub fn catalog(engine_dir: &Path) -> Result<Value, EngineError> {
+    let nikkes = read_engine_json(engine_dir, "data/parsed_nikke.json")?;
+    if !nikkes.is_object() {
+        return Err(EngineError::DataInvalid {
+            path: engine_dir.join("data/parsed_nikke.json").display().to_string(),
+            detail: "최상위가 객체가 아니다".to_string(),
+        });
+    }
+    let presets = read_engine_json(engine_dir, "data/boss_presets.json")?;
+    let Some(presets) = presets.as_object() else {
+        return Err(EngineError::DataInvalid {
+            path: engine_dir.join("data/boss_presets.json").display().to_string(),
+            detail: "최상위가 객체가 아니다".to_string(),
+        });
+    };
+    let bosses: Vec<&String> = presets.keys().filter(|k| !k.starts_with('_')).collect();
+    Ok(json!({ "nikkes": nikkes, "bosses": bosses }))
+}
+
+/// 엔진 버전: `{repo, commit}`. 커밋을 알 수 없으면 null이다(값을 지어내지 않는다).
+pub fn version(engine_dir: &Path) -> Value {
+    let mut cmd = Command::new("git");
+    cmd.arg("-C")
+        .arg(engine_dir)
+        .args(["rev-parse", "HEAD"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+    hide_console(&mut cmd);
+    let commit = cmd
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .filter(|commit| !commit.is_empty());
+    json!({ "repo": ENGINE_REPO, "commit": commit })
+}
+
+// ── 배치 실행 ─────────────────────────────────────────────────────────────────
+
+/// 창 없는 프로그램에서 띄운 콘솔 프로그램이 검은 창을 번쩍이지 않게 한다.
+fn hide_console(cmd: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    let _ = cmd;
+}
+
+/// 요청 `count`건을 프로세스 `workers`개에 돌아가며 나눈다(Node 런타임과 같은 규칙). 값은 요청 번호다.
+pub fn plan_chunks(count: usize, workers: usize) -> Vec<Vec<usize>> {
+    let workers = workers.clamp(1, MAX_WORKERS).min(count.max(1));
+    let mut chunks = vec![Vec::new(); workers];
+    for i in 0..count {
+        chunks[i % workers].push(i);
+    }
+    chunks.retain(|c| !c.is_empty());
+    chunks
+}
+
+/// 엔진이 돌려준 줄에서 요청 번호(`id`)를 읽는다.
+fn row_index(row: &Value, total: usize) -> Option<usize> {
+    let id = usize::try_from(row.get("id")?.as_u64()?).ok()?;
+    (id < total).then_some(id)
+}
+
+/// 객체가 아닌 요청은 엔진에 보낼 수 없다(번호를 붙일 곳이 없다). 엔진의 줄 단위 오류와 같은 모양으로 돌려준다.
+fn not_an_object_row(index: usize) -> Value {
+    json!({
+        "id": index,
+        "error": {
+            "type": "invalid_input",
+            "exception": "RequestError",
+            "message": "배치 한 줄은 JSON 객체여야 한다",
+            "path": "",
+        }
+    })
+}
+
+fn tail_chars(text: &str, max: usize) -> String {
+    let count = text.chars().count();
+    text.chars().skip(count.saturating_sub(max)).collect()
+}
+
+/// 엔진 프로세스 하나에 요청 줄들을 주고 결과 줄들을 받는다.
+fn run_worker(
+    config: &EngineConfig,
+    lines: &[String],
+    cancel: &AtomicBool,
+    on_row: &(dyn Fn() + Sync),
+) -> Result<Vec<Value>, EngineError> {
+    let mut cmd = Command::new(&config.python);
+    cmd.args(["-m", "runner.sim", "--batch"])
+        .current_dir(&config.engine_dir)
+        // Windows 콘솔 기본 인코딩(cp949)이 아니라 UTF-8로 주고받는다.
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console(&mut cmd);
+    let mut child = cmd.spawn().map_err(|e| EngineError::Spawn {
+        python: config.python.clone(),
+        detail: e.to_string(),
+    })?;
+
+    let mut stdin = child.stdin.take().expect("stdin 파이프");
+    let stdout = child.stdout.take().expect("stdout 파이프");
+    let mut stderr = child.stderr.take().expect("stderr 파이프");
+    let mut input = lines.join("\n");
+    input.push('\n');
+    let deadline = Instant::now() + config.timeout;
+
+    // 입력 쓰기·출력 읽기를 따로 돌려야 파이프가 차서 서로 기다리는 일이 없다.
+    let (status, out_lines, err_text) = thread::scope(|scope| {
+        scope.spawn(move || {
+            // 엔진이 먼저 끝나면 쓰기는 실패한다. 그때는 종료 코드가 사정을 알려 준다.
+            let _ = stdin.write_all(input.as_bytes());
+        });
+        let reader = scope.spawn(move || -> std::io::Result<Vec<String>> {
+            let mut rows = Vec::new();
+            for line in BufReader::new(stdout).lines() {
+                let line = line?;
+                if line.trim().is_empty() {
+                    continue;
+                }
+                rows.push(line);
+                on_row();
+            }
+            Ok(rows)
+        });
+        let errors = scope.spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stderr.read_to_end(&mut bytes);
+            String::from_utf8_lossy(&bytes).into_owned()
+        });
+
+        let status: Result<ExitStatus, EngineError> = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break Ok(status),
+                Ok(None) => {}
+                Err(e) => {
+                    break Err(EngineError::Io {
+                        detail: e.to_string(),
+                    })
+                }
+            }
+            let stop = if cancel.load(Ordering::Relaxed) {
+                Some(EngineError::Cancelled)
+            } else if Instant::now() >= deadline {
+                Some(EngineError::Timeout {
+                    seconds: config.timeout.as_secs(),
+                })
+            } else {
+                None
+            };
+            if let Some(reason) = stop {
+                break Err(reason);
+            }
+            thread::sleep(Duration::from_millis(15));
+        };
+        if status.is_err() {
+            // 멈춘 프로세스를 남기지 않는다. 죽으면 파이프가 닫혀 읽는 쪽도 끝난다.
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        let out_lines = reader.join().unwrap_or_else(|_| Ok(Vec::new()));
+        let err_text = errors.join().unwrap_or_default();
+        (status, out_lines, err_text)
+    });
+
+    let status = status?;
+    let out_lines = out_lines.map_err(|e| EngineError::Io {
+        detail: e.to_string(),
+    })?;
+    let mut rows = Vec::with_capacity(out_lines.len());
+    for line in &out_lines {
+        let row: Value = serde_json::from_str(line).map_err(|_| EngineError::BadOutput {
+            line: line.chars().take(200).collect(),
+        })?;
+        rows.push(row);
+    }
+    // 배치를 시작하지도 못했으면(코드≠0) 줄 단위 결과가 아니다.
+    if !status.success() {
+        let detail = rows
+            .first()
+            .and_then(|row| row.pointer("/error/message"))
+            .and_then(Value::as_str)
+            .map_or_else(|| tail_chars(err_text.trim(), 500), str::to_string);
+        return Err(EngineError::Exit {
+            code: status
+                .code()
+                .map_or_else(|| "없음".to_string(), |c| c.to_string()),
+            detail,
+        });
+    }
+    Ok(rows)
+}
+
+/// 요청 여러 건을 엔진 배치로 돌린다. 반환 배열은 입력 순서와 같다.
+///
+/// 요청마다 결과 객체 또는 `{error: {type, message, path}}`가 온다 — 한 건의 오류가 다른 건을 막지 않는다.
+/// 프로세스를 띄우지 못했거나 시간을 넘기는 등 배치 자체가 실패하면 `Err`이고, 남은 프로세스도 멈춘다.
+/// `on_progress(끝난 수, 전체 수)`는 결과 줄이 도착할 때마다 불린다.
+pub fn run_batch(
+    config: &EngineConfig,
+    requests: &[Value],
+    on_progress: Option<&(dyn Fn(usize, usize) + Sync)>,
+) -> Result<Vec<Value>, EngineError> {
+    let total = requests.len();
+    if total == 0 {
+        return Ok(Vec::new());
+    }
+    let mut results: Vec<Option<Value>> = vec![None; total];
+    let done = AtomicUsize::new(0);
+    let report = || {
+        let finished = done.fetch_add(1, Ordering::Relaxed) + 1;
+        if let Some(on_progress) = on_progress {
+            on_progress(finished.min(total), total);
+        }
+    };
+
+    // 요청에 번호(id)를 붙인다. 엔진이 결과 줄에 그대로 돌려주므로 프로세스를 나눠도 순서를 되찾는다.
+    let mut numbered: Vec<String> = Vec::with_capacity(total);
+    for (i, request) in requests.iter().enumerate() {
+        match request.as_object() {
+            Some(obj) => {
+                let mut obj = obj.clone();
+                obj.insert("id".to_string(), json!(i));
+                numbered.push(Value::Object(obj).to_string());
+            }
+            None => {
+                results[i] = Some(not_an_object_row(i));
+                report();
+            }
+        }
+    }
+
+    let chunks = plan_chunks(numbered.len(), config.concurrency);
+    let cancel = AtomicBool::new(false);
+    let outcomes: Vec<Result<Vec<Value>, EngineError>> = thread::scope(|scope| {
+        let handles: Vec<_> = chunks
+            .iter()
+            .filter(|chunk| !chunk.is_empty())
+            .map(|chunk| {
+                let lines: Vec<String> = chunk.iter().map(|&i| numbered[i].clone()).collect();
+                let (cancel, report) = (&cancel, &report);
+                scope.spawn(move || {
+                    let outcome = run_worker(config, &lines, cancel, report);
+                    if outcome.is_err() {
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                    outcome
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| {
+                h.join().unwrap_or_else(|_| {
+                    Err(EngineError::Io {
+                        detail: "엔진 작업 스레드가 죽었다".to_string(),
+                    })
+                })
+            })
+            .collect()
+    });
+
+    // 먼저 난 진짜 오류를 알린다. "다른 프로세스 때문에 멈췄다"는 그 결과일 뿐이다.
+    let mut cancelled = false;
+    let mut rows = Vec::new();
+    let mut first_error = None;
+    for outcome in outcomes {
+        match outcome {
+            Ok(mut part) => rows.append(&mut part),
+            Err(EngineError::Cancelled) => cancelled = true,
+            Err(e) => {
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    if let Some(e) = first_error {
+        return Err(e);
+    }
+    if cancelled {
+        return Err(EngineError::Cancelled);
+    }
+
+    for row in rows {
+        if let Some(i) = row_index(&row, total) {
+            results[i] = Some(row);
+        }
+    }
+    results
+        .into_iter()
+        .enumerate()
+        .map(|(index, row)| row.ok_or(EngineError::MissingResult { index }))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn has_korean(s: &str) -> bool {
+        s.chars().any(|c| ('가'..='힣').contains(&c))
+    }
+
+    fn repo_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
+    fn no_env(_: &str) -> Option<String> {
+        None
+    }
+
+    #[test]
+    fn settings_file_fields_are_optional() {
+        assert_eq!(parse_settings("").unwrap(), EngineSettings::default());
+        assert_eq!(parse_settings("{}").unwrap(), EngineSettings::default());
+        let s = parse_settings(
+            "\u{feff}{\"engine_dir\": \"D:\\\\엔진\", \"python\": \"py\", \"concurrency\": 2, \"timeout_seconds\": 30}",
+        )
+        .unwrap();
+        assert_eq!(s.engine_dir.as_deref(), Some("D:\\엔진"));
+        assert_eq!(s.python.as_deref(), Some("py"));
+        assert_eq!(s.concurrency, Some(2));
+        assert_eq!(s.timeout_seconds, Some(30));
+    }
+
+    #[test]
+    fn settings_file_rejects_unknown_fields_and_broken_json() {
+        assert!(parse_settings("{\"engineDir\": \"x\"}").is_err());
+        assert!(parse_settings("{").is_err());
+        assert!(parse_settings("{\"concurrency\": \"4\"}").is_err());
+    }
+
+    #[test]
+    fn missing_settings_file_means_defaults() {
+        let missing = std::env::temp_dir().join("nikke-companion-없는-설정.json");
+        assert_eq!(
+            load_settings_file(&missing).unwrap(),
+            EngineSettings::default()
+        );
+    }
+
+    #[test]
+    fn finds_the_engine_by_walking_up_from_the_executable() {
+        // 개발 실행 파일은 app/src-tauri/target/debug 아래에 있다.
+        let exe_dir = repo_root().join("app/src-tauri/target/debug");
+        let found = find_engine_dir(&[exe_dir]).expect("저장소 안에서는 엔진을 찾는다");
+        assert!(found.join("runner/sim.py").is_file());
+        assert!(found.ends_with("vendor/nikke-calc"));
+        assert_eq!(find_engine_dir(&[std::env::temp_dir()]), None);
+        assert_eq!(find_engine_dir(&[]), None);
+    }
+
+    #[test]
+    fn config_defaults_to_repo_engine_and_path_python() {
+        let c = resolve_config(&EngineSettings::default(), no_env, &[repo_root()]).unwrap();
+        assert!(c.engine_dir.ends_with("vendor/nikke-calc"));
+        assert_eq!(c.python, "python");
+        assert!((1..=MAX_WORKERS).contains(&c.concurrency));
+        assert_eq!(c.timeout, DEFAULT_TIMEOUT);
+    }
+
+    #[test]
+    fn environment_overrides_settings_file_which_overrides_defaults() {
+        let engine = repo_root().join("vendor/nikke-calc").display().to_string();
+        let settings = EngineSettings {
+            engine_dir: Some(engine.clone()),
+            python: Some("py-from-file".into()),
+            concurrency: Some(99),
+            timeout_seconds: Some(5),
+        };
+        let c = resolve_config(&settings, no_env, &[]).unwrap();
+        assert_eq!(c.engine_dir, PathBuf::from(&engine));
+        assert_eq!(c.python, "py-from-file");
+        assert_eq!(c.concurrency, MAX_WORKERS, "프로세스는 최대 4개");
+        assert_eq!(c.timeout, Duration::from_secs(5));
+
+        let env = |name: &str| match name {
+            ENV_PYTHON => Some(" py-from-env ".to_string()),
+            ENV_ENGINE_DIR => Some("   ".to_string()),
+            _ => None,
+        };
+        let c = resolve_config(&settings, env, &[]).unwrap();
+        assert_eq!(c.python, "py-from-env");
+        assert_eq!(c.engine_dir, PathBuf::from(&engine), "빈 환경 변수는 없는 것으로 본다");
+
+        let zero = EngineSettings {
+            concurrency: Some(0),
+            timeout_seconds: Some(0),
+            ..settings
+        };
+        let c = resolve_config(&zero, no_env, &[]).unwrap();
+        assert_eq!(c.concurrency, 1);
+        assert_eq!(c.timeout, DEFAULT_TIMEOUT);
+    }
+
+    #[test]
+    fn a_configured_folder_that_is_not_the_engine_is_an_error() {
+        let settings = EngineSettings {
+            engine_dir: Some(std::env::temp_dir().display().to_string()),
+            ..EngineSettings::default()
+        };
+        assert!(matches!(
+            resolve_config(&settings, no_env, &[repo_root()]),
+            Err(EngineError::NotAnEngineDir { .. })
+        ));
+        assert_eq!(
+            resolve_config(&EngineSettings::default(), no_env, &[std::env::temp_dir()]),
+            Err(EngineError::EngineDirNotFound)
+        );
+    }
+
+    #[test]
+    fn chunks_are_round_robin_and_never_more_than_four() {
+        assert_eq!(plan_chunks(0, 4), Vec::<Vec<usize>>::new());
+        assert_eq!(plan_chunks(1, 4), vec![vec![0]]);
+        assert_eq!(plan_chunks(3, 4), vec![vec![0], vec![1], vec![2]]);
+        assert_eq!(
+            plan_chunks(6, 4),
+            vec![vec![0, 4], vec![1, 5], vec![2], vec![3]]
+        );
+        assert_eq!(plan_chunks(5, 1), vec![vec![0, 1, 2, 3, 4]]);
+        assert_eq!(plan_chunks(5, 0).len(), 1);
+        assert_eq!(plan_chunks(100, 64).len(), MAX_WORKERS);
+        let mut all: Vec<usize> = plan_chunks(100, 64).into_iter().flatten().collect();
+        all.sort_unstable();
+        assert_eq!(all, (0..100).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn row_index_accepts_only_request_numbers() {
+        assert_eq!(row_index(&json!({"id": 2}), 3), Some(2));
+        assert_eq!(row_index(&json!({"id": 3}), 3), None);
+        assert_eq!(row_index(&json!({"id": -1}), 3), None);
+        assert_eq!(row_index(&json!({"id": "2"}), 3), None);
+        assert_eq!(row_index(&json!({"line": 1}), 3), None);
+    }
+
+    #[test]
+    fn empty_batch_does_not_start_the_engine() {
+        let config = EngineConfig {
+            engine_dir: PathBuf::from("없는-폴더"),
+            python: "없는-python".into(),
+            concurrency: 4,
+            timeout: DEFAULT_TIMEOUT,
+        };
+        assert_eq!(run_batch(&config, &[], None), Ok(Vec::new()));
+        // 객체가 아닌 요청만 있으면 엔진을 띄우지 않고 줄 단위 오류로 돌려준다.
+        let rows = run_batch(&config, &[json!("문자열"), Value::Null], None).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1]["id"], 1);
+        assert_eq!(rows[0]["error"]["type"], "invalid_input");
+    }
+
+    #[test]
+    fn a_python_that_cannot_start_is_reported() {
+        let config = EngineConfig {
+            engine_dir: repo_root(),
+            python: "nikke-companion-없는-python".into(),
+            concurrency: 2,
+            timeout: DEFAULT_TIMEOUT,
+        };
+        let err = run_batch(&config, &[json!({"squad": ["크라운"]}), json!({"squad": ["헬름"]})], None)
+            .unwrap_err();
+        assert!(matches!(err, EngineError::Spawn { .. }), "{err:?}");
+        assert!(err.to_string().contains("엔진을 실행할 수 없다"));
+    }
+
+    #[test]
+    fn catalog_of_a_folder_without_data_is_an_error() {
+        assert!(matches!(
+            catalog(&std::env::temp_dir().join("nikke-companion-없는-엔진")),
+            Err(EngineError::DataUnreadable { .. })
+        ));
+    }
+
+    #[test]
+    fn version_of_a_non_repository_has_no_commit() {
+        let v = version(&std::env::temp_dir().join("nikke-companion-없는-엔진"));
+        assert_eq!(v["repo"], ENGINE_REPO);
+        assert!(v["commit"].is_null());
+    }
+
+    #[test]
+    fn every_error_message_is_korean() {
+        let all = [
+            EngineError::SettingsUnreadable { path: "s.json".into(), detail: "os error 5".into() },
+            EngineError::SettingsInvalid { path: "s.json".into(), detail: "unknown field".into() },
+            EngineError::EngineDirNotFound,
+            EngineError::NotAnEngineDir { path: "D:\\x".into() },
+            EngineError::DataUnreadable { path: "p.json".into(), detail: "os error 2".into() },
+            EngineError::DataInvalid { path: "p.json".into(), detail: "EOF".into() },
+            EngineError::Spawn { python: "python".into(), detail: "not found".into() },
+            EngineError::Timeout { seconds: 600 },
+            EngineError::Io { detail: "broken pipe".into() },
+            EngineError::BadOutput { line: "Traceback".into() },
+            EngineError::Exit { code: "2".into(), detail: "usage".into() },
+            EngineError::MissingResult { index: 3 },
+            EngineError::Cancelled,
+            EngineError::Busy,
+        ];
+        for e in all {
+            assert!(has_korean(&e.to_string()), "{e:?}");
+        }
+    }
+}
