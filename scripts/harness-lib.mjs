@@ -165,7 +165,7 @@ function tail(text, lines = 40) {
 }
 
 // 작업의 검증 명령을 실제로 돌리고 결과를 runDir/verify.json에 남긴다.
-export function runVerify(task, runDir, config) {
+export function runVerify(task, runDir, config, options = {}) {
   fs.mkdirSync(runDir, { recursive: true });
   const result = {
     task: task.id,
@@ -183,6 +183,15 @@ export function runVerify(task, runDir, config) {
   }
   for (const [i, v] of task.verify.entries()) {
     const started = Date.now();
+    // 실제 환경(예: 실행 중인 게임)이 필요한 검증. 환경이 없으면 돌리지 않고 그렇게 기록한다 —
+    // 통과로도 실패로도 치지 않는다. 처음 완료할 때는 환경 없이는 완료할 수 없다(아래).
+    if (v.requires_cmd) {
+      const probe = spawnSync(v.requires_cmd, { cwd: ROOT, shell: true, encoding: 'utf8', timeout: 60_000, env: harnessEnv(config) });
+      if (probe.status !== 0) {
+        result.commands.push({ name: v.name ?? `cmd${i + 1}`, cmd: v.cmd, exit_code: null, skipped_env: true, requires: v.requires ?? v.requires_cmd, duration_ms: Date.now() - started });
+        continue;
+      }
+    }
     const r = spawnSync(v.cmd, {
       cwd: ROOT,
       shell: true,
@@ -204,7 +213,11 @@ export function runVerify(task, runDir, config) {
       tail: r.status === 0 ? undefined : tail(text),
     });
   }
-  const failed = result.commands.filter((c) => c.exit_code !== 0);
+  const failed = result.commands.filter((c) => !c.skipped_env && c.exit_code !== 0);
+  result.env_skipped = result.commands.filter((c) => c.skipped_env).map((c) => `${c.name} (${c.requires})`);
+  if (!result.reason && result.env_skipped.length > 0 && !options.allowEnvSkip) {
+    result.reason = `필요한 환경이 없어 검증하지 못했다: ${result.env_skipped.join(', ')}`;
+  }
   if (!result.reason && result.protected_violations.length > 0) {
     result.reason = `보호 경로 변경: ${result.protected_violations.join(', ')}`;
   }

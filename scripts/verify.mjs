@@ -19,6 +19,10 @@ const doc = loadTasks();
 function printResult(task, r) {
   console.log(`${r.passed ? '통과' : '실패'}  ${task.id}  ${task.title}`);
   for (const c of r.commands) {
+    if (c.skipped_env) {
+      console.log(`  skip ${c.name}  (환경 없음: ${c.requires})  ${c.cmd}`);
+      continue;
+    }
     console.log(`  ${c.exit_code === 0 ? 'ok  ' : 'FAIL'} ${c.name}  (${(c.duration_ms / 1000).toFixed(1)}s)  ${c.cmd}`);
   }
   if (!r.passed) console.log(`  사유: ${r.reason}`);
@@ -46,9 +50,12 @@ if (flags.has('--all')) {
   let failed = 0;
   for (const task of doc.tasks.filter((t) => t.status === 'done')) {
     const runDir = newRunDir(task.id, task.attempts, '-reverify');
-    const r = runVerify(task, runDir, config);
+    const r = runVerify(task, runDir, config, { allowEnvSkip: true });
     printResult(task, r);
-    if (r.passed) {
+    if (r.passed && r.env_skipped.length > 0) {
+      // 환경이 없어 일부를 못 돌렸다. 회귀는 아니지만 현재 코드로 검증됐다고 적지도 않는다.
+      console.log(`  환경 없음 — 재검증하지 못한 항목: ${r.env_skipped.join(', ')}`);
+    } else if (r.passed) {
       task.evidence = { ...task.evidence, reverified_tree: r.tree, reverified_at: r.finished_at };
     } else {
       failed += 1;

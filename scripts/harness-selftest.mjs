@@ -54,6 +54,7 @@ function setup(name, tasks, behaviors, config = {}) {
   }
   fs.writeFileSync(path.join(dir, 'fake-agent.mjs'), FAKE_AGENT);
   fs.writeFileSync(path.join(dir, 'check.mjs'), CHECK);
+  fs.writeFileSync(path.join(dir, 'envcheck.mjs'), "import fs from 'node:fs'; process.exit(fs.existsSync('env-ready') ? 0 : 1);");
   fs.writeFileSync(path.join(dir, 'guard.txt'), 'original');
   fs.writeFileSync(path.join(dir, 'fake-behaviors.json'), JSON.stringify(behaviors));
   fs.writeFileSync(path.join(dir, '.gitignore'), '.harness/lock.json\n.harness/runs/**/agent.log\n');
@@ -223,6 +224,27 @@ await scenario('K. 사람이 할 작업(manual)은 에이전트에게 넘기지 
   assert.equal(t.M1.status, 'pending');
   assert.equal(t.T1.status, 'done');
   assert.deepEqual(calls(dir), ['T1 ok']);
+});
+
+await scenario('L. 환경이 필요한 검증: 환경 없이는 완료할 수 없고, 재검증에서는 회귀로 치지 않는다', () => {
+  const live = { name: 'live', cmd: 'node check.mjs T1', requires: '표시 파일', requires_cmd: 'node envcheck.mjs' };
+  const dir = setup('l', [task('T1', { verify: [{ name: 'check', cmd: 'node check.mjs T1' }, live], max_attempts: 1 })], {});
+  autopilot(dir);
+  let t = tasksOf(dir);
+  assert.equal(t.T1.status, 'blocked', '환경이 없으면 완료 처리하면 안 된다');
+  assert.match(t.T1.blocked_reason, /필요한 환경이 없어/);
+
+  fs.writeFileSync(path.join(dir, 'env-ready'), '');
+  assert.equal(verify(dir, 'T1', '--record').status, 0, '환경이 있으면 완료된다');
+  assert.equal(tasksOf(dir).T1.status, 'done');
+
+  fs.rmSync(path.join(dir, 'env-ready'));
+  const r = verify(dir, '--all');
+  assert.equal(r.status, 0, '환경이 없어 못 돌린 것은 회귀가 아니다: ' + r.stdout);
+  assert.match(r.stdout, /환경 없음/);
+  t = tasksOf(dir);
+  assert.equal(t.T1.status, 'done');
+  assert.equal(t.T1.evidence.reverified_tree, undefined, '못 돌린 검증을 현재 코드의 성공으로 적으면 안 된다');
 });
 
 await scenario('E. 한도에 도달하면 상태를 저장하고 끝낸다', () => {
