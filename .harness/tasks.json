@@ -135,9 +135,19 @@
         "실제 계정 데이터로 돌린 결과를 인게임 솔로 레이드 기록과 대조"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261111T170826-P-003-a1-manual",
+        "verified_tree": "8cbbff934b0862401bffcd58cec94e16a5892bd9",
+        "verified_at": "2026-11-11T17:08:47.050Z",
+        "commit": null
+      }
     },
     {
       "id": "P-004",
