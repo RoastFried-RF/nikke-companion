@@ -1,0 +1,31 @@
+{
+  "name": "nikke-companion-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "test": "vitest run",
+    "tauri": "tauri",
+    "fixture": "node ../src/cli.mjs compare --account ../data/samples/account.sample.json --condition ../data/samples/condition.solo-raid.json --squads ../data/samples/squads.sample.json --json tests/fixtures/compare.sample.json"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.4",
+    "nikke-companion": "file:..",
+    "vue": "^3.5.45"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "@vue/test-utils": "^2.5.1",
+    "happy-dom": "^21.0.4",
+    "typescript": "~6.0.3",
+    "vite": "^8.3.8",
+    "vitest": "^4.1.12",
+    "vue-tsc": "^3.3.14"
+  }
+}

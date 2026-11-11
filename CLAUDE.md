@@ -22,6 +22,19 @@ node scripts/harness-selftest.mjs        # 하네스 자체 검증 (모델 호�
 node src/cli.mjs compare --account data/samples/account.sample.json --condition data/samples/condition.solo-raid.json --squads data/samples/squads.sample.json
 ```
 
+데스크톱 앱(`app/`, Tauri v2 + Vue 3 — 자체 package.json. 자세한 것은 `app/README.md`):
+
+```bash
+npm --prefix app install                                  # 처음 한 번
+npm --prefix app run tauri dev                            # 개발 실행 (오버레이 창 + Vite)
+npm --prefix app run tauri build                          # 실행 파일: app/src-tauri/target/release/nikke-companion.exe
+npm --prefix app run build                                # 타입 검사 + 프런트 빌드
+npm --prefix app test                                     # 컴포넌트 테스트 (vitest)
+cargo test --manifest-path app/src-tauri/Cargo.toml       # Rust 단위 테스트
+cargo build --manifest-path app/src-tauri/Cargo.toml
+npm --prefix app run fixture                              # 컴포넌트 테스트용 샘플 결과를 실제 CLI로 다시 만든다
+```
+
 엔진은 `vendor/nikke-calc`(서브모듈, Python 3.12, 표준 라이브러리만). 직접 고치지 않는다.
 
 ## 작업 원칙

@@ -1,0 +1,49 @@
+$ cargo test --manifest-path app/src-tauri/Cargo.toml
+
+running 28 tests
+test overlay_state::tests::apply_does_not_mutate_the_original ... ok
+test overlay_state::tests::click_through_toggle_is_ignored_while_hidden ... ok
+test overlay_state::tests::click_through_toggles_on_and_off_while_visible ... ok
+test overlay_state::tests::hide_then_show_restores_click_through_mode ... ok
+test overlay_state::tests::only_changed_fields_are_reported ... ok
+test overlay_state::tests::top_right_places_window_inside_the_work_area ... ok
+test overlay_state::tests::visibility_toggles_and_keeps_click_through ... ok
+test overlay_state::tests::serializes_with_snake_case_fields ... ok
+test overlay_state::tests::top_right_never_leaves_the_work_area ... ok
+test overlay_state::tests::starts_visible_and_interactive ... ok
+test report::tests::every_error_message_is_korean ... ok
+test report::tests::empty_path_and_directory_are_errors ... ok
+test report::tests::missing_file_is_a_korean_error ... ok
+test report::tests::missing_schema_version_is_an_error ... ok
+test report::tests::path_input_is_trimmed_and_unquoted ... ok
+test report::tests::other_result_kinds_are_rejected ... ok
+test report::tests::schema_version_mismatch_names_both_versions ... ok
+test report::tests::startup_path_is_the_first_non_option_argument ... ok
+test report::tests::required_fields_are_checked ... ok
+test report::tests::schema_version_must_be_the_number_one ... ok
+test report::tests::reads_the_sample_report_made_by_the_real_cli ... ok
+test report::tests::suggest_results_are_accepted ... ok
+test report::tests::top_level_must_be_an_object ... ok
+test report::tests::non_utf8_is_an_error ... ok
+test report::tests::returns_the_document_unchanged ... ok
+test report::tests::non_json_is_a_korean_error_with_position ... ok
+test report::tests::truncated_and_empty_json_are_reported ... ok
+test report::tests::utf8_bom_is_accepted ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
+     Running unittests src\lib.rs (app\src-tauri\target\debug\deps\nikke_companion_lib-4890b5722dd9dc4b.exe)
+     Running unittests src\main.rs (app\src-tauri\target\debug\deps\nikke_companion-91c367f41045a050.exe)
+   Doc-tests nikke_companion_lib

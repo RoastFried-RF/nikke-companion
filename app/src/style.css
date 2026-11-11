@@ -1,0 +1,58 @@
+/* 창 바탕은 투명하다. 보이는 것은 App.vue의 패널뿐이다. */
+:root {
+  color-scheme: dark;
+  --panel: rgba(16, 19, 28, 0.86);
+  --panel-strong: rgba(10, 12, 18, 0.94);
+  --line: rgba(255, 255, 255, 0.14);
+  --text: #eef1f6;
+  --muted: #a4adbd;
+  --accent: #7cc4ff;
+  --gold: #ffc440;
+  --warn: #ffb347;
+  --danger: #ff7a7a;
+  --passthrough: #ff5a36;
+  font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+}
+
+body {
+  overflow: hidden;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 4px;
+}

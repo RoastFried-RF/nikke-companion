@@ -49,7 +49,7 @@
 
 ## 차단
 
-**Rust 툴체인이 없다 (P-009, P-010)**
+**Rust 툴체인이 없다 (P-009, P-010)** — 2026-11-12 P-009 실행 때 풀렸다: `cargo`·`rustc` 1.99.1이 있고 Tauri 빌드가 된다. 아래는 기록으로 남긴다.
 - 2026-11-12 사용자 결정으로 데스크톱 앱을 Electron에서 Tauri v2로 바꿨다(`docs/spec.md` §5).
   진행 중이던 Electron 실행은 산출물이 생기기 전에 멈췄다.
 - 이 PC에 `cargo`·`rustc`가 없다. MSVC 빌드 도구(VS 2022, VC 14.44)와 WebView2는 있다.
@@ -104,4 +104,7 @@ CLI가 보고한 값이다(구독 사용 시 실제 청구액과 다를 수 있�
 - P-008 (2026-11-12): `src/core/import-profile.mjs`에 `importProfile`(엔진 프로필 → 계정 상태 순수 변환)·`importProfileFile`(→ `data/accounts/<이름>.json`, 있는 파일은 `--force` 없이 덮어쓰지 않음)과 CLI `import-profile <파일> [--name] [--out-dir] [--force] [--json]`, `renderImportReport`, `data/samples/profile.sample.json`(검증용 표시)을 추가. 못 옮긴 칸은 `unknown`, 엔진이 모르는 니케는 `import.skipped`, 오버로드는 줄 목록이 합산 수치와 맞을 때만 `overload`(9개 옵션 모두 명시)로 옮긴다. 로그인·쿠키·수집기는 다루지 않는다. 형식은 `docs/data-model.md` §계정 가져오기.
 - 검증: `tests/unit/` 90건(가져오기 14건), `tests/integration/` 14건 통과 — 샘플 프로필을 가져온 계정의 총딜이 프로필을 엔진 표기 그대로 넘긴 계산과 같다(41.74억). 실제 계정에서 받은 프로필로는 돌려 보지 않았다(`manual_checks`: 인게임 대조).
 - 남은 문제(범위 밖이라 고치지 않음, 위 "알아 둘 것" 마지막 항목): 엔진이 적지 않은 칸을 기본 스펙으로 계산하므로 수동 계정의 적지 않은 칸과 모든 미확인 칸이 실제보다 높게 계산된다 — P-002~P-006 결과와 "미육성으로 계산했다"는 메모에 영향. 고치려면 `toEngineProfile`이 미육성 값을 채워 넘기게 하고 `account.test.mjs`·샘플 수치를 함께 바꿔야 한다(별도 작업 필요). 가져온 계정은 칸을 모두 적어 영향이 없지만 미확인 칸이 남은 니케는 같은 문제를 겪는다.
+- P-009 (2026-11-12): `app/`에 Tauri v2(2.12.5) + Vue 3 + Vite + TS 오버레이 골격. Rust: `overlay_state.rs`(보임·클릭 통과 전환 규칙 + 오른쪽 위 위치 계산, 창 API 없음)·`report.rs`(`load_report`: 형식 확인 + 한국어 오류)·`lib.rs`(투명·무테·항상 위·작업 표시줄 숨김 창, 전역 단축키 Alt+Shift+C/O, 상태 이벤트). 화면: `ReportView.vue`·`OverlayStatus.vue`·`App.vue`, 단위 표기는 루트 `src/core/format.mjs`를 `@core` 별칭으로 가져온다. 권한은 `capabilities/overlay.json`(이벤트 듣기·창 끌기·앱 명령 4개)뿐, CSP는 IPC만 허용. 사용법은 `app/README.md`.
+- 검증: 하네스 명령 6개 통과(vitest 55건 — 실제 CLI로 만든 `app/tests/fixtures/compare.sample.json` 입력, Rust 28건, 루트 단위 94건). 추가로 `npm --prefix app run tauri build`로 만든 실행 파일을 잠깐 띄워 WebView2 디버깅 포트로 페이지를 읽었다: 실행 인자로 준 샘플이 실제 `load_report`로 읽혀 순위가 그려지고, 단축키 2개가 등록되고, 외부 fetch는 CSP에 막히고 capability에 없는 명령은 거부됐다. 개발 실행 경로(Vite 서버 + 디버그 실행 파일)도 같은 방법으로 샘플이 그려지는 것을 봤다. **단축키를 눌러 본 것은 아니다.**
+- 남은 문제: `manual_checks` 5개는 그대로 사람 몫(실제 니케 위 표시, 클릭 통과 중 게임 입력, Alt+Tab 뒤 동작). `Alt+Shift+O`로 다시 보일 때 창 라이브러리(tao)가 창을 활성화해 게임의 키보드 포커스를 가져갈 수 있다 — 게임 위에서 확인 필요, 고치려면 Win32로 직접 보여야 한다(P-010 이후). `npm --prefix app install`이 루트에서 돌면 `app/package.json`에 `"nikke-companion": "file:.."`을 매번 적는다(npm 10 동작, 지워도 다시 생겨 그대로 둠 — 앱은 쓰지 않는다). 설치 파일은 만들지 않는다(`bundle.active: false`). 결과 파일은 경로를 손으로 넣는다(파일 고르기 창은 P-010).
 - (P-004) 남은 점: `formatDamage`는 안전한 정수(약 9,007조)를 넘는 값도 RangeError로 본다. 표의 열 맞춤은 한글을 두 칸으로 세는 방식이라 글꼴에 따라 어긋날 수 있다.
