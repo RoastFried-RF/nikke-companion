@@ -149,7 +149,8 @@ function runAgent(task, prompt, runDir) {
     const out = fs.openSync(logFile, 'w');
     let child;
     try {
-      child = spawn(config.agent.command, args, { cwd: ROOT, stdio: ['pipe', out, out], windowsHide: true, env: harnessEnv(config) });
+      // agent.env: 에이전트 프로세스에만 주는 환경 변수(예: CLI가 보조 작업에 쓰는 모델도 같은 모델로 고정).
+      child = spawn(config.agent.command, args, { cwd: ROOT, stdio: ['pipe', out, out], windowsHide: true, env: harnessEnv(config, config.agent.env ?? {}) });
     } catch (e) {
       fs.closeSync(out);
       resolve({ ok: false, error: `실행 실패: ${e.message}`, effort, duration_ms: 0 });
@@ -218,7 +219,9 @@ try {
       session.stop_reason = s.pending || s.blocked ? '진행할 수 있는 작업이 없다(차단 또는 선행 작업 대기)' : '모든 작업 완료';
       break;
     }
-    const { task, resumed } = picked;
+    let { task } = picked;
+    const { resumed } = picked;
+    let liveDoc = doc;
     const attempt = resumed ? Math.max(task.attempts, 1) : task.attempts + 1;
     task.status = 'in_progress';
     task.attempts = attempt;
@@ -229,12 +232,34 @@ try {
     const agent = await runAgent(task, buildPrompt(task, attempt, resumed), runDir);
     const record = { task: task.id, attempt, resumed, run: path.relative(ROOT, runDir).replaceAll('\\', '/'), agent };
 
+    // 에이전트가 도는 동안(수십 분) 사람이 tasks.json을 고쳤을 수 있다(작업 추가·정의 수정).
+    // 실행 전에 읽어 둔 문서를 그대로 저장하면 그 변경을 덮어쓴다 — 디스크에서 다시 읽고 이 작업의 상태만 적는다.
+    liveDoc = loadTasks();
+    const fresh = liveDoc.tasks.find((t) => t.id === task.id);
+    if (!fresh) {
+      appendLog({ event: 'task_removed_during_run', task: task.id, run: record.run });
+      writeJson(path.join(runDir, 'meta.json'), { ...record, outcome: 'task_removed' });
+      session.stop_reason = `실행 중에 작업 ${task.id}이(가) tasks.json에서 사라졌다. 상태를 적을 곳이 없어 중단한다.`;
+      break;
+    }
+    fresh.status = task.status;
+    fresh.attempts = task.attempts;
+    task = fresh;
+
+    // 설정한 모델 말고 다른 모델이 함께 쓰였으면(예: CLI의 보조 작업) 숨기지 않고 남긴다.
+    const otherModels = (agent.result?.models ?? []).filter((m) => !m.startsWith(config.agent.model));
+    if (otherModels.length > 0) {
+      record.other_models = otherModels;
+      appendLog({ event: 'other_models_used', task: task.id, models: otherModels, run: record.run });
+      console.log(`    주의: 설정한 모델 외에 ${otherModels.join(', ')}도 쓰였다(기록함)`);
+    }
+
     if (!agent.ok) {
       // 모델 호출 실패는 제품 검증 실패가 아니다. 시도 횟수를 쓰지 않는다.
       task.status = 'pending';
       task.attempts = attempt - 1;
-      task.agent_errors += 1;
-      saveTasks(doc);
+      task.agent_errors = (task.agent_errors ?? 0) + 1;
+      saveTasks(liveDoc);
       consecutiveAgentErrors += 1;
       record.outcome = 'agent_error';
       session.iterations.push(record);
@@ -253,13 +278,24 @@ try {
     const verify = runVerify(task, runDir, config);
     record.verify = { passed: verify.passed, reason: verify.reason, tree: verify.tree };
     if (verify.passed) {
-      record.commit = completeTask(doc, task, verify, runDir, config);
+      record.commit = completeTask(liveDoc, task, verify, runDir, config);
       record.outcome = 'verified';
       console.log(`    검증 통과 · 체크포인트 ${record.commit?.slice(0, 8)}`);
+    } else if (verify.env_only) {
+      // 실패한 명령은 없고, 실제 환경(예: 떠 있는 게임 창)이 없어 일부를 못 돌렸다.
+      // 에이전트를 다시 불러도 달라질 것이 없다 — 시도를 더 쓰지 않고 환경 대기로 세운다.
+      record.outcome = 'env_wait';
+      task.status = 'blocked';
+      task.env_wait = true;
+      task.last_failure = { reason: verify.reason, run: record.run, commands: [] };
+      task.blocked_reason = `환경 대기 — ${verify.reason}`;
+      task.resume_condition = `환경을 갖춘 뒤 node scripts/verify.mjs ${task.id} --record (코드는 그대로 둔다. 마지막 실행: ${record.run})`;
+      console.log(`    환경 대기: ${verify.reason}`);
+      saveTasks(liveDoc);
     } else {
       record.outcome = 'verify_failed';
       task.last_failure = { reason: verify.reason, run: record.run, commands: verify.commands.filter((c) => c.exit_code !== 0) };
-      const max = maxAttempts(doc, config, task);
+      const max = maxAttempts(liveDoc, config, task);
       if (attempt >= max) {
         task.status = 'blocked';
         task.blocked_reason = `검증이 ${attempt}회 실패했다: ${verify.reason}`;
@@ -269,7 +305,7 @@ try {
         task.status = 'pending';
         console.log(`    검증 실패 ${attempt}/${max}: ${verify.reason}`);
       }
-      saveTasks(doc);
+      saveTasks(liveDoc);
     }
     appendLog({ event: record.outcome, task: task.id, attempt, run: record.run, tree: verify.tree, reason: verify.reason });
     writeJson(path.join(runDir, 'meta.json'), record);

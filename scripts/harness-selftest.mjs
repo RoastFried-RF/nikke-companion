@@ -27,6 +27,15 @@ else if (mode === 'bad') fs.writeFileSync('out/' + id + '.txt', 'bad');
 else if (mode === 'crash') process.exit(1);
 else if (mode === 'tamper') { fs.writeFileSync('guard.txt', 'tampered'); fs.writeFileSync('out/' + id + '.txt', 'ok'); }
 else if (mode === 'hang') { fs.writeFileSync('out/' + id + '.partial', 'half'); await new Promise((r) => setTimeout(r, 30000)); }
+else if (mode === 'edit-tasks') {
+  // 실행 중에 사람이 작업 목록을 고친 상황: 새 작업을 더하고 다른 작업의 제목을 바꾼다.
+  const p = '.harness/tasks.json';
+  const d = JSON.parse(fs.readFileSync(p, 'utf8'));
+  d.tasks.push({ id: 'T9', title: '실행 중에 더한 작업', acceptance: ['out/T9.txt가 ok'], verify: [{ name: 'check', cmd: 'node check.mjs T9' }] });
+  d.tasks.find((t) => t.id === 'T2').title = '실행 중에 바꾼 제목';
+  fs.writeFileSync(p, JSON.stringify(d, null, 2));
+  fs.writeFileSync('out/' + id + '.txt', 'ok');
+}
 else if (mode === 'resume-ok') fs.writeFileSync('out/' + id + '.txt', fs.existsSync('out/' + id + '.partial') ? 'ok' : 'lost');
 `;
 const CHECK = `
@@ -245,6 +254,47 @@ await scenario('L. 환경이 필요한 검증: 환경 없이는 완료할 수 �
   t = tasksOf(dir);
   assert.equal(t.T1.status, 'done');
   assert.equal(t.T1.evidence.reverified_tree, undefined, '못 돌린 검증을 현재 코드의 성공으로 적으면 안 된다');
+});
+
+await scenario('M. 환경만 없는 검증 실패는 에이전트를 다시 부르지 않고 환경 대기로 세운다', () => {
+  const live = { name: 'live', cmd: 'node check.mjs T1', requires: '표시 파일', requires_cmd: 'node envcheck.mjs' };
+  const dir = setup('m', [task('T1', { verify: [{ name: 'check', cmd: 'node check.mjs T1' }, live] }), task('T2')], {});
+  assert.equal(autopilot(dir).status, 0);
+  let t = tasksOf(dir);
+  assert.equal(t.T1.status, 'blocked');
+  assert.equal(t.T1.env_wait, true);
+  assert.equal(t.T1.attempts, 1, '환경이 없을 뿐인데 시도를 더 쓰면 안 된다');
+  assert.match(t.T1.resume_condition, /verify\.mjs T1 --record/);
+  assert.equal(t.T2.status, 'done', '독립 작업은 계속 진행한다');
+  assert.deepEqual(calls(dir), ['T1 ok', 'T2 ok'], '같은 작업으로 에이전트를 다시 부르면 안 된다');
+  assert.ok(events(dir).some((e) => e.event === 'env_wait' && e.task === 'T1'));
+
+  fs.writeFileSync(path.join(dir, 'env-ready'), '');
+  assert.equal(verify(dir, 'T1', '--record').status, 0);
+  t = tasksOf(dir);
+  assert.equal(t.T1.status, 'done');
+  assert.equal(t.T1.env_wait, undefined);
+
+  // 실제로 실패한 명령이 있으면 환경 대기가 아니라 검증 실패다.
+  const dir2 = setup('m2', [task('T1', { verify: [{ name: 'check', cmd: 'node check.mjs T1' }, live], max_attempts: 1 })], { T1: 'bad' });
+  autopilot(dir2);
+  const t2 = tasksOf(dir2);
+  assert.equal(t2.T1.status, 'blocked');
+  assert.equal(t2.T1.env_wait, undefined);
+  assert.match(t2.T1.blocked_reason, /검증 실패: check/);
+});
+
+await scenario('N. 실행 중에 고친 tasks.json을 덮어쓰지 않는다', () => {
+  const dir = setup('n', [task('T1'), task('T2', { deps: ['T9'] })], { T1: 'edit-tasks' });
+  const r = autopilot(dir);
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = tasksOf(dir);
+  assert.equal(t.T1.status, 'done');
+  assert.ok(t.T9, '실행 중에 더한 작업이 남아 있어야 한다');
+  assert.equal(t.T9.status, 'done', '더한 작업도 이어서 실행된다');
+  assert.equal(t.T2.title, '실행 중에 바꾼 제목');
+  assert.equal(t.T2.status, 'done');
+  assert.deepEqual(calls(dir), ['T1 edit-tasks', 'T9 ok', 'T2 ok']);
 });
 
 await scenario('E. 한도에 도달하면 상태를 저장하고 끝낸다', () => {

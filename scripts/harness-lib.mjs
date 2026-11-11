@@ -215,14 +215,18 @@ export function runVerify(task, runDir, config, options = {}) {
   }
   const failed = result.commands.filter((c) => !c.skipped_env && c.exit_code !== 0);
   result.env_skipped = result.commands.filter((c) => c.skipped_env).map((c) => `${c.name} (${c.requires})`);
-  if (!result.reason && result.env_skipped.length > 0 && !options.allowEnvSkip) {
-    result.reason = `필요한 환경이 없어 검증하지 못했다: ${result.env_skipped.join(', ')}`;
-  }
+  // 실제로 실패한 것이 있으면 그것이 사유다. 환경이 없어 못 돌린 것은 그다음이다 —
+  // 그래야 "환경만 갖추면 되는 상태"(env_only)와 "고칠 것이 있는 상태"가 구분된다.
   if (!result.reason && result.protected_violations.length > 0) {
     result.reason = `보호 경로 변경: ${result.protected_violations.join(', ')}`;
   }
   if (!result.reason && failed.length > 0) {
     result.reason = `검증 실패: ${failed.map((c) => `${c.name}(exit ${c.exit_code})`).join(', ')}`;
+  }
+  result.env_only = false;
+  if (!result.reason && result.env_skipped.length > 0 && !options.allowEnvSkip) {
+    result.reason = `필요한 환경이 없어 검증하지 못했다: ${result.env_skipped.join(', ')}`;
+    result.env_only = true;
   }
   // 검증 도중 코드가 바뀌었으면 그 결과는 어느 버전의 것인지 말할 수 없다.
   const treeAfter = codeTree();
@@ -240,6 +244,7 @@ export function runVerify(task, runDir, config, options = {}) {
 export function completeTask(doc, task, verifyResult, runDir, config) {
   if (!verifyResult.passed) throw new Error('통과하지 않은 검증으로 완료 처리할 수 없다');
   task.status = 'done';
+  delete task.env_wait;
   task.blocked_reason = null;
   task.resume_condition = null;
   task.last_failure = null;

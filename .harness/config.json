@@ -23,6 +23,11 @@
       "json"
     ],
     "model": "claude-fable-5-2",
+    "env": {
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-fable-5-2",
+      "ANTHROPIC_SMALL_FAST_MODEL": "claude-fable-5-2",
+      "CLAUDE_CODE_SUBAGENT_MODEL": "claude-fable-5-2"
+    },
     "default_effort": "high",
     "timeout_minutes": 60
   },
