@@ -1,0 +1,42 @@
+# 니케 컴패니언
+
+니케 PC판용 개인 데스크톱 앱(오버레이 + 계정 맞춤 편성·성장 추천 + 자체 티어).
+요구사항의 기준은 `docs/spec.md`다. 먼저 읽어라.
+
+## 읽는 순서
+
+1. `docs/spec.md` — 요구사항, 단계, 결정 기록, 미검증 가정
+2. `.harness/progress.md` — 지금 상황과 다음 행동
+3. `.harness/tasks.json` — 작업 목록(수락 조건·검증 명령·상태)
+4. 맡은 작업과 관련된 코드
+
+## 명령
+
+```bash
+node --test tests/unit/                  # 단위 테스트 (엔진 호출 없음, 빠름)
+node --test tests/integration/           # 실제 엔진 호출 (수십 초)
+node scripts/verify.mjs <작업ID>         # 그 작업의 검증 명령 실행 + 증거 기록
+node scripts/verify.mjs --all            # 완료된 작업을 현재 코드로 재검증
+node scripts/autopilot.mjs --max-iterations 3   # 자율 실행 루프
+node scripts/harness-selftest.mjs        # 하네스 자체 검증 (모델 호출 없음)
+node src/cli.mjs compare --account data/samples/account.sample.json --condition data/samples/condition.solo-raid.json --squads data/samples/squads.sample.json
+```
+
+엔진은 `vendor/nikke-calc`(서브모듈, Python 3.12, 표준 라이브러리만). 직접 고치지 않는다.
+
+## 작업 원칙
+
+- 한 번에 작업 하나. `tasks.json`의 수락 조건과 검증 명령을 구현 전에 확인한다.
+- 완료는 `node scripts/verify.mjs <작업ID>`가 통과해야 한다. "구현했다"는 말은 완료가 아니다.
+- 검증을 통과시키려고 테스트를 지우거나 약하게 만들지 않는다. `protected` 경로는 수정 금지.
+  수락 조건을 바꿔야 하면 이유와 영향을 `progress.md`에 적고 작업을 멈춘다.
+- 실제 게임이 필요한 확인은 `manual_checks`에 남기고 완료로 치지 않는다.
+- 모의 데이터에는 `is_test_data: true`. 개인 계정 데이터는 `data/accounts/`(gitignore).
+- 엔진이 지원하지 않는 효과는 미지원으로 표시한다. 0으로 두고 결과를 확정하지 않는다.
+- 권한·접근 제한을 우회하지 않는다. 배포·공개 게시·게임 계정에 영향을 주는 조작은 하지 않는다.
+- 모델은 Fable 5.2만. 쓸 수 없으면 기록하고 멈춘다.
+
+## 세션을 끝낼 때
+
+`.harness/progress.md`를 갱신한다: 구현한 것, 실행한 검증과 결과, 미검증 항목,
+차단된 작업과 재개 조건, 다음 작업.

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.refs/
+*.local.json
+# 개인 계정 데이터 — 저장소에 올리지 않는다
+data/accounts/
+# 하네스 실행 중 상태
+.harness/lock.json
+.harness/runs/**/agent.log
+__pycache__/
+*.pyc

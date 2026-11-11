@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "is_test_data": true,
+  "name": "검증용 샘플 계정",
+  "source": "manual",
+  "updated_at": "2026-11-12T02:00:00+09:00",
+  "nikkes": {
+    "리틀 머메이드": { "skill_levels": [10, 10, 10], "breakthrough": 3, "core_enhancement": 7, "overload": { "공격력": 3, "우월 코드 대미지": 2 } },
+    "크라운": { "skill_levels": [10, 10, 10], "breakthrough": 3, "core_enhancement": 7, "overload": { "공격력": 2 } },
+    "라피 : 레드 후드": { "skill_levels": [10, 10, 10], "breakthrough": 3, "core_enhancement": 7, "overload": { "공격력": 4, "우월 코드 대미지": 4, "최대 장탄 수": 2 } },
+    "헬름": { "skill_levels": [7, 7, 10], "breakthrough": 3, "core_enhancement": 3, "overload": { "공격력": 2, "우월 코드 대미지": 2 } },
+    "앨리스": { "skill_levels": [10, 10, 10], "breakthrough": 3, "core_enhancement": 7, "overload": { "공격력": 4, "우월 코드 대미지": 3, "차지 속도": 2 } },
+    "미하라": { "skill_levels": [4, 4, 7], "breakthrough": 2, "unknown": ["overload", "core_enhancement"] },
+    "프리카": { "skill_levels": [10, 7, 10], "breakthrough": 3, "core_enhancement": 0, "overload": { "공격력": 2, "차지 속도": 2 } },
+    "나가": {}
+  }
+}

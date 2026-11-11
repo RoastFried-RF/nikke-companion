@@ -1,0 +1,3 @@
+[submodule "vendor/nikke-calc"]
+	path = vendor/nikke-calc
+	url = https://github.com/Jgaram/nikke-calc

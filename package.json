@@ -1,0 +1,15 @@
+{
+  "name": "nikke-companion",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test tests/unit/",
+    "test:integration": "node --test tests/integration/",
+    "verify": "node scripts/verify.mjs",
+    "autopilot": "node scripts/autopilot.mjs",
+    "harness:selftest": "node scripts/harness-selftest.mjs",
+    "compare": "node src/cli.mjs compare"
+  }
+}
