@@ -145,3 +145,45 @@
   바꾸는 후보, 현재 상태와 같은 후보.
 - 기준 편성 자체에 문제가 있거나 엔진이 기준 편성을 계산하지 못하면 결과 없이 입력 오류다.
 - 엔진 호출은 기준 1건 + 계산한 후보 수다.
+
+## 데이터 변경 감지 — `src/tier/detect.mjs`
+
+자동 티어의 1단계. 엔진 저장소의 두 커밋에서 `data/parsed_nikke.json`(기본 스탯)과 `data/parsed_skills.json`(스킬 효과)을
+`git show`로 읽어 니케 단위로 추가·변경·삭제를 나눈다. 작업 폴더는 건드리지 않고 엔진도 부르지 않는다. **티어는 내지 않는다.**
+
+`detectChanges({from, to})`(CLI `detect-changes --from <커밋> --to <커밋> [--engine <엔진 저장소>] [--json <파일>]`)의 결과.
+CLI는 이 JSON을 표준 출력에 그대로 낸다. 순수 비교만 필요하면 `diffEngineData(이전 판, 새 판)`(판 = `{nikkes, skills}`).
+
+```jsonc
+{
+  "schema_version": 1, "kind": "data_changes", "generated_at": "…",
+  "engine": { "repo": "Jgaram/nikke-calc", "from": { "ref": "HEAD~40", "commit": "163144a…" }, "to": { "ref": "HEAD", "commit": "67835ca…" } },
+  "files": ["data/parsed_nikke.json", "data/parsed_skills.json"],
+  "summary": { "added": 1, "changed": 1, "removed": 1, "unchanged": 206, "hold": 1 },
+  "added":   [ { "name": "…", "evaluation": { "status": "hold", "label": "평가 보류",
+                                               "reasons": [ { "code": "skills_unparsed", "message": "…" } ] },
+                 "skills_state": "unparsed", "effects": 0 } ],
+  "changed": [ { "name": "…", "evaluation": { "status": "ready", "label": "평가 대상", "reasons": [] }, "evaluation_before": "hold",
+                 "changes": {
+                   "stats": [ { "field": "damage_coeff", "before": 13.65, "after": 15 } ],
+                   "stats_presence": null,                       // null | "added" | "removed" (기본 스탯이 통째로 생김·사라짐)
+                   "skills": { "state_before": "parsed", "state_after": "parsed", "effects_before": 9, "effects_after": 10,
+                               "added": [ { "source": "스킬3", "name": "…" } ], "removed": [],
+                               "changed": [ { "source": "스킬2", "name": "…", "fields": ["duration", "values"] } ],
+                               "reordered": false } } } ],       // 스킬이 그대로면 "skills": null
+  "removed": [ { "name": "…", "evaluation_before": "ready" } ],
+  "hold": ["…"],                                                 // 추가·변경 중 평가 보류인 이름
+  "caveats": ["티어를 낸 것이 아니다 …"]
+}
+```
+
+- 니케 = 두 파일 중 어느 쪽에든 있는 이름. 이전 판에 없으면 **추가**, 새 판에 없으면 **삭제**, 둘 다 있고 내용이 다르면 **변경**.
+  객체의 키 순서는 무시하고 배열 순서는 본다(엔진이 효과 나열 순서로 같은 프레임의 발동 순서를 정한다).
+- `evaluation`은 **새 판** 기준이다. `ready`(평가 대상)는 다음 단계가 평가해야 한다는 뜻이지 티어가 났다는 뜻이 아니다.
+- `hold`(평가 보류) 사유: `skills_unparsed` — `parsed_skills.json`에 키가 없다(엔진의 미파싱 기준과 같다. 그대로 돌리면
+  스킬 0개로 계산된다) · `skills_empty` — 효과가 하나도 없다 · `stats_missing` — `parsed_nikke.json`에 없다.
+- 스킬 효과는 (스킬 칸 `source`, 효과 `name`)으로 묶어 비교한다. 같은 칸·이름이 여럿이면(애장품 판본) 묶음째 변경으로 보고
+  `fields`는 `null`이다. 효과 내용은 같고 순서만 바뀌면 `reordered: true`.
+- `--from`이 `--to`의 조상 커밋이 아니면 방향이 뒤집혔을 수 있다는 문장이 `caveats`에 붙는다.
+- 보지 않는 것: 파싱된 효과를 엔진이 모두 계산하는지(지원 여부 판정은 다음 단계), 프리뷰 선행 등록 여부
+  (`preview_skills.json` — 카드 기준 추정값), 두 파일 밖의 변경(엔진 코드·보스·장비 데이터).

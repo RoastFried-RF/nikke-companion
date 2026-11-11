@@ -1,0 +1,22 @@
+{
+  "task": "P-007",
+  "started_at": "2026-11-11T17:35:13.991Z",
+  "head": "f4aedcb88b425594d9c40b06b65f11c505a33ac1",
+  "tree": "e89c408934017ae86672e6b49706b1819350fd61",
+  "dirty": true,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "unit",
+      "cmd": "node --test tests/unit/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 2586,
+      "log": "verify-1-unit.log"
+    }
+  ],
+  "passed": true,
+  "reason": null,
+  "tree_after": "e89c408934017ae86672e6b49706b1819350fd61",
+  "finished_at": "2026-11-11T17:35:16.826Z"
+}

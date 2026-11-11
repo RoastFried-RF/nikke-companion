@@ -3,18 +3,21 @@
 //   node src/cli.mjs compare --account <계정.json> --condition <조건.json> --squads <편성.json> [--json <결과.json>]
 //   node src/cli.mjs suggest --account <계정.json> --condition <조건.json> [--limit <후보 수>] [--top <표시 수>] [--json <결과.json>]
 //   node src/cli.mjs growth  --account <계정.json> --condition <조건.json> --squads <편성.json> [--squad <편성 이름>] --upgrades <후보.json> [--json <결과.json>]
+//   node src/cli.mjs detect-changes --from <커밋> --to <커밋> [--engine <엔진 저장소 경로>] [--json <결과.json>]
 // 종료 코드: 0 성공 · 1 실행 오류 · 2 입력 오류
 import fs from 'node:fs';
 import { suggestSquads } from './core/candidates.mjs';
 import { compareSquads, InputError } from './core/compare.mjs';
 import { compareGrowth } from './core/growth.mjs';
 import { renderReport, renderGrowthReport } from './core/render.mjs';
+import { detectChanges } from './tier/detect.mjs';
 
 const USAGE = [
   '사용법:',
   '  node src/cli.mjs compare --account <계정.json> --condition <조건.json> --squads <편성.json> [--json <결과.json>]',
   '  node src/cli.mjs suggest --account <계정.json> --condition <조건.json> [--limit <후보 수, 기본 30>] [--top <표시 수, 기본 5>] [--json <결과.json>]',
   '  node src/cli.mjs growth  --account <계정.json> --condition <조건.json> --squads <편성.json> [--squad <기준 편성 이름, 기본 첫 편성>] --upgrades <후보.json> [--json <결과.json>]',
+  '  node src/cli.mjs detect-changes --from <엔진 커밋> --to <엔진 커밋> [--engine <엔진 저장소, 기본 vendor/nikke-calc>] [--json <결과.json>]',
 ].join('\n');
 
 function parseArgs(argv) {
@@ -79,6 +82,11 @@ try {
       condition: readJsonFile('condition', opts.condition),
       squads: Array.isArray(squadsDoc) ? squadsDoc : squadsDoc.squads,
     });
+  } else if (command === 'detect-changes') {
+    // 엔진을 부르지 않는다. 결과는 표가 아니라 JSON 그대로 낸다(다음 단계의 입력).
+    if (opts.engine === true) throw new InputError('인자가 빠졌다', [{ path: '--engine', message: '엔진 저장소 경로가 필요하다' }]);
+    report = detectChanges({ from: opts.from, to: opts.to }, { engineDir: opts.engine });
+    render = (r) => JSON.stringify(r, null, 2);
   } else if (command === 'suggest') {
     report = await suggestSquads(
       { account: readJsonFile('account', opts.account), condition: readJsonFile('condition', opts.condition) },
