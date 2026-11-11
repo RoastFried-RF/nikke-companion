@@ -371,9 +371,19 @@
         "사용자가 자기 계정으로 받은 프로필 파일을 변환해 인게임 육성 상태와 대조"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261111T173517-P-008-a1",
+        "verified_tree": "9eed22478354fd73aa6619012b1675ab41d9ad31",
+        "verified_at": "2026-11-11T17:48:03.253Z",
+        "commit": null
+      }
     },
     {
       "id": "P-009",

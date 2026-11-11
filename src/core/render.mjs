@@ -58,6 +58,32 @@ export function renderGrowthReport(report) {
   return out.join('\n');
 }
 
+/** 계정 가져오기 결과(`importProfileFile`)를 텍스트로. */
+export function renderImportReport(report) {
+  const s = report.summary;
+  const out = [
+    `계정: ${report.account.name}${report.account.is_test_data ? '  [검증용 데이터]' : '  [실제 계정 데이터]'}`,
+    `입력: ${report.input.file} (${report.input.format}, 수집 ${report.input.fetched_at ?? '시각 미상'})`,
+    `저장: ${report.output}`,
+    `가져온 니케 ${s.imported}명 (프로필 ${s.roster}개 항목 · 건너뜀 ${s.skipped}개 · 미확인 칸이 있는 니케 ${s.with_unknown}명)`,
+  ];
+  if (report.unknown.length) {
+    out.push('', '미확인으로 남긴 칸:');
+    for (const u of report.unknown) out.push(`  - ${u.nikke}: ${u.fields.join(', ')}`);
+  }
+  if (report.skipped.length) {
+    out.push('', '옮기지 않은 항목:');
+    for (const k of report.skipped) out.push(`  - ${k.name}: ${k.reason}`);
+  }
+  if (report.warnings.length) {
+    out.push('', '알림:');
+    for (const w of report.warnings) out.push(`  - ${w}`);
+  }
+  out.push('', '주의:');
+  for (const c of report.caveats) out.push(`  - ${c}`);
+  return out.join('\n');
+}
+
 export function renderReport(report) {
   const out = headerLines(report);
   if (report.suggestion) {

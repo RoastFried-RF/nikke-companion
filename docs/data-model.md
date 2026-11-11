@@ -9,7 +9,7 @@
   "schema_version": 1,
   "is_test_data": true,            // 필수. 검증용이면 true, 실제 계정이면 false
   "name": "검증용 샘플 계정",
-  "source": "manual",              // manual | import (가져오기는 단계 2)
+  "source": "manual",              // manual | import (§계정 가져오기)
   "updated_at": "2026-11-12T02:00:00+09:00",
   "account": { "console": { } },   // 선택. 엔진 `_account.console` 형식 그대로
   "nikkes": {                      // 여기 있는 이름 = 보유 니케 (엔진 정식 명칭)
@@ -29,6 +29,61 @@
 - 적지 않은 칸은 **미육성 값**으로 계산된다. 모르는 칸은 `unknown`에 적어 결과에 드러나게 한다.
 - 캐릭터 레벨은 계정 상태가 아니다. 콘텐츠가 정한다(솔로 레이드 = 400 고정).
 - 실제 계정 파일은 `data/accounts/`에 둔다(gitignore).
+
+## 계정 가져오기 — `src/core/import-profile.mjs`
+
+엔진의 `scraper/profile_fetch.py`가 만든 육성 프로필(`profiles/<이름>.json`)을 계정 상태로 바꾼다. **사용자가 직접 받아 둔
+파일만 읽는다** — 로그인 세션·쿠키·네트워크는 다루지 않고, 엔진의 `profiles/` 폴더에도 쓰지 않는다.
+
+```bash
+node src/cli.mjs import-profile <프로필.json> [--name <계정 이름>] [--out-dir <폴더>] [--force] [--json <결과.json>]
+```
+
+- `data/accounts/<계정 이름>.json`에 쓴다(gitignore). 이름은 `--name` → 프로필의 `_meta.name` → 입력 파일 이름 순이다.
+  같은 이름의 파일이 있으면 쓰지 않는다(손으로 고친 내용을 지키기 위해). 덮어쓰려면 `--force`.
+- 결과는 `is_test_data: false`, `source: "import"`, `updated_at` = 프로필의 수집 시각. 프로필이 스스로 검증용이라고 밝힌
+  경우(`_meta.is_test_data: true`, 예: `data/samples/profile.sample.json`)에만 `is_test_data: true`로 남긴다.
+- 순수 변환은 `importProfile(프로필, {catalog, optionTable, name, now})` → `{account, skipped, unknown, warnings}`.
+
+| 프로필 | 계정 상태 |
+|---|---|
+| `breakthrough` · `core_enhancement` · `affinity` · `collection_stage` · `favorite_stage` | 그대로. 범위·표기가 맞지 않으면 미확인 |
+| `skill_levels` `{"1","2","3"}` | `[a, b, c]` |
+| `equipment` | 그대로, 주석 키(`_track`)만 뗀다 |
+| `equip_skills`(합산 퍼센트) + `_overload`(부위별 줄 목록) | `overload` `{인게임 이름: [줄별 레벨]}`. 9개 옵션을 모두 적고 줄이 없는 옵션은 `[]` |
+| `_unsynced` | `note`(동기화 소대 밖이었다는 메모) |
+| `_account.console` | `account.console`. `synchro_level`·`cubes`(장착 중 관찰된 보유 하한)는 `account`에 기록만 한다 |
+| `_meta.openid` · `level` · 그 밖의 `_` 키 | 옮기지 않는다 |
+
+- **옮기지 못한 칸은 값을 지어내지 않고 그 니케의 `unknown`에 남긴다.** 이유는 `import.warnings`와 결과의 `warnings`에 적힌다.
+  프로필이 언제나 적는 칸(위 표의 앞 네 줄, `favorite_stage`는 애장품이 있는 니케만)은 없어도 미확인이다.
+- 줄 목록으로 다시 계산한 합이 `equip_skills`와 맞지 않으면(프로필은 표에 없는 수치의 줄을 `_overload`에서 뺀다) 줄 단위로
+  옮기지 않고 `equip_skills`를 그대로 옮긴다. 계산 값은 같지만 줄 수를 세는 기능(후보 생성의 투자 점수, 성장 비교의
+  `overload` 더하기)에는 반영되지 않는다.
+- 엔진이 모르는 이름의 니케는 건너뛰고 `import.skipped`에 남긴다. 하나도 옮기지 못하면 입력 오류다.
+- 계정 문서에는 `import: {format, profile_name, fetched_at, imported_at, skipped, warnings}`가 함께 남는다.
+
+**알려진 한계 — 적지 않은 칸의 계산 값.** 엔진은 인라인 프로필에 **항목이 있는** 니케의 적지 않은 칸을 미육성이 아니라
+기본 스펙 값(돌파 3 · 스킬 10/10/10 · 오버로드 장비 · 우월 코드 4줄 등)으로 계산한다(`runner/spec.py`의 `build_char`·
+`GrowthProfile.layer` — 미육성은 항목이 아예 없는 이름에만 쓰인다. 2026-11-12 실제 엔진으로 확인: 빈 항목 `{}`의 총딜이
+기본 스펙과 같았다). 그래서 가져오기는 칸을 모두 값으로 적어 이 차이에 기대지 않게 하지만, **미확인 칸이 있는 니케는
+실제보다 높게 계산될 수 있다.** 위 §계정 상태의 "적지 않은 칸은 미육성 값으로 계산된다"는 설명도 지금 코드와 맞지 않는다
+(`toEngineProfile`이 미육성 값을 채워 넘기도록 고쳐야 한다 — 이 작업의 범위 밖이라 고치지 않았다).
+
+결과(`importProfileFile`, CLI의 `--json`):
+
+```jsonc
+{
+  "schema_version": 1, "kind": "import", "generated_at": "…",
+  "input": { "file": "…", "format": "nikke-calc profile", "profile_name": "me", "fetched_at": "…" },
+  "output": "data/accounts/me.json",
+  "account": { "name": "me", "is_test_data": false, "source": "import", "updated_at": "…" },
+  "summary": { "roster": 192, "imported": 191, "skipped": 1, "with_unknown": 2, "unknown_fields": { "favorite_stage": 2 } },
+  "unknown": [ { "nikke": "…", "fields": ["favorite_stage"] } ],
+  "skipped": [ { "name": "…", "reason": "엔진이 모르는 니케다 …" } ],
+  "warnings": ["…"], "caveats": ["가져온 값을 인게임 육성 상태와 대조하지 않았다 …"]
+}
+```
 
 ## 전투 조건 — `src/core/condition.mjs`
 

@@ -4,12 +4,14 @@
 //   node src/cli.mjs suggest --account <계정.json> --condition <조건.json> [--limit <후보 수>] [--top <표시 수>] [--json <결과.json>]
 //   node src/cli.mjs growth  --account <계정.json> --condition <조건.json> --squads <편성.json> [--squad <편성 이름>] --upgrades <후보.json> [--json <결과.json>]
 //   node src/cli.mjs detect-changes --from <커밋> --to <커밋> [--engine <엔진 저장소 경로>] [--json <결과.json>]
+//   node src/cli.mjs import-profile <엔진 프로필.json> [--name <계정 이름>] [--out-dir <폴더>] [--force] [--json <결과.json>]
 // 종료 코드: 0 성공 · 1 실행 오류 · 2 입력 오류
 import fs from 'node:fs';
 import { suggestSquads } from './core/candidates.mjs';
 import { compareSquads, InputError } from './core/compare.mjs';
 import { compareGrowth } from './core/growth.mjs';
-import { renderReport, renderGrowthReport } from './core/render.mjs';
+import { importProfileFile } from './core/import-profile.mjs';
+import { renderReport, renderGrowthReport, renderImportReport } from './core/render.mjs';
 import { detectChanges } from './tier/detect.mjs';
 
 const USAGE = [
@@ -18,12 +20,20 @@ const USAGE = [
   '  node src/cli.mjs suggest --account <계정.json> --condition <조건.json> [--limit <후보 수, 기본 30>] [--top <표시 수, 기본 5>] [--json <결과.json>]',
   '  node src/cli.mjs growth  --account <계정.json> --condition <조건.json> --squads <편성.json> [--squad <기준 편성 이름, 기본 첫 편성>] --upgrades <후보.json> [--json <결과.json>]',
   '  node src/cli.mjs detect-changes --from <엔진 커밋> --to <엔진 커밋> [--engine <엔진 저장소, 기본 vendor/nikke-calc>] [--json <결과.json>]',
+  '  node src/cli.mjs import-profile <엔진 프로필.json> [--name <계정 이름, 기본 프로필 이름>] [--out-dir <폴더, 기본 data/accounts>] [--force] [--json <결과.json>]',
 ].join('\n');
 
+/** 값을 받지 않는 인자. 뒤에 오는 낱말을 값으로 삼키지 않는다. */
+const FLAGS = new Set(['force']);
+
+/** `--이름 값`은 opts에, 이름 없는 낱말은 차례대로 opts._에 담는다. */
 function parseArgs(argv) {
-  const opts = {};
+  const opts = { _: [] };
   for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i].startsWith('--')) opts[argv[i].slice(2)] = argv[i + 1]?.startsWith('--') || argv[i + 1] === undefined ? true : argv[++i];
+    const key = argv[i].startsWith('--') ? argv[i].slice(2) : null;
+    if (key === null) opts._.push(argv[i]);
+    else if (FLAGS.has(key)) opts[key] = true;
+    else opts[key] = argv[i + 1]?.startsWith('--') || argv[i + 1] === undefined ? true : argv[++i];
   }
   return opts;
 }
@@ -87,6 +97,14 @@ try {
     if (opts.engine === true) throw new InputError('인자가 빠졌다', [{ path: '--engine', message: '엔진 저장소 경로가 필요하다' }]);
     report = detectChanges({ from: opts.from, to: opts.to }, { engineDir: opts.engine });
     render = (r) => JSON.stringify(r, null, 2);
+  } else if (command === 'import-profile') {
+    // 엔진을 부르지 않는다. 사용자가 직접 받아 둔 프로필 파일만 읽는다(로그인 세션·쿠키는 다루지 않는다).
+    for (const key of ['name', 'out-dir', 'engine']) {
+      if (opts[key] === true) throw new InputError('인자가 빠졌다', [{ path: `--${key}`, message: '값이 필요하다' }]);
+    }
+    if (opts._.length > 1) throw new InputError('인자가 잘못됐다', [{ path: opts._[1], message: '프로필 파일은 하나만 받는다' }]);
+    report = importProfileFile({ file: opts._[0], name: opts.name, outDir: opts['out-dir'], force: opts.force === true }, { engineDir: opts.engine });
+    render = renderImportReport;
   } else if (command === 'suggest') {
     report = await suggestSquads(
       { account: readJsonFile('account', opts.account), condition: readJsonFile('condition', opts.condition) },
