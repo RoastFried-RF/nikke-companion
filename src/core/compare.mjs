@@ -31,7 +31,7 @@ export function squadProblems(squad, account, catalog) {
 }
 
 /** 계산은 하되 결과와 함께 알려야 하는 것. */
-function squadNotes(squad, account, catalog) {
+export function squadNotes(squad, account, catalog) {
   const notes = [];
   const stages = new Set(squad.members.map((m) => catalog.nikkes[m]?.burst_stage));
   if (!stages.has('A')) {

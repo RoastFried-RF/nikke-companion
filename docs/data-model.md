@@ -96,3 +96,52 @@
 - `rejected`: 시뮬 전에 걸러진 편성(미보유·중복·인원 수·모르는 이름). 엔진에 보내지 않는다.
 - `failed`: 엔진이 오류를 낸 편성. 순위에 넣지 않는다.
 - 총딜은 정수 원값을 그대로 둔다. 단위 표기는 표시 단계의 일이다.
+
+## 성장 투자 비교 — `src/core/growth.mjs`
+
+업그레이드 후보를 계정 상태의 **복사본**에 하나씩 가상 적용하고, 기준 편성 하나의 총딜 변화를 계산해 증가율 순으로
+순위를 매긴다. 계정 문서는 바뀌지 않는다. 재화·비용은 다루지 않는다 — 후보는 입력이다.
+
+```jsonc
+// 업그레이드 후보 (data/samples/upgrades.sample.json)
+{ "upgrades": [
+  { "name": "헬름 스킬 10/10/10", "nikke": "헬름", "set": { "skill_levels": [10, 10, 10] } },
+  { "name": "크라운 공격력 +2줄", "nikke": "크라운", "add": { "overload": { "공격력": 2 } } },
+  { "name": "묶음", "changes": [ { "nikke": "헬름", "add": { "core_enhancement": 4 } },
+                                  { "nikke": "앨리스", "add": { "overload": { "우월코드": 1 } } } ] }
+] }
+```
+
+- `set` — 육성 칸(계정 상태의 칸 이름)을 그 값으로 만든다. 객체 칸은 적은 키만 바뀐다(`overload`는 적은 옵션만).
+- `add` — 현재 값에 더한다. `skill_levels`(`[a, b, c]`)·`breakthrough`·`core_enhancement`·`overload`(줄 수, 또는
+  줄별 레벨끼리 이어 붙이기)만 된다. 적지 않은 칸은 미육성 값(스킬 1/1/1, 0, 옵션 없음)에서 더한다.
+- 오버로드 옵션은 표기가 달라도(`우월코드` ↔ `우월 코드 대미지` ↔ `element_bonus`) 같은 옵션으로 합친다.
+- 미확인(`unknown`) 칸: `set`은 계산하되 적용 전을 미육성으로 본 것이라 증가율이 과대일 수 있다는 메모가 붙고,
+  `add`는 더할 기준이 없어 제외한다.
+
+`compareGrowth({account, condition, squad, upgrades})`(CLI `growth --squads <편성.json> [--squad <이름>] --upgrades <후보.json>`,
+`--squad`를 주지 않으면 첫 편성)의 결과:
+
+```jsonc
+{
+  "schema_version": 1, "kind": "growth",
+  "generated_at": "…", "account": { }, "condition": { }, "assumptions": [], "engine": { },   // 비교 결과와 같다
+  "baseline": { "name": "A", "total_damage": 0, "members": [ { "name": "…", "damage": 0, "share": 0.2 } ],
+                "notes": [], "engine_warnings": [], "ungrown_members": [] },
+  "ranking": [ { "rank": 1, "name": "헬름 스킬 10/10/10",
+                 "changes": [ { "nikke": "헬름", "field": "skill_levels", "before": [7, 7, 10], "after": [10, 10, 10] } ],
+                 "total_before": 0, "total_after": 0, "gain": 0, "gain_rate": 0.0204,
+                 "members": [ { "name": "…", "damage": 0, "share": 0.2, "gain": 0 } ],
+                 "notes": [], "engine_warnings": [] } ],
+  "rejected": [ { "name": "…", "reasons": ["기준 편성에 없는 니케만 바꾼다(프리카) …"] } ],
+  "failed":   [ { "name": "…", "changes": [], "error": { "type": "invalid_input", "message": "…", "path": "/…" } } ],
+  "caveats": ["기준 편성 하나에서의 총딜 변화다 …", "재화·비용은 고려하지 않았다 …"]
+}
+```
+
+- `gain_rate` = (`total_after` − `total_before`) / `total_before`. 0.05 = 5% 증가, 음수 = 감소. 기준 총딜이 0이면 `null`.
+- `changes[].before`가 `null`이면 적지 않았거나 미확인이던 칸이다. `members[].gain`은 그 멤버 딜의 증감이다.
+- `rejected`: 엔진에 보내지 않은 후보 — 잘못 적은 후보, 미보유 니케, 적용 후 값이 범위 밖, 기준 편성에 없는 니케만
+  바꾸는 후보, 현재 상태와 같은 후보.
+- 기준 편성 자체에 문제가 있거나 엔진이 기준 편성을 계산하지 못하면 결과 없이 입력 오류다.
+- 엔진 호출은 기준 1건 + 계산한 후보 수다.

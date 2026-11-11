@@ -21,3 +21,5 @@
 {"at":"2026-11-11T17:15:54.099Z","event":"manual_verify","task":"H-002","passed":true,"tree":"75211f1cc80d56b8ac29c40d4f47d4933918e087","reason":null}
 {"at":"2026-11-11T17:15:54.284Z","event":"checkpoint","task":"H-002","commit":"4b4e42833e63afc8df617dc073af2eacd5adbff3","tree":"75211f1cc80d56b8ac29c40d4f47d4933918e087"}
 {"at":"2026-11-11T17:16:04.424Z","event":"session_start","model":"claude-fable-5-2","head":"4b4e42833e63afc8df617dc073af2eacd5adbff3","git_status":["M .harness/runs/log.jsonl"]}
+{"at":"2026-11-11T17:22:22.572Z","event":"checkpoint","task":"P-005","commit":"de0ff50870f0aaf089252ee34144a06d1cfc4b32","tree":"d80e4a132a516870bb2eca392ab1986cae21123b"}
+{"at":"2026-11-11T17:22:22.598Z","event":"verified","task":"P-005","attempt":1,"run":".harness/runs/20261111T171604-P-005-a1","tree":"d80e4a132a516870bb2eca392ab1986cae21123b","reason":null}

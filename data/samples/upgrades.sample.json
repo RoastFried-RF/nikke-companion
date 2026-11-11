@@ -1,0 +1,10 @@
+{
+  "upgrades": [
+    { "name": "헬름 스킬 10/10/10", "nikke": "헬름", "set": { "skill_levels": [10, 10, 10] } },
+    { "name": "헬름 코어 강화 +4", "nikke": "헬름", "add": { "core_enhancement": 4 } },
+    { "name": "크라운 공격력 +2줄", "nikke": "크라운", "add": { "overload": { "공격력": 2 } } },
+    { "name": "앨리스 우월코드 +1줄", "nikke": "앨리스", "add": { "overload": { "우월코드": 1 } } },
+    { "name": "프리카 코어 강화 7 (기준 편성 밖)", "nikke": "프리카", "set": { "core_enhancement": 7 } },
+    { "name": "앨리스 스킬 +1 (범위 밖)", "nikke": "앨리스", "add": { "skill_levels": [1, 0, 0] } }
+  ]
+}

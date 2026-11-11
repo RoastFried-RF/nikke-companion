@@ -1,0 +1,30 @@
+{
+  "task": "P-006",
+  "started_at": "2026-11-11T17:28:59.925Z",
+  "head": "de0ff50870f0aaf089252ee34144a06d1cfc4b32",
+  "tree": "b89038ca20f819d0dee57a166c9bfd3510c965df",
+  "dirty": true,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "unit",
+      "cmd": "node --test tests/unit/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 204,
+      "log": "verify-1-unit.log"
+    },
+    {
+      "name": "integration",
+      "cmd": "node --test tests/integration/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 17438,
+      "log": "verify-2-integration.log"
+    }
+  ],
+  "passed": true,
+  "reason": null,
+  "tree_after": "b89038ca20f819d0dee57a166c9bfd3510c965df",
+  "finished_at": "2026-11-11T17:29:17.844Z"
+}
