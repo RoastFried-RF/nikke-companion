@@ -59,6 +59,7 @@ fn long_sim(i: usize) -> Value {
 mod processes {
     use std::collections::{HashMap, HashSet};
     use std::mem::size_of;
+    use std::sync::Mutex;
 
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -101,14 +102,30 @@ mod processes {
         found
     }
 
-    /// 이 테스트 프로세스의 자손들.
+    /// 테스트를 시작할 때 이미 있던 프로세스들. 프로세스 목록은 부모의 **번호**만 알려 주는데 Windows는 끝난 프로세스의
+    /// 번호를 다시 쓴다 — 오래전에 끝난 부모의 번호를 이 테스트의 자식이 물려받으면, 그 부모가 띄웠던 남의 프로세스
+    /// (실제로 Overwolf 여덟 개가 그랬다)가 이 테스트의 자손으로 잘못 세어진다. 시작 전에 있던 프로세스는 자손일 수 없다.
+    static BASELINE: Mutex<Option<HashSet<u32>>> = Mutex::new(None);
+
+    /// 지금 있는 프로세스를 "시작 전에 있던 것"으로 적어 둔다. 테스트마다 무엇을 띄우기 전에 부른다.
+    pub fn mark_start() {
+        let now: HashSet<u32> = all().into_keys().collect();
+        *BASELINE.lock().unwrap_or_else(|e| e.into_inner()) = Some(now);
+    }
+
+    /// 이 테스트 프로세스의 자손들(테스트를 시작한 뒤에 생긴 것만).
     pub fn spawned_by_this_test() -> Vec<(u32, String)> {
         let all = all();
+        let baseline = BASELINE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_default();
         let mut family: HashSet<u32> = HashSet::from([std::process::id()]);
         loop {
             let before = family.len();
             for (pid, (parent, _)) in &all {
-                if family.contains(parent) {
+                if family.contains(parent) && !baseline.contains(pid) {
                     family.insert(*pid);
                 }
             }
@@ -139,6 +156,8 @@ mod processes {
 /// 다른 OS에서는 프로세스 목록을 보지 않는다(돌아오는 시간과 오류만 확인한다).
 #[cfg(not(windows))]
 mod processes {
+    pub fn mark_start() {}
+
     pub fn spawned_by_this_test() -> Vec<(u32, String)> {
         Vec::new()
     }
@@ -215,6 +234,7 @@ fn assert_nothing_left(recorded: &[(u32, String)]) {
 #[test]
 fn stopping_a_long_real_batch_returns_within_seconds_and_leaves_no_engine_process() {
     let _serial = serial();
+    processes::mark_start();
     assert_eq!(processes::spawned_by_this_test(), Vec::new(), "시작 전에 띄워 둔 프로세스가 있다");
 
     // 40건 × 수 초: 멈추지 않으면 프로세스 4개로도 한참 걸린다.
@@ -306,6 +326,7 @@ impl Drop for FakeEngine {
 #[test]
 fn stopping_also_ends_processes_the_engine_started() {
     let _serial = serial();
+    processes::mark_start();
     assert_eq!(processes::spawned_by_this_test(), Vec::new(), "시작 전에 띄워 둔 프로세스가 있다");
 
     let fake = FakeEngine::new(FAKE_SIM_WITH_CHILD);
