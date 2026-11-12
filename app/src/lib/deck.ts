@@ -83,6 +83,8 @@ export interface DeckStore {
   removeSaved(id: string): Promise<void>;
   /** 요격전 추천의 편성 한 줄을 덱 빌더에 넘긴다. */
   openRanking(entry: RankingEntry, bossId: string | null): void;
+  /** 편성(자리 순서 그대로)과 상대의 열쇠를 덱 빌더에 넘긴다(레이드 5덱의 「덱 빌더에서 열기」). */
+  openDeck(members: Slots, opponent: string | null): void;
 }
 
 const KEY: InjectionKey<DeckStore> = Symbol('decks');
@@ -157,6 +159,10 @@ export function createDeckStore(shared: Shared): { store: DeckStore; stop: () =>
       const picked = deckFromRanking(entry, bossId) as { members: Slots; opponent: string | null };
       handed += 1;
       incoming.value = { members: picked.members, opponent: picked.opponent, seq: handed };
+    },
+    openDeck: (members, opponent) => {
+      handed += 1;
+      incoming.value = { members: normalizeSlots(members), opponent, seq: handed };
     },
   };
 

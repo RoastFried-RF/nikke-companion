@@ -47,6 +47,8 @@ export const TOOL_TABS = [
   { key: 'suggest', label: '추천' },
   { key: 'deck', label: '덱 빌더' },
   { key: 'efficiency', label: '육성 효율' },
+  // P-014: 솔로 레이드·유니온 레이드 — 보유 니케를 겹치지 않게 다섯 덱으로.
+  { key: 'raid', label: '레이드 5덱' },
   { key: 'compare', label: '비교' },
   { key: 'growth', label: '성장' },
 ] as const;
@@ -60,6 +62,8 @@ export const RUN_SUGGEST = 'tools-suggest';
 export const RUN_DECK = 'tools-deck';
 /** 편성 도구의 육성 효율이 돌리는 계산의 이름(효율표·오버로드 바꿔 보기·큐브 비교). */
 export const RUN_EFFICIENCY = 'tools-efficiency';
+/** 편성 도구의 레이드 5덱이 돌리는 계산의 이름. */
+export const RUN_RAID = 'tools-raid';
 
 /**
  * 계산을 돌리는 화면의 이름(useEngineRun의 이름) → 메뉴의 어느 화면인가. 메뉴에 「계산 중」을 표시하는 데 쓴다.
@@ -68,7 +72,7 @@ export const RUN_EFFICIENCY = 'tools-efficiency';
 export function pageOfRun(run: string | null | undefined): PageKey | null {
   if (!run) return null;
   if (run === RUN_INTERCEPT) return 'intercept';
-  if (run === RUN_SUGGEST || run === RUN_DECK || run === RUN_EFFICIENCY) return 'tools';
+  if (run === RUN_SUGGEST || run === RUN_DECK || run === RUN_EFFICIENCY || run === RUN_RAID) return 'tools';
   return ADVANCED_TABS.some((t) => t.key === run) ? 'settings' : null;
 }
 

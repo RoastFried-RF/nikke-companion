@@ -2139,12 +2139,20 @@
       ],
       "manual_checks": [],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
+      "status": "done",
+      "attempts": 1,
       "agent_errors": 0,
       "blocked_reason": null,
       "resume_condition": null,
-      "notes": "2026-11-12: 요격전 우선으로 보류했다가, 사용자가 커뮤니티 도구의 기능을 모두 가져오라고 해 다시 넣었다(레츠도로의 솔레 덱·유레 덱 참고). 화면 조건을 더했다."
+      "notes": "2026-11-12: 요격전 우선으로 보류했다가, 사용자가 커뮤니티 도구의 기능을 모두 가져오라고 해 다시 넣었다(레츠도로의 솔레 덱·유레 덱 참고). 화면 조건을 더했다.",
+      "last_failure": null,
+      "manual_status": null,
+      "evidence": {
+        "run": ".harness/runs/20261112T151039-P-014-a1",
+        "verified_tree": "22578197adf5c44cb170c8b2018eddce59009858",
+        "verified_at": "2026-11-12T15:37:25.471Z",
+        "commit": null
+      }
     }
   ]
 }

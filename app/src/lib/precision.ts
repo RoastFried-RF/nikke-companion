@@ -6,6 +6,7 @@
 
 import { DEFAULT_BUDGET } from '@core/candidates.mjs';
 import { DEFAULT_INTERCEPT_BUDGET } from '@core/intercept.mjs';
+import { DEFAULT_UNION_BUDGET } from '@core/union.mjs';
 import { recall, remember } from './remember';
 
 export type PrecisionKey = 'fast' | 'normal' | 'thorough';
@@ -45,6 +46,9 @@ export const INTERCEPT_PRECISION: readonly PrecisionChoice[] = choices({ fast: 6
 
 /** 편성 도구의 추천(조건 하나). 「꼼꼼히」가 계산 코드의 기본값이다. */
 export const SUGGEST_PRECISION: readonly PrecisionChoice[] = choices({ fast: 40, normal: 80, thorough: DEFAULT_BUDGET });
+
+/** 편성 도구의 레이드 5덱(다섯 덱의 후보 + 자리 순서). 「보통」이 계산 코드의 기본값이다. */
+export const RAID_PRECISION: readonly PrecisionChoice[] = choices({ fast: 40, normal: DEFAULT_UNION_BUDGET, thorough: 200 });
 
 /** 처음 고르는 정밀도. */
 export const DEFAULT_PRECISION: PrecisionKey = 'normal';

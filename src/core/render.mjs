@@ -175,6 +175,57 @@ export function renderInterceptReport(report) {
   return out.join('\n');
 }
 
+/** 레이드 5덱 결과(`allocateDecks` — docs/data-model.md §레이드 5덱)를 텍스트로. */
+export function renderUnionReport(report) {
+  const s = report.search;
+  const out = [
+    `계정: ${report.account.name ?? '(이름 없음)'}${report.account.is_test_data ? '  [검증용 데이터]' : ''}`,
+    `엔진: ${report.engine?.repo ?? '?'} @ ${report.engine?.commit?.slice(0, 8) ?? '버전 미확인'}`,
+    ...cacheLines(report.cache),
+    `탐색: 시뮬 ${s.sims}건 / 예산 ${s.budget}건 (후보 계산 ${s.stage1.requested}건${s.stage2 ? ` + 자리 순서 ${s.stage2.requested}건` : ' · 자리 순서 탐색 끔'})` +
+      (s.stage1.skipped > 0 ? ` · 예산이 모자라 못 본 후보 계산 ${s.stage1.skipped}건` : ''),
+    '가정:',
+    ...report.assumptions.map((a) => `  - ${a}`),
+    '',
+    `덱 ${report.requested}개 중 ${report.made}개 · 합계 ${unit(report.total_damage)} (${num(report.total_damage)})`,
+  ];
+  if (report.shortage) out.push(`  !! ${report.shortage.text}`);
+  for (const d of report.decks) {
+    const lock = d.lock === 'full' ? '  [고정]' : d.lock === 'partial' ? '  [일부 고정]' : '';
+    const cond = report.conditions.length > 1 ? `  (조건 ${d.condition_index + 1})` : '';
+    if (d.status !== 'computed') {
+      out.push('', `덱 ${d.deck}${lock}${cond}  ${d.status === 'failed' ? '계산하지 못함' : '빈 덱'} — ${d.reason}`);
+      if (d.locked) out.push(`      고정: ${d.locked.map((m) => m ?? '(빈 자리)').join(' / ')}`);
+      continue;
+    }
+    out.push('', `덱 ${d.deck}${lock}${cond}  총딜 ${unit(d.total_damage)} (${num(d.total_damage)})`);
+    for (const m of d.members) {
+      out.push(`      ${pct(m.share).padStart(6)}  ${padStartWide(unit(m.damage), 10)}  ${num(m.damage).padStart(15)}  ${m.name}`);
+    }
+    for (const n of d.notes) out.push(`      ! ${n}`);
+    if (d.ungrown_members.length) out.push(`      ! 육성 정보가 비어 미육성으로 계산: ${d.ungrown_members.join(', ')}`);
+  }
+  if (report.conditions.length > 1) {
+    out.push('', '조건:');
+    for (const c of report.conditions) {
+      const what = c.condition.boss ?? (c.condition.enemy?.code ? `적 속성 ${c.condition.enemy.code}` : '엔진 기본 적');
+      out.push(`  조건 ${c.index + 1} (덱 ${c.decks.join(', ')}): ${what}`);
+    }
+  }
+  out.push('', `쓰지 않은 보유 니케 ${report.unused.length}명${report.unused.length ? `: ${report.unused.join(', ')}` : ''}`);
+  if (report.rejected.length) {
+    out.push('', '계산하지 않은 편성:');
+    for (const r of report.rejected) out.push(`  - ${r.name}: ${r.reasons.join(' / ')}`);
+  }
+  if (report.failed.length) {
+    out.push('', '엔진이 계산하지 못한 편성:');
+    for (const f of report.failed) out.push(`  - ${f.name}: ${f.error.message}${f.error.path ? ` (${f.error.path})` : ''}`);
+  }
+  out.push('', '주의:');
+  for (const c of report.caveats) out.push(`  - ${c}`);
+  return out.join('\n');
+}
+
 export function renderReport(report) {
   const out = headerLines(report);
   if (report.suggestion) {

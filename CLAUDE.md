@@ -25,7 +25,7 @@ node scripts/harness-selftest.mjs        # 하네스 자체 검증 (모델 호�
 node src/cli.mjs compare --account data/samples/account.sample.json --condition data/samples/condition.solo-raid.json --squads data/samples/squads.sample.json
 ```
 
-`compare`·`suggest`·`growth`·`tier`·`intercept`는 시뮬 결과를 `data/cache/sim/`(gitignore)에 캐시한다. `--no-cache`로 끄고, 폴더를 지우면
+`compare`·`suggest`·`growth`·`tier`·`intercept`·`union`은 시뮬 결과를 `data/cache/sim/`(gitignore)에 캐시한다. `--no-cache`로 끄고, 폴더를 지우면
 비워진다(`docs/data-model.md` §시뮬 결과 캐시).
 `suggest`는 상위 조합의 배치 순서도 탐색한다(2단계). `--no-refine`으로 끄고, `--budget <시뮬 횟수>`(기본 120)로 전체
 시뮬 횟수를 묶는다(`docs/data-model.md` §배치 탐색).
@@ -66,7 +66,7 @@ npm --prefix app run fixture                              # 컴포넌트 테스�
 ```
 
 **창이 둘이다**(P-027 — `app/README.md` §창 둘 — 데스크톱 앱과 오버레이): **데스크톱 앱 창**(`app` — 테두리가 있는 보통 창, 1100×720,
-`app/src/App.vue`)이 전부 한다 — 왼쪽 메뉴의 홈 · 요격전 · 내 니케 · 편성 도구 · 티어 · 설정(계정 연결 · 오버레이 · 계산 도구 ·
+`app/src/App.vue`)이 전부 한다 — 왼쪽 메뉴의 홈 · 요격전 · 내 니케 · 편성 도구(추천 · 덱 빌더 · 육성 효율 · 레이드 5덱 · 비교 · 성장) · 티어 · 설정(계정 연결 · 오버레이 · 계산 도구 ·
 다른 도구 · 고급). **오버레이 창**(`main` — 게임 위의 작은 위젯, `app/src/Overlay.vue`)은 마지막 요격전 추천만 보여 준다. 권한도 창마다 따로다
 (`src-tauri/capabilities/app.json` 명령 50개 / `overlay.json` 명령 15개 — 결과·상태 읽기와 자기 창의 조작). 앱을 실행하면 앱 창이 뜨고 오버레이는
 설정대로 뜬다(앱과 함께 — 기본 · 게임을 찾았을 때 · 직접). **앱 창을 닫으면 앱이 끝난다**(오버레이 창은 닫히지 않고 숨는다. 끝내기
@@ -162,6 +162,25 @@ node --test tests/unit/journal.test.mjs tests/unit/marks.test.mjs tests/unit/lin
 node --test tests/integration/exclude.engine.test.mjs     # 실제 엔진(약 25초): 「안 씀」을 뺀 편성 추천·요격전 추천(뺀 사실이 결과에 남는다), 빼지 않은 계산은 그대로
 npm --prefix app test -- DailyTools                       # 화면(가짜 backend): 계정 바꾸기·잠금·숨기기, 표시와 거르기·추천에서 빼기, 기록장, 도구 목록(여는 것은 목록의 id뿐)
 cargo test --manifest-path app/src-tauri/Cargo.toml --lib tool_links   # 목록에 없는 것(주소·경로·프로그램)은 열지 않는다(브라우저를 띄우지 않고 본다)
+```
+
+**레이드 5덱**(P-014 — `app/README.md` §레이드 5덱, 형식·규칙은 `docs/data-model.md` §레이드 5덱): 편성 도구의 「레이드 5덱」 탭과 CLI `union` —
+솔로 레이드·유니온 레이드처럼 한 니케를 한 덱에만 쓰는 콘텐츠에서 보유 니케를 겹치지 않게 여러 덱(기본 5)에 나눠 덱별 총딜의 합이 큰
+배분을 찾는다. 규칙은 순수 모듈 `src/core/union.mjs`: ① 덱 순서대로 **남은** 니케에서 기존 후보 생성기로 조합을 만들고 덱마다 투자 점수 합
+1위 조합(뼈대)의 니케를 다음 덱의 풀에서 뺀다(`planCandidates`) ② 시뮬 예산 안에서 계산한다(고정한 덱 → 뼈대 → 나머지를 덱마다 돌아가며)
+③ **계산한 후보 안에서** 겹치지 않는 묶음 중 덱 수가 가장 많고 합계가 가장 큰 것을 정확히 고른다(`solveAllocation` — 단위 테스트가 무차별
+전수 탐색과 견준다) ④ 남은 예산으로 고른 덱의 자리 순서를 바꿔 본다. 조건은 하나(모든 덱에) 또는 덱별 배열, 덱 전체·일부 자리를 고정할 수
+있다(`--locked` — 화면은 덱 전체 고정만). 화면은 `app/src/views/RaidDecks.vue`(덱 다섯의 초상화 줄 · 덱별 총딜 막대 · 합계 · 쓰지 않은 보유
+니케 · 덱 고정 · 덱 빌더에서 열기). **덱을 다 만들 수 없으면 만든 만큼만 돌려주고 까닭(어느 버스트 단계가 모자라는지)을 `shortage`에 적는다,
+채우지 못한 덱은 0이 아니라 「빈 덱」**이다. **레이드의 점수가 아니다** — 보스 패턴·점수 규칙은 「지원하지 않음」으로 화면과 결과
+(`unsupported`)에 적는다. 엔진의 솔로 레이드 프리셋은 S40 하나다 — 다른 보스는 「속성만 정하기」로 계산하고 미확인 값을 표시한다
+(유니온 레이드의 보스 값도 저장소에 없다 — 지어내지 않는다).
+
+```bash
+node src/cli.mjs union --account data/samples/account.large.sample.json --condition data/samples/condition.solo-raid.json --budget 12   # 큰 시험 계정으로 다섯 덱(약 10초). --decks · --locked <고정.json> · --no-refine · --exclude
+node --test tests/unit/union.test.mjs                     # 순수 함수: 겹치지 않는 묶음 고르기(전수 탐색과 대조)·모자란 까닭·고정 읽기·일부 고정한 덱 채우기·후보 만들기·예산·결정론·덱별 조건
+node --test tests/integration/union.engine.test.mjs       # 실제 엔진(약 20초): 큰 시험 계정으로 겹치지 않는 다섯 덱·캐시·덱 고정·속성만 정한 상대
+npm --prefix app test -- RaidDecks                        # 화면(가짜 backend): 상대 하나·덱마다 상대, 덱 줄·막대·합계·쓰지 않은 니케, 모자란 까닭, 고정, 덱 빌더에서 열기, 진행·중단·오류
 ```
 
 **계산기는 만들지 않았다**(P-034 — 조사 결과 `docs/calculators.md`, 형식은 `docs/data-model.md` §계산기 출처 점검): 소장품 강화 · 모집 확률

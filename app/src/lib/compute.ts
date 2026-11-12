@@ -10,6 +10,7 @@ import { compareOrders, evaluateDeck, swapOne } from '@core/deck.mjs';
 import { compareCubes, efficiencyTable, tryOverload } from '@core/efficiency.mjs';
 import { compareGrowth } from '@core/growth.mjs';
 import { DEFAULT_INTERCEPT_BUDGET, DEFAULT_INTERCEPT_TOP, recommendIntercept } from '@core/intercept.mjs';
+import { allocateDecks } from '@core/union.mjs';
 import type {
   BossProgress,
   BurstReport,
@@ -25,6 +26,7 @@ import type {
   InterceptReport,
   OverloadPart,
   OverloadTrialReport,
+  RaidDecksReport,
   SearchStage,
   SimCacheStore,
 } from '../types';
@@ -381,6 +383,36 @@ export async function runDeckOrder(input: DeckInput & { limit?: number }, deps: 
   try {
     const report = await compareOrders({ account: input.account as object, opponent: input.opponent, members: input.members }, { limit: input.limit }, coreDeps(deps));
     return report as unknown as DeckOrderReport;
+  } catch (e) {
+    throw asComputeError(e);
+  }
+}
+
+// ── 레이드 5덱(P-014) ─────────────────────────────────────────────────────────
+// 규칙은 전부 루트의 src/core/union.mjs에 있다(후보 만들기 · 겹치지 않는 묶음 고르기 · 자리 순서). 여기서는 런타임을 넘겨 부를 뿐이다.
+
+/** 레이드 5덱의 입력: 읽어 둔 계정, 조건 하나(모든 덱에) 또는 덱별 조건, 고정한 덱. */
+export interface RaidInput {
+  account: unknown;
+  /** 조건 하나(솔로 레이드 — 상대 하나에 다섯 덱) 또는 덱 수만큼의 배열(덱마다 다른 상대). */
+  condition: Record<string, unknown> | Record<string, unknown>[];
+  decks?: number;
+  /** 계산 횟수의 상한. */
+  budget?: number;
+  /** 고정한 덱(덱 번호와 다섯 자리). 그 덱은 그대로 두고 나머지만 찾는다. */
+  locked?: { deck: number; members: (string | null)[] }[];
+  exclude?: string[];
+}
+
+/** 보유 니케를 겹치지 않게 여러 덱에 나눠 합계 총딜이 큰 배분을 찾는다. */
+export async function runRaidDecks(input: RaidInput, deps: ComputeDeps = defaultDeps): Promise<RaidDecksReport> {
+  try {
+    const report = await allocateDecks(
+      { account: input.account as object, condition: input.condition },
+      { decks: input.decks, budget: input.budget, ...(input.locked && input.locked.length ? { locked: input.locked } : {}), ...excludeOption(input.exclude) },
+      coreDeps(deps),
+    );
+    return report as unknown as RaidDecksReport;
   } catch (e) {
     throw asComputeError(e);
   }

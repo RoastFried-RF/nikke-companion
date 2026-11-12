@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// 편성 도구(데스크톱 앱): 추천 · 덱 빌더 · 육성 효율 · 비교 · 성장.
+// 편성 도구(데스크톱 앱): 추천 · 덱 빌더 · 육성 효율 · 레이드 5덱 · 비교 · 성장.
 //   추천 — 기본 계정의 니케로 총딜이 큰 편성을 찾는다(내장 전투 조건). 단추 하나 + 정밀도.
 //   덱 빌더 — 초상화로 다섯 자리를 직접 짜고 바로 계산한다(views/DeckBuilder.vue — P-030).
 //   육성 효율 — 무엇을 올리면 딜이 얼마나 오르는지(효율표), 오버로드 옵션·큐브 바꿔 보기(views/GrowthLab.vue — P-031).
+//   레이드 5덱 — 보유 니케를 겹치지 않게 다섯 덱으로 나눈다(솔로 레이드·유니온 레이드 — views/RaidDecks.vue, P-014).
 //   비교 · 성장 — 견줄 편성과 육성 선택지를 직접 골라야 하는 계산이다. 고르는 곳은 설정의 「고급」이고,
 //                 거기서 계산하거나 불러온 결과가 여기에 새 부품(니케 타일·딜 막대)으로 보인다.
 // 계산은 루트의 suggestSquads(CLI의 `suggest`와 같은 함수)가 한다 — 화면에 계산 규칙을 다시 쓰지 않는다.
@@ -22,6 +23,7 @@ import ProgressPanel from '../ui/ProgressPanel.vue';
 import DeckBuilder from '../views/DeckBuilder.vue';
 import GrowthBoard from '../views/GrowthBoard.vue';
 import GrowthLab from '../views/GrowthLab.vue';
+import RaidDecks from '../views/RaidDecks.vue';
 import SquadBoard from '../views/SquadBoard.vue';
 
 const PRECISION_KEY = 'tools.precision';
@@ -42,11 +44,14 @@ const tab = computed<ToolTab>(() => nav?.tool.value ?? ownTab.value);
 const deckSeen = ref(false);
 /** 육성 효율 탭도 같다. */
 const labSeen = ref(false);
+/** 레이드 5덱 탭도 같다. */
+const raidSeen = ref(false);
 watch(
   tab,
   (now) => {
     if (now === 'deck') deckSeen.value = true;
     if (now === 'efficiency') labSeen.value = true;
+    if (now === 'raid') raidSeen.value = true;
   },
   { immediate: true },
 );
@@ -231,6 +236,10 @@ async function run(): Promise<void> {
     <!-- 육성 효율 ─────────────────────────────────────────────────────────── -->
     <!-- 덱 빌더처럼 숨기기만 한다(계산이 도는 동안 다른 탭을 봐도 끊기지 않고, 바꿔 보던 옵션이 남는다). -->
     <GrowthLab v-if="labSeen" v-show="tab === 'efficiency'" />
+
+    <!-- 레이드 5덱 ────────────────────────────────────────────────────────── -->
+    <!-- 덱 빌더처럼 숨기기만 한다(계산이 도는 동안 다른 탭을 봐도 끊기지 않고, 고정한 덱이 남는다). -->
+    <RaidDecks v-if="raidSeen" v-show="tab === 'raid'" />
 
     <!-- 비교 ─────────────────────────────────────────────────────────────── -->
     <template v-if="tab === 'compare'">

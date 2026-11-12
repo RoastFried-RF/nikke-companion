@@ -1348,3 +1348,87 @@ export interface CubeReport {
   cache?: CacheStats | null;
   caveats: string[];
 }
+
+// ── 레이드 5덱(P-014) ─────────────────────────────────────────────────────────
+// 정본은 docs/data-model.md §레이드 5덱과 src/core/union.mjs다.
+
+/** 버스트 단계별 니케 수. */
+export interface StageCounts {
+  1: number;
+  2: number;
+  3: number;
+  /** 어느 단계에서나 버스트를 쓰는 니케. */
+  A: number;
+  unknown: number;
+}
+
+/** 덱 하나. 채우지 못한 덱은 `empty`, 고정했지만 계산하지 못한 덱은 `failed`다(0이 아니다). */
+export interface RaidDeck {
+  /** 덱 번호(1부터). */
+  deck: number;
+  lock: 'none' | 'full' | 'partial';
+  /** 고정한 자리(이름 또는 null). 고정하지 않았으면 null. */
+  locked: (string | null)[] | null;
+  /** 이 덱의 조건(결과의 `conditions`에서의 번호). */
+  condition_index: number;
+  status: 'computed' | 'empty' | 'failed';
+  members: ReportMember[];
+  total_damage: number | null;
+  notes: string[];
+  engine_warnings: string[];
+  ungrown_members: string[];
+  placement: PlacementResult | null;
+  /** 채우지 못했거나 계산하지 못한 까닭. */
+  reason: string | null;
+}
+
+/** 요청한 수만큼 덱을 만들지 못한 까닭. */
+export interface RaidShortage {
+  requested: number;
+  made: number;
+  /** size 인원이 모자란다 · stage 버스트 단계가 모자란다 · search 더 짤 수 있었지만 계산된 후보에 없었다. */
+  kind: 'size' | 'stage' | 'search';
+  /** 모자라는 버스트 단계. */
+  lacking: string[];
+  remaining: StageCounts;
+  owned: StageCounts;
+  /** 보유 니케 전체로 만들 수 있는 덱 수의 상한. */
+  capacity: number;
+  text: string;
+}
+
+/** 레이드 5덱의 결과(allocateDecks). */
+export interface RaidDecksReport {
+  schema_version: number;
+  kind: 'raid_decks';
+  generated_at: string;
+  account: { name?: string | null; is_test_data?: boolean; updated_at?: string | null };
+  /** single 모든 덱에 같은 조건 · per_deck 덱마다 조건. */
+  mode: 'single' | 'per_deck';
+  requested: number;
+  made: number;
+  /** 계산된 덱의 총딜 합. */
+  total_damage: number;
+  conditions: { index: number; decks: number[]; condition: Record<string, unknown>; assumptions: string[] }[];
+  decks: RaidDeck[];
+  /** 어느 덱에도 들지 않은 보유 니케(많이 키운 순). */
+  unused: string[];
+  shortage: RaidShortage | null;
+  search: {
+    refine: boolean;
+    budget: number;
+    sims: number;
+    stage1: { budget: number; requested: number; skipped: number; generated: number; computed: number; tiers: unknown[] };
+    stage2: { decks: number; variants: number; requested: number; skipped: number; improved: number } | null;
+    examined: number;
+  };
+  assumptions: string[];
+  /** 이 계산이 다루지 않는 것(「지원하지 않음」). */
+  unsupported: string[];
+  engine?: EngineVersion | null;
+  cache?: CacheStats | null;
+  rejected: RejectedSquad[];
+  failed: FailedSquad[];
+  caveats: string[];
+  excluded?: ExclusionNote;
+}

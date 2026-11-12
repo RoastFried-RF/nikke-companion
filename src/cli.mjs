@@ -10,7 +10,9 @@
 //                              [--references <기준 편성.json>] [--rules <등급 규칙.json>]
 //   node src/cli.mjs intercept --account <계정.json> [--bosses <보스 묶음.json>] [--boss <이름 또는 id>] [--top <표시 수>]
 //                              [--budget <시뮬 횟수>] [--json <결과.json>]
-// compare·suggest·growth·tier·intercept는 시뮬 결과 캐시(data/cache/sim/)를 기본으로 쓴다: [--no-cache] [--cache-dir <폴더>]
+//   node src/cli.mjs union --account <계정.json> --condition <조건.json 또는 덱별 조건 배열.json> [--decks <덱 수>] [--budget <시뮬 횟수>]
+//                          [--locked <고정.json>] [--no-refine] [--exclude <이름,이름>] [--json <결과.json>]
+// compare·suggest·growth·tier·intercept·union은 시뮬 결과 캐시(data/cache/sim/)를 기본으로 쓴다: [--no-cache] [--cache-dir <폴더>]
 // 종료 코드: 0 성공 · 1 실행 오류 · 2 입력 오류
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -19,7 +21,8 @@ import { suggestSquads } from './core/candidates.mjs';
 import { compareSquads, InputError } from './core/compare.mjs';
 import { compareGrowth } from './core/growth.mjs';
 import { recommendIntercept } from './core/intercept.mjs';
-import { renderReport, renderGrowthReport, renderImportReport, renderInterceptReport } from './core/render.mjs';
+import { renderReport, renderGrowthReport, renderImportReport, renderInterceptReport, renderUnionReport } from './core/render.mjs';
+import { allocateDecks } from './core/union.mjs';
 import { importProfileFile } from './runtime/import-profile.mjs';
 import { createFileCacheStore, loadEngineData, nodeRuntime } from './runtime/node.mjs';
 import { detectChanges } from './tier/detect.mjs';
@@ -47,8 +50,13 @@ const USAGE = [
   '  node src/cli.mjs intercept --account <계정.json> [--bosses <보스 묶음.json, 기본 data/intercept/anomaly.json>] [--boss <보스 이름 또는 id>]',
   '      요격전(이상 개체) 보스마다 보유 니케로 총딜이 가장 큰 편성을 추천한다. --boss로 한 보스만 계산할 수 있다',
   '      [--top <보스별 표시 수, 기본 3>]   [--budget <전체 시뮬 횟수의 상한, 기본 300 — 보스 수로 나눈다>]   [--json <결과.json>]',
-  'suggest·intercept: [--exclude <니케 이름,니케 이름>] 그 니케들을 빼고 추천한다(「안 씀」 — 뺀 것이 결과에 남는다)',
-  'compare·suggest·growth·tier·intercept는 같은 엔진 판·같은 요청의 시뮬 결과를 다시 계산하지 않는다(캐시):',
+  '  node src/cli.mjs union --account <계정.json> --condition <조건.json> [--decks <덱 수, 기본 5>] [--budget <전체 시뮬 횟수의 상한, 기본 100>] [--json <결과.json>]',
+  '      레이드 5덱(솔로·유니온 레이드): 보유 니케를 겹치지 않게 여러 덱에 나눠 합계 총딜이 큰 배분을 찾는다',
+  '      --condition 파일은 조건 하나(모든 덱에 같은 조건) 또는 조건의 배열(덱마다 다른 조건 — 덱 수만큼)이다',
+  '      [--locked <고정.json — {"decks": [{"deck": 1, "members": [이름 또는 null ×5]}]}>] 덱 전체나 일부 자리를 고정하고 나머지만 찾는다',
+  '      [--no-refine] 고른 덱의 자리 순서를 바꿔 보지 않는다',
+  'suggest·intercept·union: [--exclude <니케 이름,니케 이름>] 그 니케들을 빼고 추천한다(「안 씀」 — 뺀 것이 결과에 남는다)',
+  'compare·suggest·growth·tier·intercept·union은 같은 엔진 판·같은 요청의 시뮬 결과를 다시 계산하지 않는다(캐시):',
   '  [--no-cache] 캐시를 읽지도 쓰지도 않는다   [--cache-dir <폴더, 기본 data/cache/sim>]',
 ].join('\n');
 
@@ -122,7 +130,7 @@ function engineDeps() {
 try {
   let report;
   let render = renderReport;
-  const deps = ['compare', 'suggest', 'growth', 'tier', 'intercept'].includes(command) ? engineDeps() : {};
+  const deps = ['compare', 'suggest', 'growth', 'tier', 'intercept', 'union'].includes(command) ? engineDeps() : {};
   if (command === 'tier') {
     if (opts._[0] !== 'build' || opts._.length > 1) {
       throw new InputError('인자가 잘못됐다', [{ path: 'tier', message: '하위 명령은 build뿐이다 — node src/cli.mjs tier build [--only <이름,이름>]' }]);
@@ -175,6 +183,26 @@ try {
       },
     );
     render = renderInterceptReport;
+  } else if (command === 'union') {
+    if (opts._.length > 0) throw new InputError('인자가 잘못됐다', [{ path: opts._[0], message: '이름 없는 인자는 받지 않는다' }]);
+    if (opts.locked === true) throw new InputError('인자가 빠졌다', [{ path: '--locked', message: '고정 문서의 경로가 필요하다' }]);
+    report = await allocateDecks(
+      // 조건 파일이 배열이면 덱별 조건이다(allocateDecks가 덱 수와 견준다).
+      { account: readJsonFile('account', opts.account), condition: readJsonFile('condition', opts.condition) },
+      {
+        decks: readCount('decks', opts.decks),
+        budget: readCount('budget', opts.budget),
+        locked: opts.locked === undefined ? undefined : readJsonFile('locked', opts.locked),
+        refine: opts['no-refine'] === true ? false : undefined,
+        exclude: readNames('exclude', opts.exclude),
+      },
+      {
+        ...deps,
+        // 진행은 표준 오류로만 낸다 — 표준 출력은 결과 표다.
+        onStage: ({ stage, requests, used, budget }) => process.stderr.write(`${stage === 1 ? '후보 계산' : '자리 순서'} ${requests}건 (쓴 예산 ${used}/${budget})\n`),
+      },
+    );
+    render = renderUnionReport;
   } else if (command === 'growth') {
     const upgradesDoc = readJsonFile('upgrades', opts.upgrades);
     report = await compareGrowth({
