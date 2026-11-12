@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   captureGame,
   ENGINE_PROGRESS_EVENT,
+  engineCancel,
   engineCatalog,
   engineRunBatch,
   engineVersion,
@@ -26,9 +27,12 @@ import buildRs from '../src-tauri/build.rs?raw';
 import cargoToml from '../src-tauri/Cargo.toml?raw';
 import captureRs from '../src-tauri/src/capture.rs?raw';
 import engineRs from '../src-tauri/src/engine.rs?raw';
+import engineWin32Rs from '../src-tauri/src/engine_win32.rs?raw';
 import gameWin32Rs from '../src-tauri/src/game_win32.rs?raw';
 import gameWindowRs from '../src-tauri/src/game_window.rs?raw';
 import libRs from '../src-tauri/src/lib.rs?raw';
+import overlayStateRs from '../src-tauri/src/overlay_state.rs?raw';
+import overlayWin32Rs from '../src-tauri/src/overlay_win32.rs?raw';
 import gitignore from '../../.gitignore?raw';
 import formatSource from '../src/lib/format.ts?raw';
 
@@ -54,6 +58,7 @@ const COMMANDS = [
   'game_window_status',
   'set_follow_game',
   'capture_game',
+  'engine_cancel',
 ];
 
 const gameWindow = {
@@ -91,6 +96,7 @@ describe('Rust 명령 호출', () => {
       if (cmd === 'game_window_status') return gameSnapshot;
       if (cmd === 'set_follow_game') return { ...gameSnapshot, follow: true };
       if (cmd === 'capture_game') return captureRecord;
+      if (cmd === 'engine_cancel') return true;
       return null;
     });
     await expect(loadReport('D:\\r.json')).resolves.toEqual({ schema_version: 1 });
@@ -105,6 +111,7 @@ describe('Rust 명령 호출', () => {
     await expect(gameWindowStatus()).resolves.toEqual(gameSnapshot);
     await expect(setFollowGame(true)).resolves.toEqual({ ...gameSnapshot, follow: true });
     await expect(captureGame()).resolves.toEqual(captureRecord);
+    await expect(engineCancel()).resolves.toBe(true);
     expect(calls.map((c) => c.cmd)).toEqual(COMMANDS);
     expect(calls[0].args).toEqual({ path: 'D:\\r.json' });
     expect(calls[6].args).toEqual({ requests: [{ squad: ['크라운'] }] });
@@ -121,6 +128,8 @@ describe('Rust 명령 호출', () => {
     expect(libRs).toMatch(/async fn game_window_status\(app: AppHandle\)/);
     expect(libRs).toMatch(/async fn set_follow_game\(app: AppHandle, enabled: bool\)/);
     expect(libRs).toMatch(/async fn capture_game\(app: AppHandle, label: Option<String>\)/);
+    // 중단 명령은 화면에서 받는 인자가 없다(무엇을 멈출지는 Rust가 안다 — 도는 배치 하나).
+    expect(libRs).toMatch(/fn engine_cancel\(run: State<'_, EngineRun>\) -> bool/);
   });
 
   it('Rust가 거부한 한국어 문장을 그대로 넘긴다', async () => {
@@ -265,6 +274,81 @@ describe('엔진 호출(Rust)', () => {
   it('파일 고르기 창은 대화 상자 플러그인이 아니라 앱 명령 하나로만 연다', () => {
     expect(cargoToml).not.toMatch(/tauri-plugin-(dialog|fs|shell|http|opener)/);
     expect(libRs).not.toMatch(/tauri_plugin_(dialog|fs|shell|http|opener)/);
+  });
+
+  it('중단: 배치 명령은 자리(BatchSlot)의 신호로 돌고, 중단 명령은 그 자리를 멈춘다', () => {
+    expect(libRs).toContain('struct EngineRun(engine::BatchSlot);');
+    expect(libRs).toMatch(/run\.0\.begin\(\)/);
+    expect(libRs).toMatch(/engine::run_batch_with_stop\(&config, &requests, Some\(&progress\), ticket\.signal\(\)\)/);
+    expect(libRs).toMatch(/fn engine_cancel\([^)]*\) -> bool \{\s*run\.0\.stop\(\)\s*\}/);
+    // 중단으로 끝난 배치의 오류는 '중단됨'으로 시작한다.
+    expect(engineRs).toContain('pub const STOPPED_PREFIX: &str = "중단됨";');
+    expect(engineRs).toContain('Self::Stopped => write!(f, "{STOPPED_PREFIX}: 엔진 계산을 멈췄다")');
+  });
+
+  it('엔진 프로세스 묶음은 앱이 띄운 프로세스만 다룬다 — 다른 프로세스를 열지 않는다', () => {
+    const code = engineWin32Rs
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+    expect(code).toContain('AssignProcessToJobObject(job, HANDLE(child.as_raw_handle()))');
+    expect(code).toContain('TerminateJobObject');
+    expect(code).not.toMatch(/\b(OpenProcess|OpenJobObjectW|ReadProcessMemory|WriteProcessMemory|CreateRemoteThread|EnumProcesses|TerminateProcess)\b/);
+    // 엔진을 멈추는 길은 하나다: 묶음을 끝내고 띄운 프로세스를 끝낸다.
+    expect(engineRs).toMatch(/fn kill_engine\(child: &mut Child, group: &ProcessGroup\) \{\s*group\.terminate\(\);\s*let _ = child\.kill\(\);\s*let _ = child\.wait\(\);/);
+  });
+});
+
+describe('오버레이 창 — 활성화 없이 보이기, 파일 고르기 창의 부모(Rust)', () => {
+  const code = (source: string) =>
+    source
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+
+  it("전환 규칙에 '보일 때 활성화하지 않는다'가 있고, 접착 코드는 그 규칙대로만 창을 보인다", () => {
+    expect(overlayStateRs).toContain('ShowWithoutActivating');
+    expect(overlayStateRs).toContain('pub fn visibility_change(&self) -> Option<VisibilityChange>');
+    const apply = libRs.slice(libRs.indexOf('fn apply_transition('), libRs.indexOf('fn handle_action('));
+    expect(apply).toContain('Some(VisibilityChange::ShowWithoutActivating) => show_overlay_without_activating(window)');
+    expect(apply).toContain('Some(VisibilityChange::Hide) => hide_overlay(window)');
+    // Windows에서는 Win32의 활성화 없는 표시로, 그 밖에서는 창 라이브러리의 기존 동작으로.
+    expect(apply).toMatch(/#\[cfg\(windows\)\]\s*fn show_overlay_without_activating\([^)]*\) -> Result<\(\), String> \{\s*overlay_win32::show_without_activating\(window\)/);
+    expect(apply).toMatch(/#\[cfg\(not\(windows\)\)\]\s*fn show_overlay_without_activating\([^)]*\) -> Result<\(\), String> \{\s*window\.show\(\)/);
+    // 단축키 처리에서 창 라이브러리의 show()(활성화한다)는 Windows가 아닐 때만 남아 있다.
+    expect(code(apply).match(/window\.show\(\)/g)).toHaveLength(1);
+    // 시작할 때 한 번 보이는 것 말고는 접착 코드 어디에도 show()가 없다.
+    expect(code(libRs).match(/window\.show\(\)/g)).toHaveLength(2);
+  });
+
+  it('창에 반영하는 코드는 활성화 없는 표시(SW_SHOWNA)를 쓰고, 앞으로 가져오거나 포커스를 주지 않는다', () => {
+    const win32 = code(overlayWin32Rs);
+    expect(win32).toContain('pub const SHOW_COMMAND: SHOW_WINDOW_CMD = SW_SHOWNA;');
+    expect(win32).toContain('pub const HIDE_COMMAND: SHOW_WINDOW_CMD = SW_HIDE;');
+    expect(win32).toContain('ShowWindowAsync(HWND(hwnd as _), command)');
+    // 활성화하는 표시 방법과 포커스·전경을 바꾸는 호출이 없다.
+    expect(win32).not.toMatch(/\b(SW_SHOW|SW_SHOWNORMAL|SW_RESTORE|SW_SHOWDEFAULT|SW_SHOWMAXIMIZED|SW_SHOWMINIMIZED)\b/);
+    expect(win32).not.toMatch(
+      /\b(SetForegroundWindow|BringWindowToTop|SetActiveWindow|SetFocus|SwitchToThisWindow|SetWindowPos|AttachThreadInput|SendInput|SendMessageW|PostMessageW|keybd_event|mouse_event)\b/,
+    );
+  });
+
+  it('오버레이 창 모듈은 오버레이 창의 핸들만 쓴다 — 다른 창을 찾지 않는다', () => {
+    const win32 = code(overlayWin32Rs);
+    expect(win32).toContain('.hwnd()');
+    expect(win32).not.toMatch(/\b(FindWindowW|FindWindowExW|EnumWindows|GetForegroundWindow|GetWindowThreadProcessId|WindowFromPoint)\b/);
+    expect(win32).not.toMatch(/game_window|game_win32|nikke\.exe/);
+  });
+
+  it('파일 고르기 창은 오버레이 창을 부모로 연다', () => {
+    // 명령은 오버레이 창을 받아, 그 창의 핸들을 부모로 넘긴다. 핸들을 얻지 못하면 부모 없이 띄우지 않는다.
+    expect(libRs).toMatch(/async fn pick_json_file\(window: WebviewWindow, title: String\)/);
+    expect(libRs).toMatch(/let parent = overlay_win32::dialog_parent\(window\)\?;\s*let picked = overlay_win32::pick_json_file\(&parent, title\);/);
+    const win32 = code(overlayWin32Rs);
+    expect(win32).toMatch(/pub\(crate\) fn dialog_parent\(window: &WebviewWindow\) -> Result<DialogParent, String> \{\s*DialogParent::from_handle\(overlay_handle\(window\)\?\)/);
+    expect(win32).toMatch(/rfd::FileDialog::new\(\)\s*\.set_title\(title\)\s*\.add_filter\("JSON", &\["json"\]\)\s*\.set_parent\(parent\)\s*\.pick_file\(\)/);
+    // 대화 상자를 띄우는 곳은 한 곳뿐이다.
+    expect((code(libRs) + win32).match(/rfd::/g)).toHaveLength(1);
   });
 });
 

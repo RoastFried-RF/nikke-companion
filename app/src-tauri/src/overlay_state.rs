@@ -5,6 +5,10 @@
 //! - 클릭 통과 전환: 보이는 동안에만 켜고 끈다. 숨긴 동안에는 무시한다
 //!   (보이지 않는 창의 상태가 몰래 바뀌면 다시 보였을 때 어느 쪽인지 알 수 없다).
 //! - 숨김/보임 전환: 클릭 통과 여부는 그대로 둔다. 다시 보이면 숨기기 전 상태다.
+//! - **보일 때 활성화하지 않는다.** 단축키는 게임을 하는 도중에 눌린다 — 오버레이가 다시 보이면서 키보드 포커스를
+//!   가져가면 게임 입력이 끊긴다. 그래서 전환이 창에 시키는 보임 변화는 "활성화 없이 보이기"와 "숨기기" 둘뿐이고
+//!   (`VisibilityChange`), 활성화하며 보이는 변화는 아예 없다. 클릭 통과 전환은 보임을 바꾸지 않으므로
+//!   포커스와 무관하다.
 
 use serde::Serialize;
 
@@ -32,10 +36,39 @@ pub struct Transition {
     pub set_click_through: Option<bool>,
 }
 
+/// 전환이 창에 시키는 보임 변화. 활성화하며 보이는 변화는 없다 — 단축키로는 창이 포커스를 가져가지 않는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisibilityChange {
+    /// 창을 보이되 활성화하지 않는다: 지금 키보드 포커스를 가진 프로그램(게임)이 그대로 입력을 받는다.
+    ShowWithoutActivating,
+    /// 창을 숨긴다.
+    Hide,
+}
+
+impl VisibilityChange {
+    /// 이 변화가 창을 활성화하는가(키보드 포커스를 가져오는가). 어느 변화도 그러지 않는다.
+    pub const fn activates(self) -> bool {
+        match self {
+            Self::ShowWithoutActivating | Self::Hide => false,
+        }
+    }
+}
+
 impl Transition {
     /// 상태가 하나도 바뀌지 않았는가.
     pub fn is_noop(&self) -> bool {
         self.set_visible.is_none() && self.set_click_through.is_none()
+    }
+
+    /// 창에 반영할 보임 변화. 보임이 바뀌지 않았으면 `None`. 보일 때는 언제나 활성화 없이 보인다.
+    pub fn visibility_change(&self) -> Option<VisibilityChange> {
+        self.set_visible.map(|visible| {
+            if visible {
+                VisibilityChange::ShowWithoutActivating
+            } else {
+                VisibilityChange::Hide
+            }
+        })
     }
 }
 
@@ -143,6 +176,46 @@ mod tests {
             assert_eq!(shown.set_visible, Some(true));
             assert_eq!(shown.set_click_through, None);
         }
+    }
+
+    #[test]
+    fn showing_the_overlay_never_activates_it() {
+        // 숨긴 창을 다시 보이는 전환: 클릭 통과가 켜져 있든 꺼져 있든 "활성화 없이 보이기"다.
+        for click_through in [false, true] {
+            let shown = state(false, click_through).apply(ToggleVisibility);
+            assert_eq!(shown.set_visible, Some(true));
+            assert_eq!(
+                shown.visibility_change(),
+                Some(VisibilityChange::ShowWithoutActivating)
+            );
+            let hidden = state(true, click_through).apply(ToggleVisibility);
+            assert_eq!(hidden.visibility_change(), Some(VisibilityChange::Hide));
+        }
+    }
+
+    #[test]
+    fn no_transition_takes_keyboard_focus() {
+        // 네 상태 × 두 동작 어디에도 창을 활성화하는 변화가 없다.
+        for visible in [false, true] {
+            for click_through in [false, true] {
+                for action in [ToggleClickThrough, ToggleVisibility] {
+                    let t = state(visible, click_through).apply(action);
+                    if let Some(change) = t.visibility_change() {
+                        assert!(!change.activates(), "{change:?}");
+                    }
+                    // 보임 변화는 보임이 바뀔 때만 있다.
+                    assert_eq!(t.visibility_change().is_some(), t.set_visible.is_some());
+                }
+            }
+        }
+        // 클릭 통과 전환은 보임을 바꾸지 않는다 — 창을 보이거나 숨기는 호출 자체가 없으므로 포커스도 그대로다.
+        for click_through in [false, true] {
+            let t = state(true, click_through).apply(ToggleClickThrough);
+            assert_eq!(t.set_click_through, Some(!click_through));
+            assert_eq!(t.visibility_change(), None);
+        }
+        assert!(!VisibilityChange::ShowWithoutActivating.activates());
+        assert!(!VisibilityChange::Hide.activates());
     }
 
     #[test]

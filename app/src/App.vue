@@ -42,24 +42,38 @@ function remember(value: string): void {
   }
 }
 
+/** 계산을 시작할 때 보이던 결과. 계산을 중단하면 되돌린다 — 중단은 결과를 바꾸지 않는다. */
+let beforeCompute: { report: CompareReport | null; loadedPath: string } | null = null;
+
 function onComputeStart(): void {
   // 늦게 끝나는 파일 읽기가 계산 결과를 덮지 않게 한다. 앞서 보이던 순위도 치운다(새 계산의 결과로 오해하지 않게).
   loadSeq += 1;
   loading.value = false;
   computing.value = true;
   error.value = '';
+  beforeCompute = { report: report.value, loadedPath: loadedPath.value };
   report.value = null;
   loadedPath.value = '';
 }
 
 function onComputeDone(computed: CompareReport): void {
   computing.value = false;
+  beforeCompute = null;
   report.value = computed;
 }
 
 function onComputeFail(message: string): void {
   computing.value = false;
+  beforeCompute = null;
   error.value = message;
+}
+
+/** 사용자가 계산을 중단했다. 오류가 아니다 — 계산 전에 보이던 결과를 그대로 다시 보인다. */
+function onComputeCancel(): void {
+  computing.value = false;
+  report.value = beforeCompute?.report ?? null;
+  loadedPath.value = beforeCompute?.loadedPath ?? '';
+  beforeCompute = null;
 }
 
 async function load(): Promise<void> {
@@ -143,7 +157,7 @@ onBeforeUnmount(() => {
 
     <GamePanel />
 
-    <ComputePanel :disabled="loading" @start="onComputeStart" @done="onComputeDone" @fail="onComputeFail" />
+    <ComputePanel :disabled="loading" @start="onComputeStart" @done="onComputeDone" @fail="onComputeFail" @cancel="onComputeCancel" />
 
     <form class="loader" @submit.prevent="load">
       <input

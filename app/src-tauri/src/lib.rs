@@ -8,6 +8,8 @@
 //! - `capture`: 캡처한 프레임의 판정(빈 화면)·파일 이름·PNG 저장
 //! - `capture_cli`: 명령줄 도구 `nikke-capture`의 동작
 //! - `game_win32`(비공개): 위 규칙에 값을 대 주는 Win32 호출 — 창 열거, 창 사각형, Windows.Graphics.Capture
+//! - `overlay_win32`: 오버레이 창(이 앱의 창)만 다루는 Win32 호출 — 활성화 없이 보이기·숨기기, 파일 고르기 창의 부모
+//! - `engine_win32`(비공개): 이 앱이 띄운 엔진 프로세스를 묶어 끝내는 Job Object
 //!
 //! 편성 비교·추천의 계산은 화면 쪽의 `src/core`(JS)가 하고, 여기서는 엔진 프로세스만 대신 띄운다.
 //! 네트워크 요청은 하지 않는다.
@@ -19,9 +21,13 @@ pub mod capture;
 pub mod capture_cli;
 pub mod engine;
 #[cfg(windows)]
+mod engine_win32;
+#[cfg(windows)]
 mod game_win32;
 pub mod game_window;
 pub mod overlay_state;
+#[cfg(windows)]
+pub mod overlay_win32;
 pub mod report;
 
 use std::path::{Path, PathBuf};
@@ -37,7 +43,9 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 use capture::CaptureRecord;
 use game_window::{follow_move, follow_target, GameError, GameWindowInfo, GameWindowStatus};
-use overlay_state::{top_right_position, OverlayAction, OverlayState, Transition};
+use overlay_state::{
+    top_right_position, OverlayAction, OverlayState, Transition, VisibilityChange,
+};
 
 /// tauri.conf.json의 창 label.
 const MAIN_WINDOW: &str = "main";
@@ -118,11 +126,11 @@ struct Overlay {
     shortcut_problems: Mutex<Vec<String>>,
 }
 
-/// 엔진 배치가 돌고 있는지. 화면이 두 번 눌러도 엔진 프로세스를 겹쳐 띄우지 않는다.
+/// 엔진 배치의 자리. 화면이 두 번 눌러도 엔진 프로세스를 겹쳐 띄우지 않고, 중단 명령이 도는 배치를 멈춘다.
 #[derive(Default)]
-struct EngineBusy(AtomicBool);
+struct EngineRun(engine::BatchSlot);
 
-/// 배치가 끝나면(오류로 끝나도) 표시를 내린다.
+/// 캡처가 끝나면(오류로 끝나도) 표시를 내린다.
 struct BusyGuard<'a>(&'a AtomicBool);
 
 impl Drop for BusyGuard<'_> {
@@ -257,22 +265,29 @@ async fn engine_version(app: AppHandle) -> Result<Value, String> {
 
 /// 요청 여러 건을 엔진 배치로 돌린다. 결과는 입력 순서 그대로이고, 줄마다 결과 또는 `{error}`다.
 /// 한 건이 끝날 때마다 `engine-progress` 이벤트를 보낸다.
+/// 도는 동안 `engine_cancel`이 불리면 엔진 프로세스를 모두 끝내고 '중단됨' 오류로 돌아온다.
 #[tauri::command]
 async fn engine_run_batch(app: AppHandle, requests: Vec<Value>) -> Result<Vec<Value>, String> {
     let config = engine_config(&app)?;
     blocking(move || {
-        let busy = app.state::<EngineBusy>();
-        if busy.0.swap(true, Ordering::AcqRel) {
-            return Err(engine::EngineError::Busy.to_string());
-        }
-        let _guard = BusyGuard(&busy.0);
+        let run = app.state::<EngineRun>();
+        // 표는 이 함수가 끝날 때(오류로 끝나도) 버려져 자리가 빈다 — 중단 뒤에 다시 실행할 수 있다.
+        let ticket = run.0.begin().map_err(|e| e.to_string())?;
         let progress = |done: usize, total: usize| {
             // 진행 표시를 못 보내도 계산은 계속한다.
             let _ = app.emit(ENGINE_PROGRESS_EVENT, EngineProgress { done, total });
         };
-        engine::run_batch(&config, &requests, Some(&progress)).map_err(|e| e.to_string())
+        engine::run_batch_with_stop(&config, &requests, Some(&progress), ticket.signal())
+            .map_err(|e| e.to_string())
     })
     .await
+}
+
+/// 도는 엔진 배치를 멈춘다. 멈출 배치가 있었으면 true — 그 배치의 `engine_run_batch`가 '중단됨' 오류로 돌아온다.
+/// 도는 배치가 없으면 아무 일도 하지 않고 false다(다음에 시작할 배치를 미리 멈추지 않는다).
+#[tauri::command]
+fn engine_cancel(run: State<'_, EngineRun>) -> bool {
+    run.0.stop()
 }
 
 /// JSON 파일(계정 상태·전투 조건·후보 편성)을 읽어 내용 그대로 돌려준다. 실패하면 한국어 오류 문장.
@@ -291,12 +306,10 @@ async fn pick_json_file(window: WebviewWindow, title: String) -> Result<Option<S
 
 #[cfg(windows)]
 fn pick_json_file_dialog(window: &WebviewWindow, title: &str) -> Result<Option<String>, String> {
-    // 오버레이는 항상 위 창이다. 대화 상자를 이 창의 자식으로 띄워야 뒤에 가려지지 않는다.
-    let picked = rfd::FileDialog::new()
-        .set_title(title)
-        .add_filter("JSON", &["json"])
-        .set_parent(window)
-        .pick_file();
+    // 오버레이는 항상 위 창이다. 대화 상자를 이 창의 자식(소유된 창)으로 띄워야 뒤에 가려지지 않는다.
+    // 창 핸들을 얻지 못하면 부모 없이 띄우지 않고 오류로 알린다(경로는 직접 넣을 수 있다).
+    let parent = overlay_win32::dialog_parent(window)?;
+    let picked = overlay_win32::pick_json_file(&parent, title);
     Ok(picked.map(|path| path.display().to_string()))
 }
 
@@ -466,17 +479,44 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
-/// 전환 결과에서 바뀐 것만 창에 반영한다.
-fn apply_transition(window: &WebviewWindow, t: &Transition) -> tauri::Result<()> {
+/// 전환 결과에서 바뀐 것만 창에 반영한다. 어느 변화도 창을 활성화하지 않는다(게임의 키보드 포커스를 건드리지 않는다).
+fn apply_transition(window: &WebviewWindow, t: &Transition) -> Result<(), String> {
     if let Some(ignore) = t.set_click_through {
-        window.set_ignore_cursor_events(ignore)?;
+        // 창 스타일만 바꾼다 — 보이기·활성화 호출이 아니다.
+        window
+            .set_ignore_cursor_events(ignore)
+            .map_err(|e| e.to_string())?;
     }
-    match t.set_visible {
-        Some(true) => window.show()?,
-        Some(false) => window.hide()?,
-        None => {}
+    match t.visibility_change() {
+        Some(VisibilityChange::ShowWithoutActivating) => show_overlay_without_activating(window),
+        Some(VisibilityChange::Hide) => hide_overlay(window),
+        None => Ok(()),
     }
-    Ok(())
+}
+
+/// 오버레이를 활성화하지 않고 보인다. Windows에서는 Win32의 활성화 없는 표시(SW_SHOWNA)를 쓴다 —
+/// 창 라이브러리의 `show()`는 창을 활성화해 게임의 키보드 포커스를 가져간다.
+#[cfg(windows)]
+fn show_overlay_without_activating(window: &WebviewWindow) -> Result<(), String> {
+    overlay_win32::show_without_activating(window)
+}
+
+/// Windows가 아니면 창 라이브러리의 보이기를 그대로 쓴다(기존 동작 — 활성화 여부는 그 플랫폼을 따른다).
+#[cfg(not(windows))]
+fn show_overlay_without_activating(window: &WebviewWindow) -> Result<(), String> {
+    window.show().map_err(|e| e.to_string())
+}
+
+/// 오버레이를 숨긴다. Windows에서는 보이기와 같은 길(Win32)로 숨긴다 — 두 길을 섞으면 창 라이브러리가 아는
+/// 보임 상태와 실제가 어긋난다(`overlay_win32.rs`).
+#[cfg(windows)]
+fn hide_overlay(window: &WebviewWindow) -> Result<(), String> {
+    overlay_win32::hide(window)
+}
+
+#[cfg(not(windows))]
+fn hide_overlay(window: &WebviewWindow) -> Result<(), String> {
+    window.hide().map_err(|e| e.to_string())
 }
 
 /// 단축키 동작 하나를 처리한다: 규칙으로 다음 상태를 구하고, 창에 반영하고, 화면에 알린다.
@@ -555,7 +595,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Overlay::default())
-        .manage(EngineBusy::default())
+        .manage(EngineRun::default())
         .manage(GameTracker::default())
         .invoke_handler(tauri::generate_handler![
             load_report,
@@ -565,6 +605,7 @@ pub fn run() {
             engine_catalog,
             engine_version,
             engine_run_batch,
+            engine_cancel,
             read_json_file,
             pick_json_file,
             game_window_status,
@@ -576,6 +617,8 @@ pub fn run() {
                 .get_webview_window(MAIN_WINDOW)
                 .ok_or("오버레이 창(main)이 설정에 없다")?;
             // 설정에서는 숨긴 채 만들고, 자리를 잡은 뒤에 보인다(엉뚱한 자리에서 번쩍이지 않게).
+            // 시작할 때만 창 라이브러리의 show()를 쓴다 — 사용자가 방금 띄운 창이라 활성화돼도 된다.
+            // 그 뒤의 보임/숨김(단축키)은 활성화 없는 길로만 한다(apply_transition).
             if let Err(e) = place_top_right(&window) {
                 eprintln!("창을 화면 오른쪽 위로 옮기지 못했다: {e}");
             }

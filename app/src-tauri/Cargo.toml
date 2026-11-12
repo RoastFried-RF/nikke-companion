@@ -25,8 +25,11 @@ png = "0.18"
 
 [target."cfg(windows)".dependencies]
 rfd = { version = "0.18.0", default-features = false }
+# 파일 고르기 창의 부모로 오버레이 창 핸들을 넘길 때 쓴다(src/overlay_win32.rs). rfd·Tauri가 이미 끌어오는 판과 같다.
+raw-window-handle = "0.6"
 # 게임 창 찾기·창 정보·화면 캡처(src/game_win32.rs). Tauri가 이미 쓰는 판과 같다 — 기능만 더 켠다.
 # 표준 창 API만 쓴다: 창 열거, 창 사각형, DWM, Windows.Graphics.Capture.
+# Win32_Security·Win32_System_JobObjects는 이 앱이 띄운 엔진 프로세스를 묶어 끝내는 데만 쓴다(src/engine_win32.rs).
 windows = { version = "0.62", features = [
     "Foundation",
     "Graphics",
@@ -40,8 +43,10 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
+    "Win32_Security",
     "Win32_System_Com",
     "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_JobObjects",
     "Win32_System_SystemInformation",
     "Win32_System_WinRT",
     "Win32_System_WinRT_Direct3D11",

@@ -788,9 +788,19 @@
         "파일 고르기 창이 오버레이 앞에 뜬다"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261112T025954-P-016-a1",
+        "verified_tree": "94adad7d651ca7dbf0119b5be93874eba7d3810b",
+        "verified_at": "2026-11-12T03:21:45.400Z",
+        "commit": null
+      }
     },
     {
       "id": "P-015",

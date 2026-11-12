@@ -77,3 +77,4 @@
 {"at":"2026-11-12T02:55:56.787Z","event":"session_end","stop_reason":"한도 도달: 반복 2회","tasks":{"done":["H-001","P-001","P-002","P-003","P-004","H-002","P-005","P-006","P-007","P-008","P-009","P-010","P-012","P-013"],"blocked":["P-011"],"pending":["P-014","P-015","P-016","P-017"]}}
 {"at":"2026-11-12T02:58:29.273Z","event":"manual_verify","task":"P-011","passed":true,"tree":"39bd738c194136ed4ef54f9f26ac82fc5397a328","reason":null}
 {"at":"2026-11-12T02:58:29.442Z","event":"checkpoint","task":"P-011","commit":"eb362de4488bcbdf43b2054433f39df93b29afec","tree":"39bd738c194136ed4ef54f9f26ac82fc5397a328"}
+{"at":"2026-11-12T02:59:54.050Z","event":"session_start","model":"claude-fable-5-2","head":"1950b2a7a1923cf378bd6c1c1f2326753a7a8d27","git_status":[]}

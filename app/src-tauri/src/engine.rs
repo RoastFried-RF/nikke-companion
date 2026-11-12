@@ -8,8 +8,9 @@ use std::fmt;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -73,8 +74,13 @@ pub enum EngineError {
     Exit { code: String, detail: String },
     MissingResult { index: usize },
     Cancelled,
+    /// 밖에서 멈추라고 했다(`StopSignal`). 화면의 중단 단추가 이 길로 온다.
+    Stopped,
     Busy,
 }
+
+/// 중단으로 끝난 배치의 오류 문장이 시작하는 말. 화면이 '중단됨'으로 보인다.
+pub const STOPPED_PREFIX: &str = "중단됨";
 
 impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -111,6 +117,7 @@ impl fmt::Display for EngineError {
                 write!(f, "엔진이 요청 {index}의 결과를 돌려주지 않았다")
             }
             Self::Cancelled => write!(f, "다른 엔진 프로세스의 오류로 계산을 멈췄다"),
+            Self::Stopped => write!(f, "{STOPPED_PREFIX}: 엔진 계산을 멈췄다"),
             Self::Busy => write!(f, "이미 계산 중이다. 끝난 뒤에 다시 실행하라"),
         }
     }
@@ -279,6 +286,113 @@ pub fn version(engine_dir: &Path) -> Value {
     json!({ "repo": ENGINE_REPO, "commit": commit, "dirty": dirty })
 }
 
+// ── 중단 ─────────────────────────────────────────────────────────────────────
+
+/// 도는 배치를 밖에서 멈추는 신호. 한 번 켜면 꺼지지 않는다 — 배치마다 새로 만든다.
+#[derive(Debug, Default)]
+pub struct StopSignal(AtomicBool);
+
+impl StopSignal {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 멈추라고 한다. 이 신호로 도는 배치의 엔진 프로세스가 모두 끝나고 `EngineError::Stopped`가 돌아온다.
+    pub fn stop(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub fn is_stopped(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+/// 앱에서 한 번에 하나만 도는 엔진 배치의 자리. 겹쳐 띄우지 않게 하고, 도는 배치를 멈추는 길을 준다.
+///
+/// 신호를 배치마다 새로 만들기 때문에, 늦게 온 중단 요청이 다음 배치를 멈추는 일이 없다.
+#[derive(Debug, Default)]
+pub struct BatchSlot(Mutex<Option<Arc<StopSignal>>>);
+
+/// 배치가 자리를 쥐고 있는 동안 들고 있는 표. 버리면(배치가 끝나면 — 오류로 끝나도) 자리가 빈다.
+#[derive(Debug)]
+pub struct BatchTicket<'a> {
+    slot: &'a BatchSlot,
+    signal: Arc<StopSignal>,
+}
+
+impl BatchSlot {
+    fn guard(&self) -> MutexGuard<'_, Option<Arc<StopSignal>>> {
+        // 다른 스레드가 잠근 채 죽었어도 자리 값 자체는 쓸 수 있다.
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// 자리를 잡는다. 이미 도는 배치가 있으면 `Busy`.
+    pub fn begin(&self) -> Result<BatchTicket<'_>, EngineError> {
+        let mut current = self.guard();
+        if current.is_some() {
+            return Err(EngineError::Busy);
+        }
+        let signal = Arc::new(StopSignal::new());
+        *current = Some(Arc::clone(&signal));
+        Ok(BatchTicket { slot: self, signal })
+    }
+
+    /// 도는 배치를 멈추라고 한다. 도는 배치가 있었으면 `true`, 없었으면 아무 일도 하지 않고 `false`.
+    pub fn stop(&self) -> bool {
+        match self.guard().as_ref() {
+            Some(signal) => {
+                signal.stop();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// 배치가 돌고 있는가.
+    pub fn is_running(&self) -> bool {
+        self.guard().is_some()
+    }
+}
+
+impl BatchTicket<'_> {
+    /// 이 배치를 멈추는 신호. `run_batch_with_stop`에 넘긴다.
+    pub fn signal(&self) -> &StopSignal {
+        &self.signal
+    }
+}
+
+impl Drop for BatchTicket<'_> {
+    fn drop(&mut self) {
+        *self.slot.guard() = None;
+    }
+}
+
+/// 엔진 프로세스와 그 프로세스가 띄운 프로세스들을 한꺼번에 끝내는 묶음.
+///
+/// Windows에서는 Job Object다(`engine_win32.rs`) — `python`이 다른 실행 파일을 띄우는 껍데기(가상 환경의 실행기 등)여도,
+/// 엔진이 도중에 다른 프로그램(git)을 띄웠어도 남기지 않는다. 다른 OS에서는 띄운 프로세스 하나만 끝낸다.
+#[cfg(windows)]
+use crate::engine_win32::ProcessGroup;
+
+#[cfg(not(windows))]
+struct ProcessGroup;
+
+#[cfg(not(windows))]
+impl ProcessGroup {
+    fn adopt(_child: &Child) -> Self {
+        Self
+    }
+
+    fn terminate(&self) {}
+}
+
+/// 멈춘 엔진 프로세스를 남기지 않는다: 묶음을 끝내고, 띄운 프로세스가 죽은 것을 확인한다.
+fn kill_engine(child: &mut Child, group: &ProcessGroup) {
+    group.terminate();
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 // ── 배치 실행 ─────────────────────────────────────────────────────────────────
 
 /// 창 없는 프로그램에서 띄운 콘솔 프로그램이 검은 창을 번쩍이지 않게 한다.
@@ -333,8 +447,13 @@ fn run_worker(
     config: &EngineConfig,
     lines: &[String],
     cancel: &AtomicBool,
+    stop: &StopSignal,
     on_row: &(dyn Fn() + Sync),
 ) -> Result<Vec<Value>, EngineError> {
+    // 이미 멈추라고 했으면 띄우지 않는다.
+    if stop.is_stopped() {
+        return Err(EngineError::Stopped);
+    }
     let mut cmd = Command::new(&config.python);
     cmd.args(["-m", "runner.sim", "--batch"])
         .current_dir(&config.engine_dir)
@@ -349,6 +468,7 @@ fn run_worker(
         python: config.python.clone(),
         detail: e.to_string(),
     })?;
+    let group = ProcessGroup::adopt(&child);
 
     let mut stdin = child.stdin.take().expect("stdin 파이프");
     let stdout = child.stdout.take().expect("stdout 파이프");
@@ -391,7 +511,9 @@ fn run_worker(
                     })
                 }
             }
-            let stop = if cancel.load(Ordering::Relaxed) {
+            let halt = if stop.is_stopped() {
+                Some(EngineError::Stopped)
+            } else if cancel.load(Ordering::Relaxed) {
                 Some(EngineError::Cancelled)
             } else if Instant::now() >= deadline {
                 Some(EngineError::Timeout {
@@ -400,15 +522,14 @@ fn run_worker(
             } else {
                 None
             };
-            if let Some(reason) = stop {
+            if let Some(reason) = halt {
                 break Err(reason);
             }
             thread::sleep(Duration::from_millis(15));
         };
         if status.is_err() {
             // 멈춘 프로세스를 남기지 않는다. 죽으면 파이프가 닫혀 읽는 쪽도 끝난다.
-            let _ = child.kill();
-            let _ = child.wait();
+            kill_engine(&mut child, &group);
         }
         let out_lines = reader.join().unwrap_or_else(|_| Ok(Vec::new()));
         let err_text = errors.join().unwrap_or_default();
@@ -453,6 +574,18 @@ pub fn run_batch(
     requests: &[Value],
     on_progress: Option<&(dyn Fn(usize, usize) + Sync)>,
 ) -> Result<Vec<Value>, EngineError> {
+    run_batch_with_stop(config, requests, on_progress, &StopSignal::new())
+}
+
+/// `run_batch`와 같되 밖에서 멈출 수 있다: `stop`이 켜지면 엔진 프로세스를 모두 끝내고 `EngineError::Stopped`를
+/// 돌려준다(프로세스마다 0.015초 간격으로 신호를 본다). 그때까지 끝난 결과는 버린다 — 일부만 계산된 배치를 결과로
+/// 내지 않는다.
+pub fn run_batch_with_stop(
+    config: &EngineConfig,
+    requests: &[Value],
+    on_progress: Option<&(dyn Fn(usize, usize) + Sync)>,
+    stop: &StopSignal,
+) -> Result<Vec<Value>, EngineError> {
     let total = requests.len();
     if total == 0 {
         return Ok(Vec::new());
@@ -492,7 +625,7 @@ pub fn run_batch(
                 let lines: Vec<String> = chunk.iter().map(|&i| numbered[i].clone()).collect();
                 let (cancel, report) = (&cancel, &report);
                 scope.spawn(move || {
-                    let outcome = run_worker(config, &lines, cancel, report);
+                    let outcome = run_worker(config, &lines, cancel, stop, report);
                     if outcome.is_err() {
                         cancel.store(true, Ordering::Relaxed);
                     }
@@ -511,6 +644,11 @@ pub fn run_batch(
             })
             .collect()
     });
+
+    // 멈추라고 했으면 그것이 답이다 — 프로세스가 죽으며 낸 다른 오류나, 마침 다 끝난 결과로 덮지 않는다.
+    if stop.is_stopped() {
+        return Err(EngineError::Stopped);
+    }
 
     // 먼저 난 진짜 오류를 알린다. "다른 프로세스 때문에 멈췄다"는 그 결과일 뿐이다.
     let mut cancelled = false;
@@ -717,6 +855,65 @@ mod tests {
     }
 
     #[test]
+    fn a_stopped_batch_says_so_in_words_the_screen_shows() {
+        let message = EngineError::Stopped.to_string();
+        assert!(message.starts_with(STOPPED_PREFIX), "{message}");
+        assert_eq!(STOPPED_PREFIX, "중단됨");
+        // 다른 프로세스의 오류로 멈춘 것과는 다른 말이다.
+        assert_ne!(message, EngineError::Cancelled.to_string());
+    }
+
+    #[test]
+    fn a_batch_stopped_before_it_starts_never_launches_the_engine() {
+        // 없는 python이다 — 띄우려 했다면 Spawn 오류가 난다.
+        let config = EngineConfig {
+            engine_dir: repo_root(),
+            python: "nikke-companion-없는-python".into(),
+            concurrency: 2,
+            timeout: DEFAULT_TIMEOUT,
+        };
+        let stop = StopSignal::new();
+        assert!(!stop.is_stopped());
+        stop.stop();
+        assert!(stop.is_stopped());
+        let err = run_batch_with_stop(
+            &config,
+            &[json!({"squad": ["크라운"]}), json!({"squad": ["헬름"]})],
+            None,
+            &stop,
+        )
+        .unwrap_err();
+        assert_eq!(err, EngineError::Stopped);
+        // 엔진에 보낼 것이 없는 배치도 멈추라고 했으면 결과를 내지 않는다.
+        assert_eq!(
+            run_batch_with_stop(&config, &[json!("문자열")], None, &stop),
+            Err(EngineError::Stopped)
+        );
+    }
+
+    #[test]
+    fn only_one_batch_holds_the_slot_and_stop_reaches_only_that_batch() {
+        let slot = BatchSlot::default();
+        assert!(!slot.is_running());
+        assert!(!slot.stop(), "도는 배치가 없으면 멈출 것도 없다");
+
+        let first = slot.begin().expect("첫 배치");
+        assert!(slot.is_running());
+        assert_eq!(slot.begin().unwrap_err(), EngineError::Busy);
+        assert!(!first.signal().is_stopped());
+        assert!(slot.stop());
+        assert!(first.signal().is_stopped());
+        assert!(slot.stop(), "두 번 눌러도 된다");
+        drop(first);
+
+        // 끝난 뒤에는 자리가 비고, 다음 배치는 앞 배치의 중단을 물려받지 않는다.
+        assert!(!slot.is_running());
+        assert!(!slot.stop());
+        let second = slot.begin().expect("중단 뒤 다시 실행");
+        assert!(!second.signal().is_stopped());
+    }
+
+    #[test]
     fn catalog_of_a_folder_without_data_is_an_error() {
         assert!(matches!(
             catalog(&std::env::temp_dir().join("nikke-companion-없는-엔진")),
@@ -750,6 +947,7 @@ mod tests {
             EngineError::Exit { code: "2".into(), detail: "usage".into() },
             EngineError::MissingResult { index: 3 },
             EngineError::Cancelled,
+            EngineError::Stopped,
             EngineError::Busy,
         ];
         for e in all {

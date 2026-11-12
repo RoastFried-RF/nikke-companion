@@ -64,6 +64,14 @@ export function engineRunBatch(requests: EngineRequest[]): Promise<EngineRow[]> 
   return invoke<EngineRow[]>('engine_run_batch', { requests });
 }
 
+/**
+ * 도는 엔진 배치를 멈춘다. 멈출 배치가 있었으면 true — 그 배치의 `engineRunBatch`가 '중단됨' 오류로 거부된다.
+ * 도는 배치가 없으면 Rust는 아무 일도 하지 않고 false를 돌려준다.
+ */
+export function engineCancel(): Promise<boolean> {
+  return invoke<boolean>('engine_cancel');
+}
+
 /** JSON 파일(계정 상태·전투 조건·후보 편성)을 읽는다. 실패하면 한국어 오류 문장으로 거부된다. */
 export function readJsonFile(path: string): Promise<unknown> {
   return invoke<unknown>('read_json_file', { path });

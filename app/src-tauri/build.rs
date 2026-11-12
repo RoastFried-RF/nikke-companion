@@ -10,6 +10,7 @@ fn main() {
             "engine_catalog",
             "engine_version",
             "engine_run_batch",
+            "engine_cancel",
             "read_json_file",
             "pick_json_file",
             "game_window_status",

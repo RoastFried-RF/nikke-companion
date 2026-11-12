@@ -2,7 +2,7 @@
 // 계산 실행: 계정 파일과 조건 파일을 골라 추천(suggest)·비교(compare)를 돌린다.
 // 계산은 루트의 src/core가 하고(lib/compute.ts), 엔진 프로세스는 Rust가 띄운다. 결과는 부모가 그린다.
 import { onBeforeUnmount, reactive, ref } from 'vue';
-import { errorMessage, onEngineProgress, pickJsonFile } from '../lib/backend';
+import { engineCancel, errorMessage, onEngineProgress, pickJsonFile } from '../lib/backend';
 import { DEFAULT_BUDGET, DEFAULT_LIMIT, DEFAULT_TOP, defaultDeps, runCompare, runSuggest, type ComputeDeps } from '../lib/compute';
 import type { CompareReport, EngineProgress, SearchStage } from '../types';
 
@@ -18,7 +18,12 @@ const emit = defineEmits<{
   start: [];
   done: [report: CompareReport];
   fail: [message: string];
+  /** 사용자가 중단했다. 결과도 오류도 아니다 — 부모는 계산 전의 화면으로 돌아간다. */
+  cancel: [];
 }>();
+
+/** 중단을 눌렀는데 엔진 배치가 아직 시작 전이면 다시 청하는 간격(밀리초). */
+const STOP_RETRY_MS = 100;
 
 const FIELDS: Record<Field, { label: string; title: string; placeholder: string }> = {
   account: { label: '계정', title: '계정 상태 파일 고르기', placeholder: '계정 상태 JSON 파일 경로' },
@@ -61,6 +66,12 @@ const budget = ref<number | ''>('');
 const refine = ref(remembered('refine') !== 'off');
 
 const computing = ref(false);
+/** 사용자가 중단을 눌렀다. 이 실행은 어떻게 끝나든 '중단됨'이다. */
+const stopping = ref(false);
+/** 마지막 실행이 중단으로 끝났다. 다음 실행을 시작하면 지운다. */
+const stopped = ref(false);
+/** Rust에 맡긴 엔진 배치가 아직 돌아오지 않았다(멈출 것이 있다). */
+let engineBusy = false;
 /** 엔진에 넘긴 요청 수와 끝난 수. 엔진을 부르기 전에는 null. */
 const progress = ref<EngineProgress | null>(null);
 /** 추천이 지금 어느 단계인지와 쓴 예산(계산 코드가 단계마다 알려 준다). 비교에서는 null. */
@@ -84,9 +95,33 @@ async function pick(field: Field): Promise<void> {
 
 const count = (value: number | ''): number | undefined => (value === '' ? undefined : value);
 
+/** 중단으로 끝낼 때 계산 코드에 던지는 값. 화면에는 보이지 않는다(중단은 `stopping`으로 가린다). */
+const STOPPED = '중단됨';
+
+/**
+ * 도는 계산을 멈춘다. Rust가 엔진 프로세스를 모두 끝내고 배치 호출이 '중단됨' 오류로 돌아오면 `run`이 마무리한다.
+ * 엔진 배치 사이(파일 읽기·캐시 확인 중)에 눌렀으면 멈출 프로세스가 없다 — 다음 배치를 엔진에 보내지 않고 끝낸다.
+ */
+async function stop(): Promise<void> {
+  if (!computing.value || stopping.value) return;
+  stopping.value = true;
+  // 배치 호출이 Rust에 닿기 직전에 눌렀으면 Rust는 "도는 배치 없음"으로 답한다. 그 배치가 돌아올 때까지 다시 청한다.
+  while (computing.value && engineBusy) {
+    try {
+      if (await engineCancel()) return;
+    } catch {
+      // 중단 명령을 보내지 못했다. 계산은 끝까지 가지만 결과는 쓰지 않는다(이 실행은 중단으로 끝난다).
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, STOP_RETRY_MS));
+  }
+}
+
 async function run(): Promise<void> {
   if (computing.value || props.disabled) return;
   computing.value = true;
+  stopping.value = false;
+  stopped.value = false;
   progress.value = null;
   stage.value = null;
   elapsed.value = 0;
@@ -112,9 +147,16 @@ async function run(): Promise<void> {
       ...defaultDeps,
       runtime: {
         ...defaultDeps.runtime,
-        runBatch: (requests, options) => {
+        runBatch: async (requests, options) => {
+          // 중단을 누른 뒤에는 엔진을 띄우지 않는다.
+          if (stopping.value) throw STOPPED;
           progress.value = { done: 0, total: requests.length };
-          return defaultDeps.runtime.runBatch(requests, options);
+          engineBusy = true;
+          try {
+            return await defaultDeps.runtime.runBatch(requests, options);
+          } finally {
+            engineBusy = false;
+          }
         },
       },
       // 단계가 바뀌면 앞 단계의 건수를 지운다. 이 단계의 요청이 모두 캐시에 있으면 엔진을 부르지 않는다.
@@ -137,6 +179,12 @@ async function run(): Promise<void> {
             deps,
           )
         : await runCompare({ accountPath: paths.account, conditionPath: paths.condition, squadsPath: paths.squads }, deps);
+    // 중단을 눌렀으면 마침 끝난 계산도 결과로 쓰지 않는다 — 누른 뒤의 화면은 언제나 '중단됨'이다.
+    if (stopping.value) {
+      stopped.value = true;
+      emit('cancel');
+      return;
+    }
     remember('account', paths.account.trim());
     remember('condition', paths.condition.trim());
     if (mode.value === 'compare') remember('squads', paths.squads.trim());
@@ -144,11 +192,18 @@ async function run(): Promise<void> {
     remember('mode', mode.value);
     emit('done', report);
   } catch (e) {
-    emit('fail', errorMessage(e));
+    // 중단으로 엔진이 낸 오류('중단됨', 죽은 프로세스의 오류)는 오류로 보이지 않는다.
+    if (stopping.value) {
+      stopped.value = true;
+      emit('cancel');
+    } else {
+      emit('fail', errorMessage(e));
+    }
   } finally {
     unlisten?.();
     stopTimer();
     computing.value = false;
+    stopping.value = false;
     progress.value = null;
     stage.value = null;
   }
@@ -251,10 +306,26 @@ onBeforeUnmount(stopTimer);
         </label>
       </template>
       <span class="compute__spacer"></span>
+      <!-- 중단 단추는 계산이 도는 동안에만 있다. -->
+      <button
+        v-if="computing"
+        class="compute__stop"
+        type="button"
+        title="도는 계산을 멈춘다 (엔진 프로세스를 끝낸다)"
+        :disabled="stopping"
+        data-testid="stop-compute"
+        @click="stop"
+      >
+        {{ stopping ? '중단하는 중…' : '중단' }}
+      </button>
       <button class="compute__run" type="button" :disabled="computing || disabled" data-testid="run-compute" @click="run">
         {{ computing ? '계산 중…' : mode === 'suggest' ? '추천 실행' : '비교 실행' }}
       </button>
     </div>
+
+    <p v-if="stopped && !computing" class="compute__stopped" role="status" data-testid="compute-stopped">
+      중단됨 — 계산을 멈췄다. 결과는 계산 전 그대로다.
+    </p>
 
     <p v-if="computing" class="compute__progress" role="status" aria-live="polite" data-testid="compute-progress">
       <template v-if="progress">
@@ -346,7 +417,23 @@ onBeforeUnmount(stopTimer);
   font-weight: 700;
 }
 
+.compute__stop {
+  padding: 3px 10px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.compute__stopped {
+  margin: 0;
+  color: var(--muted);
+}
+
 .compute__pick:disabled,
+.compute__stop:disabled,
 .compute__run:disabled {
   opacity: 0.6;
   cursor: default;

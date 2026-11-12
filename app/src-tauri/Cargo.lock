@@ -1931,6 +1931,7 @@ name = "nikke-companion"
 version = "0.1.0"
 dependencies = [
  "png",
+ "raw-window-handle",
  "rfd",
  "serde",
  "serde_json",

@@ -19,6 +19,7 @@ vi.mock('../src/lib/backend', async (importOriginal) => ({
   engineCatalog: vi.fn(),
   engineVersion: vi.fn(),
   engineRunBatch: vi.fn(),
+  engineCancel: vi.fn(),
   readJsonFile: vi.fn(),
   pickJsonFile: vi.fn(),
   onEngineProgress: vi.fn(),
@@ -41,6 +42,8 @@ interface PendingBatch {
   requests: EngineRequest[];
   finish: (rows?: EngineRow[]) => void;
   fail: (reason: unknown) => void;
+  /** 끝났나(결과든 오류든). */
+  settled: boolean;
 }
 let batches: PendingBatch[] = [];
 /** 엔진 배치를 테스트가 붙들고 있나(`holdEngine`). */
@@ -51,7 +54,19 @@ function holdEngine(): void {
   api.engineRunBatch.mockImplementation(
     (requests) =>
       new Promise<EngineRow[]>((resolve, reject) => {
-        batches.push({ requests, finish: (rows) => resolve(rows ?? requests.map((r) => fakeRow(r))), fail: reject });
+        const batch: PendingBatch = {
+          requests,
+          settled: false,
+          finish: (rows) => {
+            batch.settled = true;
+            resolve(rows ?? requests.map((r) => fakeRow(r)));
+          },
+          fail: (reason) => {
+            batch.settled = true;
+            reject(reason);
+          },
+        };
+        batches.push(batch);
       }),
   );
 }
@@ -122,6 +137,12 @@ beforeEach(() => {
   api.engineCatalog.mockResolvedValue(catalog);
   api.engineVersion.mockResolvedValue(FAKE_EVALUATOR);
   api.engineRunBatch.mockImplementation(async (requests) => requests.map((r) => fakeRow(r)));
+  // 중단 명령: Rust처럼 도는 배치를 '중단됨' 오류로 끝내고 true를, 도는 배치가 없으면 false를 돌려준다.
+  api.engineCancel.mockImplementation(async () => {
+    const running = batches.filter((b) => !b.settled);
+    for (const b of running) b.fail('중단됨: 엔진 계산을 멈췄다');
+    return running.length > 0;
+  });
   api.readJsonFile.mockImplementation(async (path) => {
     if (!(path in documents)) throw `파일을 찾을 수 없다: ${path}`;
     return structuredClone(documents[path]);
@@ -444,6 +465,159 @@ describe('오류 표시', () => {
     await start(w);
     expect(at(w, 'error').exists()).toBe(false);
     expect(w.findAll('[data-testid="ranking-entry"]').length).toBeGreaterThan(0);
+  });
+});
+
+describe('계산 중단', () => {
+  it('중단 단추는 계산이 도는 동안에만 보인다', async () => {
+    holdEngine();
+    const w = await render();
+    expect(at(w, 'stop-compute').exists()).toBe(false);
+    await fillPaths(w);
+    await refineOff(w);
+    await start(w);
+    expect(at(w, 'stop-compute').exists()).toBe(true);
+    expect(at(w, 'stop-compute').text()).toBe('중단');
+    expect(at(w, 'compute-stopped').exists()).toBe(false);
+
+    batches[0].finish();
+    await settle(w);
+    // 끝까지 간 계산: 단추가 사라지고 '중단됨'은 없다.
+    expect(at(w, 'stop-compute').exists()).toBe(false);
+    expect(at(w, 'compute-stopped').exists()).toBe(false);
+    expect(api.engineCancel).not.toHaveBeenCalled();
+    expect(w.findAll('[data-testid="ranking-entry"]').length).toBeGreaterThan(0);
+  });
+
+  it('중단하면 엔진을 멈추고 상태가 중단됨이 된다. 이전 결과는 그대로 남고 오류는 뜨지 않는다', async () => {
+    holdEngine();
+    api.startupReportPath.mockResolvedValue('D:\\old.json');
+    const w = await render();
+    const before = { names: texts(w, 'squad-name'), totals: texts(w, 'total-raw') };
+    expect(before.names).toContain('A 레드후드-앨리스');
+
+    await fillPaths(w);
+    await at(w, 'suggest-limit').setValue('6');
+    await refineOff(w);
+    await start(w);
+    // 계산하는 동안에는 이전 결과를 치워 둔다(새 계산의 결과로 오해하지 않게).
+    expect(at(w, 'ranking-entry').exists()).toBe(false);
+    expect(at(w, 'compute-progress').text()).toContain('0/6건 끝남');
+
+    await at(w, 'stop-compute').trigger('click');
+    await settle(w);
+
+    // Rust의 중단 명령을 한 번 불렀고, 배치는 '중단됨' 오류로 끝났다.
+    expect(api.engineCancel).toHaveBeenCalledTimes(1);
+    expect(batches).toHaveLength(1);
+    expect(batches[0].settled).toBe(true);
+    // 상태는 '중단됨'이고 오류가 아니다.
+    expect(at(w, 'compute-stopped').text()).toMatch(/^중단됨/);
+    expect(at(w, 'compute-stopped').attributes('role')).toBe('status');
+    expect(at(w, 'error').exists()).toBe(false);
+    expect(at(w, 'compute-progress').exists()).toBe(false);
+    expect(at(w, 'stop-compute').exists()).toBe(false);
+    expect(at(w, 'run-compute').text()).toBe('추천 실행');
+    expect(at(w, 'run-compute').attributes('disabled')).toBeUndefined();
+    expect(at(w, 'load-report').attributes('disabled')).toBeUndefined();
+    // 이전 결과가 그대로 다시 보인다.
+    expect({ names: texts(w, 'squad-name'), totals: texts(w, 'total-raw') }).toEqual(before);
+    // 멈춘 계산의 요청은 캐시에 남지 않는다.
+    expect(simCache.size).toBe(0);
+    expect(unlistenProgress).toHaveBeenCalledTimes(1);
+  });
+
+  it('이전 결과가 없을 때 중단하면 결과 없이 중단됨만 보인다', async () => {
+    holdEngine();
+    const w = await render();
+    await fillPaths(w);
+    await refineOff(w);
+    await start(w);
+    await at(w, 'stop-compute').trigger('click');
+    await settle(w);
+    expect(at(w, 'compute-stopped').text()).toMatch(/^중단됨/);
+    expect(at(w, 'ranking-entry').exists()).toBe(false);
+    expect(at(w, 'error').exists()).toBe(false);
+  });
+
+  it('중단한 뒤에 다시 실행할 수 있다', async () => {
+    holdEngine();
+    const w = await render();
+    await fillPaths(w);
+    await at(w, 'suggest-limit').setValue('6');
+    await at(w, 'suggest-top').setValue('3');
+    await refineOff(w);
+    await start(w);
+    await at(w, 'stop-compute').trigger('click');
+    await settle(w);
+    expect(at(w, 'compute-stopped').exists()).toBe(true);
+
+    // 다시 실행: '중단됨'이 사라지고, 새 배치가 엔진에 가서 끝까지 돈다.
+    await start(w);
+    expect(at(w, 'compute-stopped').exists()).toBe(false);
+    expect(at(w, 'stop-compute').exists()).toBe(true);
+    expect(batches).toHaveLength(2);
+    expect(batches[1].requests).toHaveLength(6);
+    batches[1].finish();
+    await settle(w);
+    expect(texts(w, 'rank')).toEqual(['1위', '2위', '3위']);
+    expect(at(w, 'compute-stopped').exists()).toBe(false);
+    expect(at(w, 'error').exists()).toBe(false);
+    expect(api.engineCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('두 단계 사이(엔진이 돌지 않을 때)나 2단계에서 중단해도 멈춘다 — 다음 배치를 엔진에 보내지 않는다', async () => {
+    holdEngine();
+    const w = await render();
+    await fillPaths(w);
+    await at(w, 'suggest-limit').setValue('6');
+    await at(w, 'suggest-budget').setValue('16');
+    await start(w);
+    expect(batches).toHaveLength(1);
+
+    // 1단계 배치가 막 돌아온 순간에 누른다: 멈출 엔진 프로세스가 없다.
+    batches[0].finish();
+    await at(w, 'stop-compute').trigger('click');
+    expect(at(w, 'stop-compute').text()).toBe('중단하는 중…');
+    expect(at(w, 'stop-compute').attributes('disabled')).toBeDefined();
+    await settle(w);
+    expect(batches).toHaveLength(1);
+    expect(at(w, 'compute-stopped').text()).toMatch(/^중단됨/);
+    expect(at(w, 'error').exists()).toBe(false);
+    expect(at(w, 'ranking-entry').exists()).toBe(false);
+  });
+
+  it('중단 명령이 닿기 전에 배치가 시작 전이었으면 다시 청해서 멈춘다', async () => {
+    holdEngine();
+    const w = await render();
+    await fillPaths(w);
+    await refineOff(w);
+    await start(w);
+    // 첫 청은 "도는 배치 없음"(Rust에 배치 호출이 아직 닿지 않았다), 다음 청에서 멈춘다.
+    api.engineCancel.mockResolvedValueOnce(false);
+    await at(w, 'stop-compute').trigger('click');
+    await vi.waitFor(() => expect(api.engineCancel).toHaveBeenCalledTimes(2));
+    await settle(w);
+    expect(at(w, 'compute-stopped').text()).toMatch(/^중단됨/);
+    expect(at(w, 'error').exists()).toBe(false);
+  });
+
+  it('중단 명령을 보내지 못해도 그 계산의 결과는 쓰지 않는다', async () => {
+    holdEngine();
+    api.engineCancel.mockRejectedValue('명령을 부를 수 없다');
+    const w = await render();
+    await fillPaths(w);
+    await refineOff(w);
+    await start(w);
+    await at(w, 'stop-compute').trigger('click');
+    await flushPromises();
+    // 엔진은 멈추지 못했다 — 계산이 끝까지 가도 누른 뒤의 화면은 '중단됨'이다.
+    expect(at(w, 'compute-progress').exists()).toBe(true);
+    batches[0].finish();
+    await settle(w);
+    expect(at(w, 'compute-stopped').text()).toMatch(/^중단됨/);
+    expect(at(w, 'ranking-entry').exists()).toBe(false);
+    expect(at(w, 'error').exists()).toBe(false);
   });
 });
 
