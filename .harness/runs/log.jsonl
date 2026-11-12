@@ -114,3 +114,4 @@
 {"at":"2026-11-12T06:57:50.001Z","event":"checkpoint","task":"P-021","commit":"e2bc9c7a93ea09848d7290b8e513930b5d038832","tree":"23874ee9d5b99fff46dfdbc17810edc7cbb8213e"}
 {"at":"2026-11-12T06:57:50.027Z","event":"verified","task":"P-021","attempt":1,"run":".harness/runs/20261112T060326-P-021-a1","tree":"23874ee9d5b99fff46dfdbc17810edc7cbb8213e","reason":null}
 {"at":"2026-11-12T06:57:50.054Z","event":"session_end","stop_reason":"한도 도달: 반복 2회","tasks":{"done":["H-001","P-001","P-002","P-003","P-004","H-002","P-005","P-006","P-007","P-008","P-009","P-010","P-011","P-012","P-013","P-016","P-015","P-018","P-019","P-017","P-020","P-021"],"pending":["P-023","P-022"],"blocked":["P-014"]}}
+{"at":"2026-11-12T06:58:25.205Z","event":"session_start","model":"claude-fable-5-2","head":"590556a7b92f3f034a0f4b6c35f3cb448be215f3","git_status":[]}

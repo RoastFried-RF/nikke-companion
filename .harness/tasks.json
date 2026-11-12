@@ -1256,9 +1256,19 @@
         "요격 횟수를 다 쓴 날에도 실제 게임의 선택·편성 화면에서 보스가 맞게 인식된다"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261112T065825-P-023-a1",
+        "verified_tree": "395e659611225e396f9641988a543961858d3c18",
+        "verified_at": "2026-11-12T07:09:42.289Z",
+        "commit": null
+      }
     },
     {
       "id": "P-022",

@@ -1,0 +1,263 @@
+$ cargo test --manifest-path app/src-tauri/Cargo.toml
+
+running 165 tests
+test capture::tests::a_frame_whose_pixel_count_does_not_match_its_size_is_judged_pixel_by_pixel ... ok
+test capture::tests::bgra_rows_become_rgb_and_padding_is_skipped ... ok
+test capture::tests::all_black_frame_is_blank ... ok
+test capture::tests::blank_kinds_are_described_in_korean ... ok
+test capture::tests::capture_dir_prefers_the_environment_variable ... ok
+test capture::tests::check_frame_rejects_blank_and_wrong_size ... ok
+test capture::tests::client_crop_refuses_areas_outside_the_surface ... ok
+test capture::tests::client_crop_removes_title_bar_and_borders ... ok
+test capture::tests::empty_frame_is_blank ... ok
+test capture::tests::capture_record_serializes_the_documented_fields ... ok
+test capture::tests::labels_keep_only_file_name_safe_characters ... ok
+test capture::tests::long_labels_are_cut ... ok
+test capture::tests::capture_dir_defaults_to_the_repository_data_captures ... ok
+test capture::tests::method_name_matches_the_json_value ... ok
+test capture::tests::file_name_is_time_plus_label ... ok
+test capture::tests::capture_dir_is_unknown_outside_the_repository ... ok
+test capture::tests::single_colour_frame_is_blank ... ok
+test capture::tests::unix_time_becomes_a_utc_calendar_time ... ok
+test capture_cli::tests::parses_info_capture_and_help ... ok
+test capture_cli::tests::rejects_bad_arguments_in_korean ... ok
+test capture_cli::tests::bad_arguments_print_usage_and_exit_with_1_without_touching_the_game ... ok
+test capture::tests::a_frame_with_any_different_pixel_is_not_blank ... ok
+test capture_cli::tests::capture_prints_the_record_as_one_json_line ... ok
+test capture::tests::saving_a_frame_with_wrong_pixel_count_fails_and_leaves_no_file ... ok
+test engine::tests::a_stopped_batch_says_so_in_words_the_screen_shows ... ok
+test engine::tests::a_configured_folder_that_is_not_the_engine_is_an_error ... ok
+test capture_cli::tests::info_of_a_minimized_window_still_succeeds ... ok
+test capture_cli::tests::info_prints_the_window_as_one_json_line ... ok
+test capture_cli::tests::help_prints_usage_and_succeeds ... ok
+test engine::tests::a_batch_stopped_before_it_starts_never_launches_the_engine ... ok
+test engine::tests::chunks_are_round_robin_and_never_more_than_four ... ok
+test engine::tests::catalog_of_a_folder_without_data_is_an_error ... ok
+test engine::tests::empty_batch_does_not_start_the_engine ... ok
+test engine::tests::config_defaults_to_repo_engine_and_path_python ... ok
+test capture_cli::tests::capture_without_out_uses_the_default_folder ... ok
+test engine::tests::every_error_message_is_korean ... ok
+test engine::tests::environment_overrides_settings_file_which_overrides_defaults ... ok
+test engine::tests::only_one_batch_holds_the_slot_and_stop_reaches_only_that_batch ... ok
+test engine::tests::missing_settings_file_means_defaults ... ok
+test engine::tests::settings_file_fields_are_optional ... ok
+test engine::tests::row_index_accepts_only_request_numbers ... ok
+test engine::tests::settings_file_rejects_unknown_fields_and_broken_json ... ok
+test game_window::tests::a_minimized_game_window_is_still_the_game_window ... ok
+test capture::tests::load_png_explains_missing_and_broken_files ... ok
+test game_window::tests::a_window_titled_like_the_game_in_another_process_is_ignored ... ok
+test game_window::tests::among_several_game_windows_the_titled_visible_largest_one_wins ... ok
+test capture::tests::saved_png_round_trips_pixels ... ok
+test game_window::tests::candidates_are_collected_by_process_name_or_title ... ok
+test game_window::tests::errors_are_korean_sentences_and_only_missing_game_is_flagged ... ok
+test game_window::tests::follow_target_exists_only_while_attached_to_a_capturable_window ... ok
+test game_window::tests::follow_target_tracks_game_moves_and_resizes ... ok
+test game_window::tests::game_is_chosen_over_the_launcher_with_the_same_title ... ok
+test capture_cli::tests::recognize_live_recognises_the_game_screen_and_saves_nothing ... ok
+test game_window::tests::invisible_cloaked_and_empty_game_windows_are_filtered_out ... ok
+test capture_cli::tests::capture_failures_exit_with_1_and_a_korean_message ... ok
+test game_window::tests::launcher_alone_is_not_the_game ... ok
+test engine::tests::finds_the_engine_by_walking_up_from_the_executable ... ok
+test game_window::tests::no_candidates_means_no_game ... ok
+test game_window::tests::overlay_attaches_inside_the_top_right_of_the_game_client_area ... ok
+test game_window::tests::overlay_moves_only_when_the_target_changes ... ok
+test game_window::tests::overlay_wider_than_the_game_stays_at_the_game_left_edge ... ok
+test game_window::tests::process_name_comparison_ignores_case_but_not_extra_text ... ok
+test capture_cli::tests::recognize_of_a_missing_or_broken_file_exits_with_1 ... ok
+test game_window::tests::status_reports_found_and_minimized ... ok
+test game_window::tests::status_reports_missing_launcher_only_and_unavailable ... ok
+test overlay_state::tests::a_second_launch_changes_nothing_when_the_overlay_is_already_visible ... ok
+test game_window::tests::status_serializes_for_the_front_end ... ok
+test overlay_state::tests::a_second_launch_shows_a_hidden_overlay_without_activating_it ... ok
+test overlay_state::tests::click_through_toggle_is_ignored_while_hidden ... ok
+test overlay_state::tests::click_through_toggles_on_and_off_while_visible ... ok
+test overlay_state::tests::hide_then_show_restores_click_through_mode ... ok
+test overlay_state::tests::no_transition_takes_keyboard_focus ... ok
+test overlay_state::tests::only_changed_fields_are_reported ... ok
+test capture::tests::load_png_drops_alpha_and_expands_greyscale ... ok
+test overlay_state::tests::serializes_with_snake_case_fields ... ok
+test overlay_state::tests::starts_visible_and_interactive ... ok
+test overlay_state::tests::apply_does_not_mutate_the_original ... ok
+test overlay_state::tests::showing_the_overlay_never_activates_it ... ok
+test capture_cli::tests::missing_game_exits_with_2_and_a_korean_message ... ok
+test overlay_state::tests::top_right_never_leaves_the_work_area ... ok
+test overlay_state::tests::top_right_places_window_inside_the_work_area ... ok
+test overlay_state::tests::visibility_toggles_and_keeps_click_through ... ok
+test overlay_win32::tests::the_dialog_parent_hands_over_the_overlay_window_handle ... ok
+test overlay_win32::tests::a_handle_that_is_not_a_window_is_reported_not_ignored ... ok
+test overlay_win32::tests::the_overlay_is_shown_with_the_no_activate_command ... ok
+test capture_cli::tests::recognize_live_without_the_game_exits_with_2 ... ok
+test recognize::tests::a_challenge_button_in_another_boss_colour_is_still_unknown ... ok
+test recognize::tests::boss_ids_and_names_match_the_boss_bundle ... ok
+test recognize::tests::a_missing_required_mark_is_unknown_whatever_the_button_looks_like ... ok
+test recognize::tests::confidence_follows_the_weakest_mark ... ok
+test recognize::tests::decide_explains_what_it_saw ... ok
+test recognize::tests::decide_boundaries_of_each_squad_mark ... ok
+test recognize::tests::decide_boundaries_of_each_select_mark ... ok
+test recognize::tests::decide_recognises_each_boss_on_both_screens ... ok
+test recognize::tests::decide_refuses_incomplete_or_contradictory_layouts ... ok
+test capture::tests::saving_creates_the_folder_and_never_overwrites ... ok
+test recognize::tests::decide_recognises_the_squad_screen_when_the_enter_button_is_not_red ... ok
+test recognize::tests::decide_recognises_the_select_screen_when_the_challenge_button_has_no_theme_colour ... ok
+test recognize::tests::hsv_of_primary_and_grey_colours ... ok
+test recognize::tests::decide_refuses_when_marks_of_two_bosses_are_mixed ... ok
+test recognize::tests::hue_range_includes_both_ends_and_wraps_around_zero ... ok
+test recognize::tests::decide_says_other_when_the_bottom_strip_has_no_theme_colour ... ok
+test recognize::tests::read_theme_boundaries ... ok
+test recognize::tests::read_theme_reports_two_bosses_as_mixed ... ok
+test recognize::tests::region_pixel_maps_cell_centres_to_pixels ... ok
+test recognize::tests::regions_stay_inside_the_frame_and_sample_a_fixed_number_of_points ... ok
+test recognize::tests::representative_theme_colours_belong_to_their_boss ... ok
+test engine::tests::a_python_that_cannot_start_is_reported ... ok
+test recognize::tests::tally_counts_theme_blue_and_red_separately ... ok
+test recognize::tests::theme_needs_enough_saturation_and_value ... ok
+test report::tests::every_error_message_is_korean ... ok
+test report::tests::empty_path_and_directory_are_errors ... ok
+test report::tests::missing_file_is_a_korean_error ... ok
+test report::tests::missing_schema_version_is_an_error ... ok
+test recognize::tests::theme_hue_ranges_do_not_overlap_and_leave_gaps ... ok
+test report::tests::path_input_is_trimmed_and_unquoted ... ok
+test report::tests::other_result_kinds_are_rejected ... ok
+test recognize::tests::broken_or_tiny_frames_are_unknown ... ok
+test report::tests::non_utf8_is_an_error ... ok
+test report::tests::schema_version_mismatch_names_both_versions ... ok
+test report::tests::startup_path_is_the_first_non_option_argument ... ok
+test report::tests::required_fields_are_checked ... ok
+test report::tests::reads_the_sample_report_made_by_the_real_cli ... ok
+test report::tests::suggest_results_are_accepted ... ok
+test report::tests::top_level_must_be_an_object ... ok
+test report::tests::schema_version_must_be_the_number_one ... ok
+test report::tests::returns_the_document_unchanged ... ok
+test screen_track::tests::a_busy_cycle_changes_nothing ... ok
+test screen_track::tests::a_different_boss_or_screen_is_reported ... ok
+test screen_track::tests::a_reading_is_reported_once_and_not_again_while_it_stays_the_same ... ok
+test screen_track::tests::capture_errors_become_pauses_or_failures ... ok
+test screen_track::tests::changing_only_the_interval_is_reported_and_keeps_the_reading ... ok
+test screen_track::tests::describe_never_names_a_boss_it_did_not_see ... ok
+test screen_track::tests::hiding_the_overlay_pauses_and_showing_it_resumes ... ok
+test screen_track::tests::it_captures_only_when_enabled_visible_and_the_game_window_is_up ... ok
+test screen_track::tests::it_resumes_by_itself_when_the_game_comes_back ... ok
+test screen_track::tests::pauses_map_to_states_and_korean_reasons ... ok
+test screen_track::tests::readings_that_arrive_while_off_are_dropped ... ok
+test screen_track::tests::repeated_failures_are_one_state_with_a_count_not_a_pile_of_errors ... ok
+test screen_track::tests::the_default_is_off_with_a_two_second_interval ... ok
+test report::tests::utf8_bom_is_accepted ... ok
+test screen_track::tests::the_game_gate_hands_over_the_window_or_says_why_not ... ok
+test screen_track::tests::the_interval_is_kept_inside_its_range ... ok
+test screen_track::tests::the_status_serializes_the_way_the_screen_reads_it ... ok
+test recognize::tests::recognition_serialises_to_the_documented_shape ... ok
+test screen_track::tests::turning_it_on_and_off_is_reported_and_clears_what_was_read ... ok
+test report::tests::reads_any_json_file_without_report_checks ... ok
+test report::tests::truncated_and_empty_json_are_reported ... ok
+test report::tests::non_json_is_a_korean_error_with_position ... ok
+test recognize::tests::one_recognition_samples_the_same_few_points_whatever_the_frame_size ... ok
+test recognize::tests::frames_with_another_aspect_ratio_are_unknown ... ok
+test recognize::tests::spent_screens_mixing_two_bosses_are_still_unknown ... ok
+test engine::tests::version_of_a_non_repository_has_no_commit ... ok
+test recognize::tests::images_mixing_two_bosses_are_unknown ... ok
+test recognize::tests::synthetic_non_anomaly_screens_are_other ... ok
+test recognize::tests::partial_screens_are_unknown_not_guessed ... ok
+test recognize::tests::screens_without_marks_stay_other_whatever_the_buttons_look_like ... ok
+test recognize::tests::synthetic_screens_are_recognised_for_every_boss_at_every_size ... ok
+test capture_cli::tests::recognize_reports_other_and_unknown_with_exit_code_0 ... ok
+test capture_cli::tests::recognize_prints_the_result_of_a_png_as_one_json_line_without_touching_the_game ... ok
+test recognize::tests::select_screen_with_a_grey_challenge_button_is_recognised ... ok
+test capture::tests::rounded_window_corners_do_not_make_a_single_colour_frame_look_fine ... ok
+test recognize::tests::squad_screen_with_a_grey_enter_button_is_recognised ... ok
+test recognize::tests::brightness_and_weak_noise_do_not_change_the_answer ... ok
+test recognize::tests::spent_screens_survive_brightness_and_weak_noise ... ok
+
+test result: ok. 165 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.12s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 6 tests
+test engine_runs_in_its_folder_with_utf8_and_batch_arguments ... ok
+test a_crashed_engine_process_fails_the_batch_and_stops_the_others ... ok
+test output_that_is_not_json_or_misses_a_request_is_an_error ... ok
+test real_engine_keeps_input_order_isolates_row_errors_and_is_deterministic ... ok
+test a_stuck_engine_is_stopped_at_the_time_limit ... ok
+test rust_command_and_node_runtime_give_the_same_total_damage ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.67s
+
+
+running 2 tests
+test stopping_a_long_real_batch_returns_within_seconds_and_leaves_no_engine_process ... ok
+test stopping_also_ends_processes_the_engine_started ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.29s
+
+
+running 4 tests
+test a_minimized_window_is_refused_and_captured_again_once_restored ... ignored, 화면이 켜진 Windows 데스크톱이 필요하다(창을 잠깐 띄운다)
+test a_single_colour_window_is_not_a_successful_capture ... ignored, 화면이 켜진 Windows 데스크톱이 필요하다(창을 잠깐 띄운다)
+test captures_exactly_the_client_area_of_a_framed_window ... ignored, 화면이 켜진 Windows 데스크톱이 필요하다(창을 잠깐 띄운다)
+test captures_the_window_content_when_another_window_covers_it ... ignored, 화면이 켜진 Windows 데스크톱이 필요하다(창을 잠깐 띄운다)
+
+test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 5 tests
+test captures_game_content_even_when_another_window_covers_it ... ignored, 실행 중인 니케(nikke.exe)가 필요하다
+test captures_the_client_area_without_touching_the_game_window ... ignored, 실행 중인 니케(nikke.exe)가 필요하다
+test cli_prints_window_info_and_saves_a_capture ... ignored, 실행 중인 니케(nikke.exe)가 필요하다
+test finds_the_game_window_and_not_the_launcher ... ignored, 실행 중인 니케(nikke.exe)가 필요하다
+test saves_a_png_that_matches_the_client_area ... ignored, 실행 중인 니케(nikke.exe)가 필요하다
+
+test result: ok. 0 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 7 tests
+test brightness_and_weak_noise_do_not_change_the_answer ... ignored, 라벨 붙은 게임 캡처(data/captures/labels.json)가 필요하다
+test captures_with_the_battle_button_greyed_out_get_the_same_answer ... ignored, 라벨 붙은 게임 캡처(data/captures/labels.json)가 필요하다
+test every_labeled_capture_gets_the_right_screen_and_boss ... ignored, 라벨 붙은 게임 캡처(data/captures/labels.json)가 필요하다
+test frames_with_another_aspect_ratio_are_unknown_instead_of_wrong ... ignored, 라벨 붙은 게임 캡처(data/captures/labels.json)가 필요하다
+test labels_cover_both_anomaly_screens_for_every_boss_and_some_other_screens ... ignored, 라벨 붙은 게임 캡처(data/captures/labels.json)가 필요하다
+test one_recognition_is_fast_and_looks_at_a_few_points_only ... ignored, 라벨 붙은 게임 캡처(data/captures/labels.json)가 필요하다
+test resampled_captures_get_the_same_answer ... ignored, 라벨 붙은 게임 캡처(data/captures/labels.json)가 필요하다
+
+test result: ok. 0 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+test a_second_launch_exits_quietly_and_reveals_the_hidden_overlay ... ignored, 화면이 켜진 Windows 데스크톱이 필요하다(오버레이를 실제로 띄운다). 이미 떠 있는 오버레이는 끄고 돌린다
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 4 tests
+test a_new_window_is_captured_after_the_old_one_is_gone ... ignored, 화면이 켜진 Windows 데스크톱이 필요하다(창을 몇 초 띄운다)
+test capture_cycle_time_on_a_test_window ... ignored, 화면이 켜진 Windows 데스크톱이 필요하다(창을 몇 초 띄운다)
+test capture_cycle_time_on_the_game_window ... ignored, 실행 중인 니케가 필요하다(게임 창이 떠 있어야 한다 — 최소화돼 있으면 실패한다)
+test repeated_captures_follow_a_resized_window ... ignored, 화면이 켜진 Windows 데스크톱이 필요하다(창을 몇 초 띄운다)
+
+test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.29s
+     Running unittests src\lib.rs (app\src-tauri\target\debug\deps\nikke_companion_lib-b25991a886c36c3c.exe)
+     Running unittests src\bin\nikke-capture.rs (app\src-tauri\target\debug\deps\nikke_capture-31a6a08ca5db4592.exe)
+     Running unittests src\main.rs (app\src-tauri\target\debug\deps\nikke_companion-6b9b87c78d5a3815.exe)
+     Running tests\engine_batch.rs (app\src-tauri\target\debug\deps\engine_batch-1be646b8cda22ff1.exe)
+     Running tests\engine_cancel.rs (app\src-tauri\target\debug\deps\engine_cancel-572d369bd794f2ac.exe)
+     Running tests\live_capture.rs (app\src-tauri\target\debug\deps\live_capture-e63e8f7431f81c4c.exe)
+     Running tests\live_game.rs (app\src-tauri\target\debug\deps\live_game-5bb8565f5b359ce5.exe)
+     Running tests\live_recognize.rs (app\src-tauri\target\debug\deps\live_recognize-aea93b6929933bb5.exe)
+     Running tests\live_single_instance.rs (app\src-tauri\target\debug\deps\live_single_instance-52b2daa18c93150f.exe)
+     Running tests\live_track.rs (app\src-tauri\target\debug\deps\live_track-4f5fe37e91539712.exe)
+   Doc-tests nikke_companion_lib

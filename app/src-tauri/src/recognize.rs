@@ -6,14 +6,19 @@
 //! - 이상 개체 화면은 보스마다 테마 색이 다르다(초록·보라·빨강·주황·파랑). 화면 맨 아래 가장자리의 띠,
 //!   `도전하기` 단추, 좌우 화살표(선택 화면), 보스 이름 칸의 좌우 막대와 정보 칸의 좌우 날개(편성 화면)가 그 색이다.
 //! - 화면 종류는 그 화면에만 있는 표지로 가른다: 선택 화면은 아래 탭(이상 개체 요격전 쪽이 빨강),
-//!   편성 화면은 `모의전`(파랑)·`전투 진입`(빨강) 단추.
+//!   편성 화면은 `모의전`(파랑) 단추.
 //!
 //! 자리마다 격자로 몇백 점만 찍어 본다(`SAMPLES_PER_FRAME`, 프레임 크기와 무관). 프레임 전체를 훑지 않는다.
 //! 자리는 화면 비율(0~1)로 적혀 있어 해상도와 무관하지만 **16:9 화면에서 잰 값**이다 — 비율이 다른 프레임은
 //! 판단하지 않고 `unknown`으로 돌려준다.
 //!
-//! 판정은 엄격하다: 한 화면의 표지가 **모두** 같은 보스 색으로 보여야 그 화면·그 보스라고 한다. 하나라도 빠지거나
+//! 판정은 엄격하다: 한 화면의 **필수 표지**가 모두 같은 보스 색으로 보여야 그 화면·그 보스라고 한다. 하나라도 빠지거나
 //! 두 보스의 색이 섞이면 `unknown`이다 — 다른 보스로 잘못 말하느니 모른다고 한다.
+//!
+//! 다만 **한 단추의 색에 전부를 걸지 않는다**(P-023). 전투로 들어가는 단추 — 선택 화면의 `도전하기`, 편성 화면의
+//! `전투 진입` — 는 필수 표지가 아니다: 그날의 요격 횟수를 다 쓰면 `전투 진입`이 빨강이 아니게 된다(2026-11-12 실제 게임에서
+//! 빨강 0%). 제 색이면 근거에 더하고, 아니면 나머지 표지로 판단하되 그 사실을 근거에 적고 신뢰도를 낮춘다
+//! (`WITHOUT_BUTTON_CONFIDENCE`). `도전하기`가 **다른 보스의** 테마 색이면 여전히 `unknown`이다.
 //!
 //! 기준값(자리·색 범위·몫)은 2026-11-12 사용자 계정의 캡처 16장(1881×1058, 로비 1장은 2212×1244)에서 쟀다.
 //! 방법과 한계는 `app/README.md` §화면 인식, 화면 구성은 `docs/intercept.md` §화면 구성.
@@ -35,7 +40,7 @@ pub enum ScreenKind {
     AnomalySquad,
     /// 이상 개체 화면이 아니다(아래 가장자리에 테마 색 띠가 없다).
     Other,
-    /// 판단하지 않는다: 표지가 일부만 보이거나, 두 보스의 색이 섞였거나, 지원하지 않는 프레임이다.
+    /// 판단하지 않는다: 필수 표지가 일부만 보이거나, 두 보스의 색이 섞였거나, 지원하지 않는 프레임이다.
     Unknown,
 }
 
@@ -131,7 +136,8 @@ pub struct Recognition {
     pub screen: ScreenKind,
     /// 이상 개체 화면일 때만 있다(`{id, name}`). 그 밖에는 null — 추측으로 채우지 않는다.
     pub boss: Option<Boss>,
-    /// 0~1. 이상 개체 화면이면 0.5(모든 표지가 기준에 겨우 닿음)~1(캡처에서 잰 값만큼 뚜렷함),
+    /// 0~1. 이상 개체 화면이면 0.5(모든 표지가 기준에 겨우 닿음)~1(캡처에서 잰 값만큼 뚜렷함) —
+    /// `도전하기`·`전투 진입` 단추가 제 색이 아니면 0.8을 넘지 않는다(`WITHOUT_BUTTON_CONFIDENCE`).
     /// `other`는 아래 띠 자리에 테마 색이 적을수록 1에 가깝고, `unknown`은 0이다.
     pub confidence: f32,
     /// 무엇을 보고 그렇게 판단했는지(한국어 문장들).
@@ -477,7 +483,7 @@ pub const MIXED_RATIO: f32 = 0.25;
 /// 아래 띠(0.94~1.00 / 0.02).
 pub const STRIP_MIN: f32 = 0.70;
 pub const STRIP_TYPICAL: f32 = 0.95;
-/// `도전하기` 단추(0.81~0.91 / 0.16).
+/// `도전하기` 단추(0.81~0.91 / 0.16). 필수 표지가 아니다 — 기준 이상이면 근거에 더하고, 아니면 그 사실을 적는다.
 pub const BUTTON_MIN: f32 = 0.55;
 pub const BUTTON_TYPICAL: f32 = 0.85;
 /// 좌우 화살표(0.41~0.58 / 0.12).
@@ -497,9 +503,12 @@ pub const TAB_OFF_MAX: f32 = 0.10;
 /// `모의전` 단추의 파랑(0.94~0.95 / 일반·특수 개체 편성 화면 0.64).
 pub const MOCK_MIN: f32 = 0.70;
 pub const MOCK_TYPICAL: f32 = 0.94;
-/// `전투 진입` 단추의 빨강(0.77~0.87).
+/// `전투 진입` 단추의 빨강(0.77~0.87). 필수 표지가 아니다 — 요격 횟수를 다 쓴 날에는 0.00이었다(2026-11-12 실제 게임).
 pub const ENTER_MIN: f32 = 0.55;
 pub const ENTER_TYPICAL: f32 = 0.82;
+/// 전투로 들어가는 단추(`도전하기`·`전투 진입`)가 제 색이 아닐 때 신뢰도의 상한. 나머지 표지가 아무리 뚜렷해도
+/// 표지 하나가 덜 받쳐 주는 만큼 낮춘다(어림값이다 — 화면에 보이는 숫자일 뿐 판정에는 쓰지 않는다).
+pub const WITHOUT_BUTTON_CONFIDENCE: f32 = 0.80;
 
 /// 지원하는 화면 비율(가로/세로)과 허용 오차(상대값). 기준값을 16:9 화면에서만 쟀다.
 pub const SUPPORTED_ASPECT: f64 = 16.0 / 9.0;
@@ -585,7 +594,7 @@ impl Mark {
 
     fn describe(&self) -> String {
         match self.read {
-            ThemeRead::Absent => format!("{} 없음", self.label),
+            ThemeRead::Absent => format!("{} 테마 색 없음", self.label),
             ThemeRead::Weak { boss, share } => format!(
                 "{} {} {}(기준 {} 미만)",
                 self.label,
@@ -638,16 +647,92 @@ fn unknown(mut evidence: Vec<String>, reason: String) -> Verdict {
     }
 }
 
+/// 전투로 들어가는 단추(`도전하기`·`전투 진입`)에서 읽은 것. 필수 표지가 아니다 — 요격 횟수를 다 쓰면 색이 달라진다.
+#[derive(Debug, Clone, PartialEq)]
+enum ButtonRead {
+    /// 제 색이다. 값은 기준에서의 여유(0~1)이고 신뢰도에 넣는다.
+    Usual(f32),
+    /// 제 색이 아니다. 나머지 표지로 판단하고 이 문장을 근거에 적는다.
+    Unusual(String),
+    /// 다른 보스를 가리킨다(이유). 그 화면이라고 하지 않는다.
+    Conflict(String),
+}
+
+/// 선택 화면의 `도전하기` 단추를 좌우 화살표가 가리킨 보스에 비춰 읽는다.
+fn read_challenge_button(button: &Mark, boss: Boss) -> ButtonRead {
+    const REST: &str = "필수 표지가 아니어서 나머지 표지(아래 띠·좌우 화살표·아래 탭)로 판단했다. \
+                        요격 횟수를 다 쓴 날에 이렇게 보일 수 있다(미확인)";
+    match button.read {
+        ThemeRead::Clear { boss: seen, .. } if seen == boss => {
+            ButtonRead::Usual(button.strength())
+        }
+        ThemeRead::Absent => ButtonRead::Unusual(format!(
+            "도전하기 단추가 테마 색이 아니다(테마 색 {} 미만, 평소 {} 이상) — {REST}",
+            percent(ABSENT_SHARE),
+            percent(button.min)
+        )),
+        ThemeRead::Weak { boss: seen, share } if seen == boss => ButtonRead::Unusual(format!(
+            "도전하기 단추의 테마 색이 평소보다 적다({} {}, 평소 {} 이상) — {REST}",
+            seen.theme(),
+            percent(share),
+            percent(button.min)
+        )),
+        ThemeRead::Clear { boss: seen, .. } | ThemeRead::Weak { boss: seen, .. } => {
+            ButtonRead::Conflict(format!(
+                "도전하기 단추는 {}({}) 색인데 좌우 화살표는 {}({}) 색이다",
+                seen.theme(),
+                seen.name(),
+                boss.theme(),
+                boss.name()
+            ))
+        }
+        ThemeRead::Mixed { first, second } => ButtonRead::Conflict(format!(
+            "도전하기 단추에 두 보스의 색({}·{})이 섞여 있다",
+            first.theme(),
+            second.theme()
+        )),
+    }
+}
+
+/// 편성 화면의 `전투 진입` 단추를 읽는다. 빨강이 아니어도 다른 보스를 가리키는 것은 아니다(테마 색 단추가 아니다).
+fn read_enter_button(red_share: f32) -> ButtonRead {
+    if red_share >= ENTER_MIN {
+        ButtonRead::Usual(strength(red_share, ENTER_MIN, ENTER_TYPICAL))
+    } else {
+        ButtonRead::Unusual(format!(
+            "전투 진입 단추가 빨강이 아니다(빨강 {}, 평소 {} 이상) — 필수 표지가 아니어서 나머지 표지(아래 띠·이름 칸 막대·\
+             정보 칸 날개·모의전 단추)로 판단했다. 요격 횟수를 다 쓴 날에 이렇게 보인다(추정)",
+            percent(red_share),
+            percent(ENTER_MIN)
+        ))
+    }
+}
+
+/// 필수 표지가 다 갖춰진 한 화면.
+struct Layout {
+    screen: ScreenKind,
+    name: &'static str,
+    boss: Boss,
+    /// 그 화면의 표지를 적은 근거 줄.
+    line: String,
+    /// 필수 표지 중 가장 약한 것의 여유(0~1).
+    strength: f32,
+    button: ButtonRead,
+}
+
 /// 자리마다 센 값으로 화면 종류와 보스를 정한다.
 ///
-/// - 선택 화면: 아래 띠 + `도전하기` 단추 + 좌우 화살표가 모두 같은 보스 색이고, 아래 탭은 이상 개체 요격전 쪽만 빨강.
-/// - 편성 화면: 아래 띠 + 이름 칸 좌우 막대 + 정보 칸 좌우 날개가 모두 같은 보스 색이고, `모의전`이 파랑·`전투 진입`이 빨강.
+/// - 선택 화면: 아래 띠 + 좌우 화살표가 모두 같은 보스 색이고, 아래 탭은 이상 개체 요격전 쪽만 빨강.
+///   `도전하기` 단추는 필수가 아니다 — 같은 보스 색이면 근거에 더하고, 테마 색이 아니면 그 사실을 적는다.
+///   다른 보스의 색이거나 두 보스의 색이 섞였으면 선택 화면이라고 하지 않는다.
+/// - 편성 화면: 아래 띠 + 이름 칸 좌우 막대 + 정보 칸 좌우 날개가 모두 같은 보스 색이고, `모의전`이 파랑.
+///   `전투 진입` 단추의 빨강은 필수가 아니다 — 빨강이 아니면 그 사실을 적는다.
 /// - 아래 띠 자리에 테마 색이 없고 어느 화면의 표지도 갖춰지지 않았으면 `other`.
-/// - 그 밖(표지가 일부만 보임, 두 보스의 색이 섞임, 두 화면의 표지가 함께 보임)은 `unknown`.
+/// - 그 밖(필수 표지가 일부만 보임, 두 보스의 색이 섞임, 두 화면의 표지가 함께 보임)은 `unknown`.
 pub fn decide(readings: &Readings) -> Verdict {
     let strip = Mark::new("아래 띠", &readings.strip, STRIP_MIN, STRIP_TYPICAL);
+    let button = Mark::new("도전하기 단추", &readings.button, BUTTON_MIN, BUTTON_TYPICAL);
     let select_marks = [
-        Mark::new("도전하기 단추", &readings.button, BUTTON_MIN, BUTTON_TYPICAL),
         Mark::new(
             "왼쪽 화살표",
             &readings.chevron_left,
@@ -689,25 +774,26 @@ pub fn decide(readings: &Readings) -> Verdict {
     );
     let tabs_ok = tab_on >= TAB_ON_MIN && tab_off <= TAB_OFF_MAX;
     let (mock, enter) = (readings.mock.blue_share(), readings.enter.red_share());
-    let buttons_ok = mock >= MOCK_MIN && enter >= ENTER_MIN;
+    let mock_ok = mock >= MOCK_MIN;
 
     let strip_line = format!("{}(화면 맨 아래 가장자리)", strip.describe());
     let select_line = describe_marks(
         "보스 선택 화면의 표지",
         &select_marks,
         &format!(
-            "아래 탭 빨강 — 이상 개체 요격전 쪽 {}(기준 {} 이상), 요격전 쪽 {}(기준 {} 이하)",
+            "아래 탭 빨강 — 이상 개체 요격전 쪽 {}(기준 {} 이상), 요격전 쪽 {}(기준 {} 이하) / 필수 아님 — {}",
             percent(tab_on),
             percent(TAB_ON_MIN),
             percent(tab_off),
-            percent(TAB_OFF_MAX)
+            percent(TAB_OFF_MAX),
+            button.describe()
         ),
     );
     let squad_line = describe_marks(
         "편성 화면의 표지",
         &squad_marks,
         &format!(
-            "모의전 단추 파랑 {}(기준 {} 이상), 전투 진입 단추 빨강 {}(기준 {} 이상)",
+            "모의전 단추 파랑 {}(기준 {} 이상) / 필수 아님 — 전투 진입 단추 빨강 {}(평소 {} 이상)",
             percent(mock),
             percent(MOCK_MIN),
             percent(enter),
@@ -715,38 +801,52 @@ pub fn decide(readings: &Readings) -> Verdict {
         ),
     );
 
-    let select = agreed_boss(&select_marks).filter(|_| tabs_ok);
-    let squad = agreed_boss(&squad_marks).filter(|_| buttons_ok);
+    // 필수 표지가 갖춰진 화면과, 그 화면의 단추(필수 아님)에서 읽은 것.
+    let select = agreed_boss(&select_marks)
+        .filter(|_| tabs_ok)
+        .map(|boss| (boss, read_challenge_button(&button, boss)));
+    let squad = agreed_boss(&squad_marks)
+        .filter(|_| mock_ok)
+        .map(|boss| (boss, read_enter_button(enter)));
+    // `도전하기` 단추가 다른 보스를 가리키면 선택 화면이라고 하지 않는다.
+    let (select, button_conflict) = match select {
+        Some((_, ButtonRead::Conflict(why))) => (None, Some(why)),
+        other => (other, None),
+    };
 
-    let (screen, screen_name, boss, line, layout_strength) = match (select, squad) {
+    let layout = match (select, squad) {
         (Some(_), Some(_)) => {
             return unknown(
                 vec![strip_line, select_line, squad_line],
                 "보스 선택 화면과 편성 화면의 표지가 함께 보인다".to_string(),
             );
         }
-        (Some(boss), None) => (
-            ScreenKind::AnomalySelect,
-            "이상 개체 보스 선택 화면",
+        (Some((boss, button)), None) => Layout {
+            screen: ScreenKind::AnomalySelect,
+            name: "이상 개체 보스 선택 화면",
             boss,
-            select_line,
-            min_strength(
+            line: select_line,
+            strength: min_strength(
                 select_marks.iter().map(Mark::strength).chain([
                     strength(tab_on, TAB_ON_MIN, TAB_ON_TYPICAL),
                     ((TAB_OFF_MAX - tab_off) / TAB_OFF_MAX).clamp(0.0, 1.0),
                 ]),
             ),
-        ),
-        (None, Some(boss)) => (
-            ScreenKind::AnomalySquad,
-            "이상 개체 편성 화면",
+            button,
+        },
+        (None, Some((boss, button))) => Layout {
+            screen: ScreenKind::AnomalySquad,
+            name: "이상 개체 편성 화면",
             boss,
-            squad_line,
-            min_strength(squad_marks.iter().map(Mark::strength).chain([
-                strength(mock, MOCK_MIN, MOCK_TYPICAL),
-                strength(enter, ENTER_MIN, ENTER_TYPICAL),
-            ])),
-        ),
+            line: squad_line,
+            strength: min_strength(
+                squad_marks
+                    .iter()
+                    .map(Mark::strength)
+                    .chain([strength(mock, MOCK_MIN, MOCK_TYPICAL)]),
+            ),
+            button,
+        },
         (None, None) => {
             if strip.read == ThemeRead::Absent {
                 let top = readings.strip.top_themes()[0].1;
@@ -766,30 +866,52 @@ pub fn decide(readings: &Readings) -> Verdict {
                     ],
                 };
             }
-            return unknown(
-                vec![strip_line, select_line, squad_line],
+            let mut reason =
                 "아래 띠에는 테마 색이 보이는데 보스 선택 화면의 표지도 편성 화면의 표지도 다 갖춰지지 않았다"
-                    .to_string(),
-            );
+                    .to_string();
+            if let Some(why) = button_conflict {
+                reason.push_str(&format!(" — {why}"));
+            }
+            return unknown(vec![strip_line, select_line, squad_line], reason);
         }
     };
+    let Layout {
+        screen,
+        name: screen_name,
+        boss,
+        line,
+        strength: layout_strength,
+        button,
+    } = layout;
 
-    // 한 화면의 표지가 다 갖춰졌다. 아래 띠도 같은 보스 색이어야 한다.
+    // 한 화면의 필수 표지가 다 갖춰졌다. 아래 띠도 같은 보스 색이어야 한다.
     match strip.read {
-        ThemeRead::Clear { boss: seen, .. } if seen == boss => Verdict {
-            screen,
-            boss: Some(boss),
-            confidence: 0.5 + 0.5 * layout_strength.min(strip.strength()),
-            evidence: vec![
-                strip_line,
-                line,
-                format!(
-                    "→ {screen_name}, 보스 {}(테마 색 {})",
-                    boss.name(),
-                    boss.theme()
-                ),
-            ],
-        },
+        ThemeRead::Clear { boss: seen, .. } if seen == boss => {
+            let mut weakest = layout_strength.min(strip.strength());
+            let mut evidence = vec![strip_line, line];
+            let mut limit = 1.0;
+            match button {
+                ButtonRead::Usual(strength) => weakest = weakest.min(strength),
+                // 단추가 제 색이 아니다: 그 사실을 적고 신뢰도를 낮춘다.
+                ButtonRead::Unusual(note) => {
+                    evidence.push(note);
+                    limit = WITHOUT_BUTTON_CONFIDENCE;
+                }
+                // 다른 보스를 가리키는 단추는 위에서 걸러졌다.
+                ButtonRead::Conflict(_) => {}
+            }
+            evidence.push(format!(
+                "→ {screen_name}, 보스 {}(테마 색 {})",
+                boss.name(),
+                boss.theme()
+            ));
+            Verdict {
+                screen,
+                boss: Some(boss),
+                confidence: (0.5 + 0.5 * weakest).min(limit),
+                evidence,
+            }
+        }
         ThemeRead::Clear { boss: seen, .. } => unknown(
             vec![strip_line, line],
             format!(
@@ -870,6 +992,9 @@ pub(crate) mod synth {
     pub const BACKGROUND: [u8; 3] = [6, 7, 9];
     pub const WHITE: [u8; 3] = [245, 245, 245];
     pub const GREY: [u8; 3] = [72, 72, 74];
+    /// 요격 횟수를 다 쓴 날의 `전투 진입`·`도전하기` 단추로 **가정한** 회색. 실제 색은 모른다(캡처가 없다) —
+    /// `전투 진입`이 빨강 0%였다는 것까지만 안다.
+    pub const SPENT_GREY: [u8; 3] = [118, 120, 124];
     /// `모의전` 단추·`전투 진입` 단추·선택된 탭 아이콘의 색(캡처에서 잰 평균).
     pub const MOCK_BLUE: [u8; 3] = [19, 177, 244];
     pub const ENTER_RED: [u8; 3] = [238, 75, 54];
@@ -962,6 +1087,21 @@ pub(crate) mod synth {
         let mut frame = canvas(width, height, BACKGROUND);
         fill(&mut frame, STRIP, theme_rgb(boss));
         draw_squad_marks(&mut frame, theme_rgb(boss));
+        frame
+    }
+
+    /// 요격 횟수를 다 쓴 날의 보스 선택 화면: `도전하기` 단추만 `colour`로 칠한다(글자는 그대로 흰색).
+    pub fn spent_select_screen(width: u32, height: u32, boss: Boss, colour: [u8; 3]) -> Frame {
+        let mut frame = select_screen(width, height, boss);
+        fill(&mut frame, BUTTON, colour);
+        fill(&mut frame, BUTTON_TEXT, WHITE);
+        frame
+    }
+
+    /// 요격 횟수를 다 쓴 날의 편성 화면: `전투 진입` 단추만 `colour`로 칠한다.
+    pub fn spent_squad_screen(width: u32, height: u32, boss: Boss, colour: [u8; 3]) -> Frame {
+        let mut frame = squad_screen(width, height, boss);
+        fill(&mut frame, ENTER, colour);
         frame
     }
 
@@ -1426,10 +1566,9 @@ mod tests {
         let verdict = decide(&edge);
         assert_eq!((verdict.screen, verdict.boss), (ScreenKind::AnomalySelect, Some(boss)));
         assert_eq!(verdict.confidence, 0.5);
-        // 하나라도 한 점 모자라면 모른다.
+        // 필수 표지가 하나라도 한 점 모자라면 모른다.
         for short in [
             Readings { strip: themed(boss, 699), ..edge },
-            Readings { button: themed(boss, 549), ..edge },
             Readings { chevron_left: themed(boss, 249), ..edge },
             Readings { chevron_right: themed(boss, 249), ..edge },
             Readings { tab_anomaly: tally_of(1000, &[], 0, 349), ..edge },
@@ -1440,6 +1579,18 @@ mod tests {
             assert_eq!(decide(&short).boss, None);
         }
         assert!(ok(base));
+        // `도전하기` 단추는 필수가 아니다(P-023): 기준에 한 점 모자라도 나머지 표지로 인식하고 그 사실을 적는다.
+        let dim_button = decide(&Readings { button: themed(boss, 549), ..edge });
+        assert_eq!(
+            (dim_button.screen, dim_button.boss),
+            (ScreenKind::AnomalySelect, Some(boss)),
+            "{dim_button:?}"
+        );
+        assert_eq!(dim_button.confidence, 0.5);
+        assert!(
+            dim_button.evidence.join("\n").contains("도전하기 단추의 테마 색이 평소보다 적다(빨강 55%"),
+            "{dim_button:?}"
+        );
     }
 
     #[test]
@@ -1466,12 +1617,197 @@ mod tests {
             Readings { info_left: themed(boss, 279), ..edge },
             Readings { info_right: themed(boss, 279), ..edge },
             Readings { mock: tally_of(1000, &[], 699, 0), ..edge },
-            Readings { enter: tally_of(1000, &[], 0, 549), ..edge },
         ] {
             let verdict = decide(&short);
             assert_eq!(verdict.screen, ScreenKind::Unknown, "{short:?}");
             assert_eq!(verdict.boss, None);
         }
+        // `전투 진입` 단추의 빨강은 필수가 아니다(P-023): 기준에 한 점 모자라도 나머지 표지로 인식하고 그 사실을 적는다.
+        let dim_enter = decide(&Readings { enter: tally_of(1000, &[], 0, 549), ..edge });
+        assert_eq!(
+            (dim_enter.screen, dim_enter.boss),
+            (ScreenKind::AnomalySquad, Some(boss)),
+            "{dim_enter:?}"
+        );
+        assert_eq!(dim_enter.confidence, 0.5);
+        assert!(
+            dim_enter.evidence.join("\n").contains("전투 진입 단추가 빨강이 아니다(빨강 55%, 평소 55% 이상)"),
+            "{dim_enter:?}"
+        );
+    }
+
+    // ── 전투로 들어가는 단추는 필수 표지가 아니다 (P-023) ──
+
+    #[test]
+    fn decide_recognises_the_squad_screen_when_the_enter_button_is_not_red() {
+        for boss in Boss::ALL {
+            // 2026-11-12 실제 게임(인디빌리아 편성 화면, 요격 횟수 소진 추정)에서 읽힌 값: 빨강 0%.
+            for red in [0, 100, 549] {
+                let spent = Readings {
+                    enter: tally_of(1000, &[], 0, red),
+                    // 단추가 빨강이 아니면 그 위에 걸친 탭 자리도 빨강이 아니다.
+                    tab_intercept: tally_of(1000, &[], 0, 0),
+                    tab_anomaly: tally_of(1000, &[], 0, 0),
+                    ..squad_readings(boss)
+                };
+                let verdict = decide(&spent);
+                assert_eq!(
+                    (verdict.screen, verdict.boss),
+                    (ScreenKind::AnomalySquad, Some(boss)),
+                    "빨강 {red}/1000 {verdict:?}"
+                );
+                // 나머지 표지가 아무리 뚜렷해도 신뢰도는 상한을 넘지 않는다.
+                assert_eq!(verdict.confidence, WITHOUT_BUTTON_CONFIDENCE, "{verdict:?}");
+                let text = verdict.evidence.join("\n");
+                assert!(text.contains("전투 진입 단추가 빨강이 아니다"), "{text}");
+                assert!(text.contains("필수 표지가 아니어서 나머지 표지"), "{text}");
+                assert!(
+                    verdict.evidence.last().unwrap().starts_with("→ 이상 개체 편성 화면"),
+                    "{text}"
+                );
+            }
+        }
+        // 사용자가 본 값 그대로: 아래 띠 초록 100%, 막대 69%·77%, 날개 64%·47%, 모의전 파랑 95%, 전투 진입 빨강 0%.
+        let reported = Readings {
+            strip: themed(Boss::Indivilia, 1000),
+            bar_left: themed(Boss::Indivilia, 690),
+            bar_right: themed(Boss::Indivilia, 770),
+            info_left: themed(Boss::Indivilia, 640),
+            info_right: themed(Boss::Indivilia, 470),
+            mock: tally_of(1000, &[], 950, 0),
+            ..Readings::default()
+        };
+        let verdict = decide(&reported);
+        assert_eq!(
+            (verdict.screen, verdict.boss),
+            (ScreenKind::AnomalySquad, Some(Boss::Indivilia)),
+            "{verdict:?}"
+        );
+        assert!(verdict.evidence.join("\n").contains("전투 진입 단추가 빨강이 아니다(빨강 0%"));
+        // 단추가 빨강이면 그런 말을 하지 않고 상한도 없다.
+        let usual = decide(&squad_readings(Boss::Indivilia));
+        assert!(!usual.evidence.join("\n").contains("빨강이 아니다"), "{usual:?}");
+        assert_eq!(usual.confidence, 1.0);
+        assert_eq!(usual.evidence.len(), 3);
+    }
+
+    #[test]
+    fn decide_recognises_the_select_screen_when_the_challenge_button_has_no_theme_colour() {
+        for boss in Boss::ALL {
+            for button in [Tally::default(), tally_of(1000, &[], 0, 0), themed(boss, 79), themed(boss, 300)] {
+                let spent = Readings { button, ..select_readings(boss) };
+                let verdict = decide(&spent);
+                assert_eq!(
+                    (verdict.screen, verdict.boss),
+                    (ScreenKind::AnomalySelect, Some(boss)),
+                    "{button:?} {verdict:?}"
+                );
+                assert_eq!(verdict.confidence, WITHOUT_BUTTON_CONFIDENCE, "{verdict:?}");
+                let text = verdict.evidence.join("\n");
+                assert!(text.contains("도전하기 단추"), "{text}");
+                assert!(text.contains("필수 표지가 아니어서 나머지 표지(아래 띠·좌우 화살표·아래 탭)"), "{text}");
+                assert!(
+                    verdict.evidence.last().unwrap().starts_with("→ 이상 개체 보스 선택 화면"),
+                    "{text}"
+                );
+            }
+        }
+        let grey = decide(&Readings { button: Tally::default(), ..select_readings(Boss::Kraken) });
+        assert!(grey.evidence.join("\n").contains("도전하기 단추가 테마 색이 아니다"), "{grey:?}");
+        // 단추가 제 색이면 그런 말을 하지 않는다.
+        let usual = decide(&select_readings(Boss::Kraken));
+        assert!(!usual.evidence.join("\n").contains("필수 표지가 아니어서"), "{usual:?}");
+        assert_eq!(usual.evidence.len(), 3);
+    }
+
+    #[test]
+    fn a_challenge_button_in_another_boss_colour_is_still_unknown() {
+        let boss = Boss::Harvester;
+        for (button, said) in [
+            // 다른 보스의 색이 뚜렷하다.
+            (themed(Boss::Kraken, 850), "도전하기 단추는 주황(크라켄) 색인데 좌우 화살표는 빨강(하베스터) 색이다"),
+            // 다른 보스의 색이 조금(기준 미만) 보인다 — 그래도 다른 보스를 가리킨다.
+            (themed(Boss::Ultra, 200), "도전하기 단추는 보라(울트라) 색인데"),
+            // 두 보스의 색이 섞였다.
+            (
+                tally_of(1000, &[(Boss::Harvester, 500), (Boss::MirrorContainer, 400)], 0, 0),
+                "도전하기 단추에 두 보스의 색(빨강·파랑)이 섞여 있다",
+            ),
+        ] {
+            let verdict = decide(&Readings { button, ..select_readings(boss) });
+            assert_unknown(&verdict, "다 갖춰지지 않았다");
+            assert!(verdict.evidence.last().unwrap().contains(said), "{verdict:?}");
+        }
+    }
+
+    #[test]
+    fn a_missing_required_mark_is_unknown_whatever_the_button_looks_like() {
+        let boss = Boss::MirrorContainer;
+        // 선택 화면: 단추가 테마 색이 아닌데 필수 표지까지 하나 빠졌다(= 평소 표지에서 둘이 빠졌다).
+        let spent_select = Readings { button: Tally::default(), ..select_readings(boss) };
+        for short in [
+            Readings { strip: Tally::default(), ..spent_select },
+            Readings { strip: themed(boss, 400), ..spent_select },
+            Readings { chevron_left: Tally::default(), ..spent_select },
+            Readings { chevron_right: themed(boss, 249), ..spent_select },
+            Readings { tab_anomaly: tally_of(1000, &[], 0, 0), ..spent_select },
+            Readings { tab_intercept: tally_of(1000, &[], 0, 600), ..spent_select },
+            // 필수 표지가 다른 보스를 가리킨다.
+            Readings { chevron_left: themed(Boss::Ultra, 450), ..spent_select },
+            Readings { strip: themed(Boss::Ultra, 980), ..spent_select },
+        ] {
+            let verdict = decide(&short);
+            assert_eq!((verdict.screen, verdict.boss), (ScreenKind::Unknown, None), "{short:?}");
+        }
+        // 편성 화면: 전투 진입이 빨강이 아닌데 필수 표지까지 하나 빠졌다.
+        let spent_squad = Readings {
+            enter: Tally::default(),
+            tab_intercept: Tally::default(),
+            tab_anomaly: Tally::default(),
+            ..squad_readings(boss)
+        };
+        for short in [
+            Readings { strip: Tally::default(), ..spent_squad },
+            Readings { bar_left: Tally::default(), ..spent_squad },
+            Readings { bar_right: themed(boss, 349), ..spent_squad },
+            Readings { info_left: Tally::default(), ..spent_squad },
+            Readings { info_right: themed(boss, 279), ..spent_squad },
+            Readings { mock: tally_of(1000, &[], 699, 0), ..spent_squad },
+            Readings { mock: Tally::default(), ..spent_squad },
+            Readings { bar_right: themed(Boss::Kraken, 700), ..spent_squad },
+            Readings { strip: themed(Boss::Kraken, 980), ..spent_squad },
+        ] {
+            let verdict = decide(&short);
+            assert_eq!((verdict.screen, verdict.boss), (ScreenKind::Unknown, None), "{short:?}");
+        }
+        // 단추가 제 색이어도 필수 표지 둘이 빠지면 모른다.
+        for short in [
+            Readings {
+                chevron_left: Tally::default(),
+                chevron_right: Tally::default(),
+                ..select_readings(boss)
+            },
+            Readings {
+                bar_left: Tally::default(),
+                info_right: Tally::default(),
+                ..squad_readings(boss)
+            },
+            Readings {
+                mock: Tally::default(),
+                info_left: Tally::default(),
+                ..squad_readings(boss)
+            },
+        ] {
+            let verdict = decide(&short);
+            assert_eq!((verdict.screen, verdict.boss), (ScreenKind::Unknown, None), "{short:?}");
+        }
+        // 단추만 남고 아래 띠도 없으면(일반 개체 편성 화면처럼) 이상 개체 화면이 아니다.
+        let only_buttons = Readings {
+            mock: tally_of(1000, &[], 950, 0),
+            enter: tally_of(1000, &[], 0, 850),
+            ..Readings::default()
+        };
+        assert_eq!(decide(&only_buttons).screen, ScreenKind::Other);
     }
 
     #[test]
@@ -1618,6 +1954,175 @@ mod tests {
         }
     }
 
+    // ── 합성 이미지: 요격 횟수를 다 쓴 화면 (P-023) ──
+
+    /// 횟수를 다 쓴 단추로 그려 보는 색들. 실제 색은 모른다 — 회색 계열과, 단추 색 기준에 못 미치는 어두운 색.
+    const SPENT_COLOURS: [[u8; 3]; 4] = [SPENT_GREY, GREY, [200, 200, 204], [58, 44, 46]];
+
+    #[test]
+    fn squad_screen_with_a_grey_enter_button_is_recognised() {
+        for (width, height) in SIZES {
+            for boss in Boss::ALL {
+                for colour in SPENT_COLOURS {
+                    let seen = recognize(&spent_squad_screen(width, height, boss, colour));
+                    assert_eq!(
+                        (seen.screen, seen.boss),
+                        (ScreenKind::AnomalySquad, Some(boss)),
+                        "{width}×{height} {colour:?} {seen:?}"
+                    );
+                    assert!(
+                        (0.5..=WITHOUT_BUTTON_CONFIDENCE).contains(&seen.confidence),
+                        "{seen:?}"
+                    );
+                    let text = seen.evidence.join("\n");
+                    assert!(text.contains("전투 진입 단추가 빨강이 아니다(빨강 0%"), "{text}");
+                    assert!(text.contains("필수 아님 — 전투 진입 단추 빨강 0%"), "{text}");
+                }
+            }
+        }
+        // 단추가 아예 없어도(배경색) 같다.
+        let mut erased = squad_screen(1881, 1058, Boss::Ultra);
+        fill(&mut erased, ENTER, BACKGROUND);
+        let seen = recognize(&erased);
+        assert_eq!((seen.screen, seen.boss), (ScreenKind::AnomalySquad, Some(Boss::Ultra)), "{seen:?}");
+        // 평소의 빨강 단추면 그 말이 없고 신뢰도에 상한도 없다.
+        let usual = recognize(&squad_screen(1881, 1058, Boss::Ultra));
+        assert!(!usual.evidence.join("\n").contains("빨강이 아니다"), "{usual:?}");
+        assert!(usual.confidence > WITHOUT_BUTTON_CONFIDENCE, "{usual:?}");
+    }
+
+    #[test]
+    fn select_screen_with_a_grey_challenge_button_is_recognised() {
+        for (width, height) in SIZES {
+            for boss in Boss::ALL {
+                for colour in SPENT_COLOURS {
+                    let seen = recognize(&spent_select_screen(width, height, boss, colour));
+                    assert_eq!(
+                        (seen.screen, seen.boss),
+                        (ScreenKind::AnomalySelect, Some(boss)),
+                        "{width}×{height} {colour:?} {seen:?}"
+                    );
+                    assert!(
+                        (0.5..=WITHOUT_BUTTON_CONFIDENCE).contains(&seen.confidence),
+                        "{seen:?}"
+                    );
+                    let text = seen.evidence.join("\n");
+                    assert!(text.contains("도전하기 단추가 테마 색이 아니다"), "{text}");
+                    assert!(text.contains("필수 아님 — 도전하기 단추 테마 색 없음"), "{text}");
+                }
+            }
+        }
+        // 단추가 아예 없어도(배경색) 같다.
+        let mut erased = select_screen(1881, 1058, Boss::Kraken);
+        fill(&mut erased, BUTTON, BACKGROUND);
+        let seen = recognize(&erased);
+        assert_eq!((seen.screen, seen.boss), (ScreenKind::AnomalySelect, Some(Boss::Kraken)), "{seen:?}");
+        // 같은 보스 색이 어둡게만 남은 단추(명도가 기준 위)는 평소처럼 읽힌다.
+        let dimmed = spent_select_screen(1881, 1058, Boss::Indivilia, [0, 88, 33]);
+        let seen = recognize(&dimmed);
+        assert_eq!((seen.screen, seen.boss), (ScreenKind::AnomalySelect, Some(Boss::Indivilia)), "{seen:?}");
+        assert!(!seen.evidence.join("\n").contains("필수 표지가 아니어서"), "{seen:?}");
+    }
+
+    #[test]
+    fn spent_screens_survive_brightness_and_weak_noise() {
+        for (width, height) in [(960, 540), (1366, 768), (1881, 1058)] {
+            for boss in Boss::ALL {
+                for (kind, frame) in [
+                    (ScreenKind::AnomalySelect, spent_select_screen(width, height, boss, SPENT_GREY)),
+                    (ScreenKind::AnomalySquad, spent_squad_screen(width, height, boss, SPENT_GREY)),
+                ] {
+                    for (label, variant) in [
+                        ("밝기 -10%", brighten(&frame, 0.9)),
+                        ("밝기 +10%", brighten(&frame, 1.1)),
+                        ("잡음 ±12", add_noise(&frame, 12, 41)),
+                        ("밝기 -10% + 잡음", add_noise(&brighten(&frame, 0.9), 6, 13)),
+                    ] {
+                        let seen = recognize(&variant);
+                        assert_eq!(
+                            (seen.screen, seen.boss),
+                            (kind, Some(boss)),
+                            "{label} {width}×{height}: {seen:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn spent_screens_mixing_two_bosses_are_still_unknown() {
+        let (width, height) = (1881, 1058);
+        for (first, second) in [
+            (Boss::Indivilia, Boss::Ultra),
+            (Boss::Harvester, Boss::Kraken),
+            (Boss::MirrorContainer, Boss::Indivilia),
+        ] {
+            // 아래 띠는 한 보스, 나머지 표지는 다른 보스 — 단추가 회색이어도 모른다.
+            let mut select = canvas(width, height, BACKGROUND);
+            fill(&mut select, STRIP, theme_rgb(first));
+            draw_select_marks(&mut select, theme_rgb(second));
+            fill(&mut select, BUTTON, SPENT_GREY);
+            let seen = recognize(&select);
+            assert_eq!((seen.screen, seen.boss), (ScreenKind::Unknown, None), "{seen:?}");
+            let mut squad = canvas(width, height, BACKGROUND);
+            fill(&mut squad, STRIP, theme_rgb(first));
+            draw_squad_marks(&mut squad, theme_rgb(second));
+            fill(&mut squad, ENTER, SPENT_GREY);
+            let seen = recognize(&squad);
+            assert_eq!((seen.screen, seen.boss), (ScreenKind::Unknown, None), "{seen:?}");
+            // 좌우 화살표·막대의 색이 서로 다르다.
+            let mut chevrons = spent_select_screen(width, height, first, SPENT_GREY);
+            fill(&mut chevrons, CHEVRON_RIGHT, theme_rgb(second));
+            let seen = recognize(&chevrons);
+            assert_eq!((seen.screen, seen.boss), (ScreenKind::Unknown, None), "{seen:?}");
+            let mut wings = spent_squad_screen(width, height, first, SPENT_GREY);
+            fill(&mut wings, INFO_LEFT, theme_rgb(second));
+            let seen = recognize(&wings);
+            assert_eq!((seen.screen, seen.boss), (ScreenKind::Unknown, None), "{seen:?}");
+            // `도전하기` 단추가 통째로 다른 보스의 색이다 — 단추는 필수가 아니지만 다른 보스를 가리키면 모른다.
+            let other_button = spent_select_screen(width, height, first, theme_rgb(second));
+            let seen = recognize(&other_button);
+            assert_eq!((seen.screen, seen.boss), (ScreenKind::Unknown, None), "{seen:?}");
+            assert!(seen.evidence.last().unwrap().contains("도전하기 단추는"), "{seen:?}");
+        }
+    }
+
+    #[test]
+    fn screens_without_marks_stay_other_whatever_the_buttons_look_like() {
+        for (width, height) in SIZES {
+            // 로비처럼 표지가 하나도 없는 화면: 여러 색 덩어리가 있어도 아래 띠·표지 자리는 비어 있다.
+            let mut lobby = canvas(width, height, [24, 26, 30]);
+            fill(&mut lobby, [120.0, 90.0, 520.0, 300.0], [230, 190, 60]);
+            fill(&mut lobby, [1400.0, 120.0, 1800.0, 420.0], [40, 160, 220]);
+            fill(&mut lobby, [1500.0, 700.0, 1850.0, 760.0], WHITE);
+            let seen = recognize(&lobby);
+            assert_eq!((seen.screen, seen.boss), (ScreenKind::Other, None), "{width}×{height} {seen:?}");
+            // 일반 개체 편성 화면: 모의전·전투 진입 단추가 있고 아래 띠가 없다 — 전투 진입이 빨강이든 회색이든.
+            for enter in [ENTER_RED, SPENT_GREY, BACKGROUND] {
+                let mut stage = canvas(width, height, [40, 40, 42]);
+                fill(&mut stage, MOCK, MOCK_BLUE);
+                fill(&mut stage, ENTER, enter);
+                let seen = recognize(&stage);
+                assert_eq!((seen.screen, seen.boss), (ScreenKind::Other, None), "{enter:?} {seen:?}");
+            }
+            // 요격전 탭(일반·특수 개체 선택): 요격전 쪽 탭이 빨강, 표지는 없다.
+            let mut map = canvas(width, height, BACKGROUND);
+            fill(&mut map, TAB_INTERCEPT, TAB_RED);
+            fill(&mut map, TAB_ANOMALY, GREY);
+            fill(&mut map, [300.0, 300.0, 700.0, 700.0], [150, 150, 156]);
+            let seen = recognize(&map);
+            assert_eq!((seen.screen, seen.boss), (ScreenKind::Other, None), "{seen:?}");
+            // 이상 개체 탭이 빨강이고 가운데에 회색 단추만 있는 화면(띠·화살표 없음)도 이상 개체 화면이 아니다.
+            let mut tabs_only = canvas(width, height, BACKGROUND);
+            fill(&mut tabs_only, TAB_INTERCEPT, GREY);
+            fill(&mut tabs_only, TAB_ANOMALY, TAB_RED);
+            fill(&mut tabs_only, BUTTON, SPENT_GREY);
+            let seen = recognize(&tabs_only);
+            assert_eq!((seen.screen, seen.boss), (ScreenKind::Other, None), "{seen:?}");
+        }
+    }
+
     #[test]
     fn brightness_and_weak_noise_do_not_change_the_answer() {
         for (width, height) in [(960, 540), (1366, 768)] {
@@ -1711,19 +2216,52 @@ mod tests {
     fn partial_screens_are_unknown_not_guessed() {
         let (width, height) = (1881, 1058);
         let boss = Boss::Harvester;
-        // 선택 화면에서 표지 하나씩을 지운다.
-        for erased in [BUTTON, CHEVRON_LEFT, CHEVRON_RIGHT, TAB_ANOMALY] {
-            let mut frame = select_screen(width, height, boss);
-            fill(&mut frame, erased, BACKGROUND);
-            let seen = recognize(&frame);
-            assert_eq!((seen.screen, seen.boss), (ScreenKind::Unknown, None), "{erased:?} {seen:?}");
+        // 선택 화면에서 필수 표지 하나씩을 지운다 — 단추가 제 색이든(평소) 회색이든(횟수 소진) 모른다.
+        // (`도전하기` 단추만 지운 화면은 P-023부터 인식한다 — 아래 「요격 횟수를 다 쓴 화면」 테스트.)
+        for erased in [CHEVRON_LEFT, CHEVRON_RIGHT, TAB_ANOMALY, STRIP] {
+            for mut frame in [
+                select_screen(width, height, boss),
+                spent_select_screen(width, height, boss, SPENT_GREY),
+            ] {
+                fill(&mut frame, erased, BACKGROUND);
+                let seen = recognize(&frame);
+                assert_eq!((seen.screen, seen.boss), (ScreenKind::Unknown, None), "{erased:?} {seen:?}");
+            }
         }
-        // 편성 화면에서 표지 하나씩을 지운다.
-        for erased in [BAR_LEFT, BAR_RIGHT, INFO_LEFT, INFO_RIGHT, MOCK, ENTER] {
-            let mut frame = squad_screen(width, height, boss);
-            fill(&mut frame, erased, BACKGROUND);
+        // 편성 화면에서 필수 표지 하나씩을 지운다(`전투 진입` 단추만 지운 화면은 인식한다).
+        for erased in [BAR_LEFT, BAR_RIGHT, INFO_LEFT, INFO_RIGHT, MOCK, STRIP] {
+            for mut frame in [
+                squad_screen(width, height, boss),
+                spent_squad_screen(width, height, boss, SPENT_GREY),
+            ] {
+                fill(&mut frame, erased, BACKGROUND);
+                let seen = recognize(&frame);
+                assert_eq!((seen.screen, seen.boss), (ScreenKind::Unknown, None), "{erased:?} {seen:?}");
+            }
+        }
+        // 필수 표지 둘이 빠졌다.
+        for (first, second) in [
+            (CHEVRON_LEFT, CHEVRON_RIGHT),
+            (CHEVRON_RIGHT, TAB_ANOMALY),
+            (CHEVRON_LEFT, TAB_ANOMALY),
+        ] {
+            let mut frame = select_screen(width, height, boss);
+            fill(&mut frame, first, BACKGROUND);
+            fill(&mut frame, second, BACKGROUND);
             let seen = recognize(&frame);
-            assert_eq!((seen.screen, seen.boss), (ScreenKind::Unknown, None), "{erased:?} {seen:?}");
+            assert_eq!((seen.screen, seen.boss), (ScreenKind::Unknown, None), "{first:?} {second:?} {seen:?}");
+        }
+        for (first, second) in [
+            (BAR_LEFT, BAR_RIGHT),
+            (INFO_LEFT, MOCK),
+            (BAR_RIGHT, INFO_RIGHT),
+            (BAR_LEFT, INFO_LEFT),
+        ] {
+            let mut frame = squad_screen(width, height, boss);
+            fill(&mut frame, first, BACKGROUND);
+            fill(&mut frame, second, BACKGROUND);
+            let seen = recognize(&frame);
+            assert_eq!((seen.screen, seen.boss), (ScreenKind::Unknown, None), "{first:?} {second:?} {seen:?}");
         }
         // 화면 전체가 어두워졌다(팝업 뒤): 테마 색의 명도가 기준 아래로 — 틀린 보스를 말하지 않는다.
         let dimmed = brighten(&select_screen(width, height, boss), 0.25);

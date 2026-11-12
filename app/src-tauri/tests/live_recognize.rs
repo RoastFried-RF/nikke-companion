@@ -13,6 +13,8 @@
 //! 확인하는 것:
 //! - 라벨 캡처 전부에서 정답: `anomaly_select`·`anomaly_squad`는 화면 종류와 보스가 맞고, 나머지(로비·요격전 탭·
 //!   일반/특수 개체 편성)는 `other`이고 보스가 없다
+//! - 전투로 들어가는 단추(`도전하기`·`전투 진입`) 자리만 회색으로 덧칠해도 같은 답이다 — 요격 횟수를 다 쓴 날을
+//!   흉내 낸 것이다(P-023. 그 상태의 실제 캡처는 아직 없다)
 //! - 0.6배·0.8배·1.25배로 다시 샘플링해도(가까운 픽셀·쌍선형) 같은 답이다
 //! - 밝기 ±10%·약한 잡음에서도 같은 답이다
 //! - 4:3·21:9로 자르거나 늘린 프레임은 틀린 답 대신 `unknown`이다
@@ -313,6 +315,77 @@ fn every_labeled_capture_gets_the_right_screen_and_boss() {
         if !label.is_anomaly() {
             assert_eq!(seen.boss, None, "{}", label.file);
             assert_eq!(seen.screen, ScreenKind::Other, "{}", label.file);
+        }
+    }
+}
+
+/// 1881×1058 기준 픽셀 사각형 `[x0, y0, x1, y1)`을 이 프레임의 크기에 맞춰 한 색으로 덧칠한다.
+fn paint(frame: &Frame, rect: [f64; 4], rgb: [u8; 3]) -> Frame {
+    let mut out = Frame {
+        width: frame.width,
+        height: frame.height,
+        rgb: frame.rgb.clone(),
+    };
+    let scale = |value: f64, reference: f64, size: u32| {
+        ((value / reference * f64::from(size)).round().max(0.0) as u32).min(size)
+    };
+    let (x0, x1) = (scale(rect[0], 1881.0, out.width), scale(rect[2], 1881.0, out.width));
+    let (y0, y1) = (scale(rect[1], 1058.0, out.height), scale(rect[3], 1058.0, out.height));
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let at = (y as usize * out.width as usize + x as usize) * 3;
+            out.rgb[at..at + 3].copy_from_slice(&rgb);
+        }
+    }
+    out
+}
+
+/// `도전하기` 단추(선택 화면)와 `전투 진입` 단추(편성 화면)의 자리 — `docs/intercept.md` §인식 근거.
+const CHALLENGE_BUTTON: [f64; 4] = [835.0, 832.0, 1045.0, 893.0];
+const ENTER_BUTTON: [f64; 4] = [962.0, 945.0, 1211.0, 1012.0];
+
+/// 요격 횟수를 다 쓴 날에는 전투로 들어가는 단추의 색이 달라진다(P-023 — `전투 진입`이 빨강 0%였다). 그 상태의 캡처는
+/// 아직 없어서, **실제 캡처의 단추 자리만 회색으로 덧칠해** 나머지 표지로 같은 답이 나오는지 본다. 실제 소진 화면이 아니다 —
+/// 그 캡처를 찍어 라벨에 넣으면 `every_labeled_capture_gets_the_right_screen_and_boss`가 그대로 확인한다.
+#[test]
+#[ignore = "라벨 붙은 게임 캡처(data/captures/labels.json)가 필요하다"]
+fn captures_with_the_battle_button_greyed_out_get_the_same_answer() {
+    for label in captures() {
+        for grey in [[118, 120, 124], [72, 72, 74], [200, 200, 204], [10, 10, 12]] {
+            let (painted, said) = match label.screen.as_str() {
+                "anomaly_select" => (
+                    paint(&label.frame, CHALLENGE_BUTTON, grey),
+                    Some("도전하기 단추가 테마 색이 아니다"),
+                ),
+                "anomaly_squad" => (
+                    paint(&label.frame, ENTER_BUTTON, grey),
+                    Some("전투 진입 단추가 빨강이 아니다(빨강 0%"),
+                ),
+                // 이상 개체가 아닌 화면은 두 자리를 다 칠해도 `other`다.
+                _ => (
+                    paint(&paint(&label.frame, CHALLENGE_BUTTON, grey), ENTER_BUTTON, grey),
+                    None,
+                ),
+            };
+            let what = format!("단추를 회색 {grey:?}로 덧칠");
+            let seen = recognize(&painted);
+            assert_matches(label, &seen, &what);
+            if let Some(said) = said {
+                let text = seen.evidence.join("\n");
+                assert!(text.contains(said), "{} [{what}] 근거에 단추 이야기가 없다:\n{text}", label.file);
+                assert!(text.contains("필수 표지가 아니어서"), "{} [{what}]\n{text}", label.file);
+                assert!(seen.confidence <= 0.8, "{} [{what}] {seen:?}", label.file);
+            }
+            // 줄이고 밝기를 바꿔도 같다.
+            let (width, height) = scaled_size(&painted, 0.6);
+            let small = resample_bilinear(&painted, width, height);
+            assert_matches(label, &recognize(&small), &format!("{what} + 0.6배"));
+            assert_matches(label, &recognize(&brighten(&small, 0.9)), &format!("{what} + 0.6배 + 밝기 -10%"));
+            assert_matches(
+                label,
+                &recognize(&add_noise(&painted, 8, 77)),
+                &format!("{what} + 잡음 ±8"),
+            );
         }
     }
 }
