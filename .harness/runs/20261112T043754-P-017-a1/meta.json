@@ -1,0 +1,30 @@
+{
+  "task": "P-017",
+  "attempt": 1,
+  "resumed": false,
+  "run": ".harness/runs/20261112T043754-P-017-a1",
+  "agent": {
+    "ok": true,
+    "effort": "high",
+    "exit_code": 0,
+    "signal": null,
+    "duration_ms": 1771678,
+    "result": {
+      "is_error": false,
+      "error": null,
+      "num_turns": 126,
+      "total_cost_usd": 19.039741399999997,
+      "models": [
+        "claude-fable-5-2"
+      ],
+      "session_id": "cd9053dc-7f66-4d71-89e7-3ba8ed107b3a"
+    }
+  },
+  "verify": {
+    "passed": true,
+    "reason": null,
+    "tree": "95569a6977fafc433cbd99c5af94353adda6d72c"
+  },
+  "commit": "6ee4a425b7d989e429bfa86db87d2c18d5ddfc4b",
+  "outcome": "verified"
+}
