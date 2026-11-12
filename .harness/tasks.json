@@ -921,9 +921,19 @@
         "사용자 실제 계정으로 추천을 돌려 인게임 요격전 기록(모의전 대미지)과 대조한다"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261112T035119-P-018-a1",
+        "verified_tree": "7f37718e786911a285fd533259f860f15f857b3e",
+        "verified_at": "2026-11-12T04:09:36.424Z",
+        "commit": null
+      }
     },
     {
       "id": "P-019",

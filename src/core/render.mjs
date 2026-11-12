@@ -115,6 +115,66 @@ export function renderImportReport(report) {
   return out.join('\n');
 }
 
+const CONTENT_NAMES = { anomaly_interception: '이상 개체 요격전', interception: '요격전' };
+
+/** 요격전 보스 한 줄 머리: 이름과 속성·약점·보상·레벨. 유도한 값과 모르는 값은 그렇게 적는다. */
+function interceptBossHeader(b) {
+  const el = b.element;
+  const code = el.code ? `${el.code}${el.code_source === 'weak_to' ? '(약점에서 유도)' : ''}` : '미확인';
+  const weak = el.weak_to ? `${el.weak_to}${el.weak_to_source === 'code' ? '(속성에서 유도)' : ''}` : '미확인';
+  const level = b.level.mode === 'fixed'
+    ? `레벨 ${b.level.level}(상한 미확인)`
+    : `레벨 ${b.level.level}(상한 ${b.level.cap}${b.level.assumed ? ' — 동기화 레벨을 몰라 상한으로 가정' : ''})`;
+  const parts = [`속성 ${code}`, `약점 ${weak}`, `보상 ${b.reward ?? '미확인'}`, level, `전투 ${b.duration}초${b.confirmed.includes('duration') ? '' : '(미확인 — 엔진 기본값)'}`];
+  return `■ ${b.name}  ${parts.join(' · ')}`;
+}
+
+/** 요격전 보스별 추천 결과(`recommendIntercept` — docs/data-model.md §요격전 추천 결과)를 텍스트로. */
+export function renderInterceptReport(report) {
+  const out = [
+    `계정: ${report.account.name ?? '(이름 없음)'}${report.account.is_test_data ? '  [검증용 데이터]' : ''}`,
+    `콘텐츠: ${CONTENT_NAMES[report.content] ?? report.content} · 보스 ${report.bosses.length}종${report.bundle.is_test_data ? '  [검증용 보스 묶음]' : ''}`,
+    `보스 값의 출처: ${report.bundle.source}`,
+    `엔진: ${report.engine?.repo ?? '?'} @ ${report.engine?.commit?.slice(0, 8) ?? '버전 미확인'}`,
+    ...cacheLines(report.cache),
+    `예산: 시뮬 ${report.sims.used}건 / 예산 ${report.sims.budget}건 (${report.sims.per_boss.map((p) => `${p.name} ${p.used}/${p.budget}`).join(' · ')})`,
+    '가정:',
+    ...report.assumptions.map((a) => `  - ${a}`),
+  ];
+  for (const b of report.bosses) {
+    out.push('', interceptBossHeader(b));
+    // 속성 상성 미반영 같은 표시는 보스 이름 바로 아래에 따로 낸다 — 다른 메모에 묻히지 않게.
+    for (const flag of b.flags) out.push(`  !! ${flag} !!`);
+    const defaults = b.unconfirmed.filter((u) => u.field !== 'weak_to');
+    if (defaults.length) {
+      out.push('  미확인(확정값이 아니다 — 이렇게 계산했다):');
+      for (const u of defaults) out.push(`    ? ${u.label}: ${u.text}`);
+    }
+    if (b.status !== 'computed') {
+      out.push('  계산하지 않았다.');
+    } else {
+      const line = searchLine(b.suggestion?.search);
+      if (line) out.push(`  ${line}`);
+      if (b.ranking.length === 0) out.push('  계산된 편성이 없다.');
+      for (const r of b.ranking) {
+        const rel = r.rank === 1 ? '기준' : `1위 대비 ${pct(r.relative_to_best)}`;
+        out.push(`  ${r.rank}위  ${r.name}  총딜 ${unit(r.total_damage)} (${num(r.total_damage)})  · ${rel}`);
+        for (const m of r.members) {
+          out.push(`        ${pct(m.share).padStart(6)}  ${padStartWide(unit(m.damage), 10)}  ${num(m.damage).padStart(15)}  ${m.name}`);
+        }
+        for (const n of r.notes) out.push(`        ! ${n}`);
+        if (r.ungrown_members.length) out.push(`        ! 육성 정보가 비어 미육성으로 계산: ${r.ungrown_members.join(', ')}`);
+      }
+      for (const f of b.failed) out.push(`  엔진이 계산하지 못한 편성 — ${f.name}: ${f.error.message}${f.error.path ? ` (${f.error.path})` : ''}`);
+      for (const r of b.rejected) out.push(`  계산하지 않은 편성 — ${r.name}: ${r.reasons.join(' / ')}`);
+    }
+    for (const n of b.notes) out.push(`  ! ${n}`);
+  }
+  out.push('', '주의:');
+  for (const c of report.caveats) out.push(`  - ${c}`);
+  return out.join('\n');
+}
+
 export function renderReport(report) {
   const out = headerLines(report);
   if (report.suggestion) {

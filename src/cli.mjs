@@ -8,7 +8,9 @@
 //   node src/cli.mjs import-profile <엔진 프로필.json> [--name <계정 이름>] [--out-dir <폴더>] [--force] [--json <결과.json>]
 //   node src/cli.mjs tier build [--only <이름,이름>] [--budget <시뮬 횟수>] [--json <결과.json>]
 //                              [--references <기준 편성.json>] [--rules <등급 규칙.json>]
-// compare·suggest·growth·tier는 시뮬 결과 캐시(data/cache/sim/)를 기본으로 쓴다: [--no-cache] [--cache-dir <폴더>]
+//   node src/cli.mjs intercept --account <계정.json> [--bosses <보스 묶음.json>] [--boss <이름 또는 id>] [--top <표시 수>]
+//                              [--budget <시뮬 횟수>] [--json <결과.json>]
+// compare·suggest·growth·tier·intercept는 시뮬 결과 캐시(data/cache/sim/)를 기본으로 쓴다: [--no-cache] [--cache-dir <폴더>]
 // 종료 코드: 0 성공 · 1 실행 오류 · 2 입력 오류
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -17,7 +19,8 @@ import { suggestSquads } from './core/candidates.mjs';
 import { compareSquads, InputError } from './core/compare.mjs';
 import { compareGrowth } from './core/growth.mjs';
 import { importProfileFile } from './core/import-profile.mjs';
-import { renderReport, renderGrowthReport, renderImportReport } from './core/render.mjs';
+import { recommendIntercept } from './core/intercept.mjs';
+import { renderReport, renderGrowthReport, renderImportReport, renderInterceptReport } from './core/render.mjs';
 import { createFileCacheStore, loadEngineData, nodeRuntime } from './runtime/node.mjs';
 import { detectChanges } from './tier/detect.mjs';
 import { buildTier } from './tier/evaluate.mjs';
@@ -26,6 +29,8 @@ import { renderTierReport } from './tier/render.mjs';
 /** 자동 티어의 기준 편성·등급 규칙(버전 있는 데이터 파일). --references·--rules로 바꿀 수 있다. */
 const TIER_REFERENCES = fileURLToPath(new URL('../data/tier/reference-squads.json', import.meta.url));
 const TIER_RULES = fileURLToPath(new URL('../data/tier/rules.json', import.meta.url));
+/** 이상 개체 요격전의 실제 보스 묶음(게임 화면에서 확인한 값 — docs/intercept.md). --bosses로 바꿀 수 있다. */
+const INTERCEPT_BOSSES = fileURLToPath(new URL('../data/intercept/anomaly.json', import.meta.url));
 
 const USAGE = [
   '사용법:',
@@ -39,7 +44,10 @@ const USAGE = [
   '  node src/cli.mjs tier build [--only <니케 이름,니케 이름>] [--budget <시뮬 횟수의 상한, 기본 2000>] [--json <결과.json>]',
   '      엔진 계산으로 티어표를 만든다(전원 계산은 1,800건쯤 — 수십 분). --only로 일부만 계산할 수 있다',
   '      [--references <기준 편성.json, 기본 data/tier/reference-squads.json>]   [--rules <등급 규칙.json, 기본 data/tier/rules.json>]',
-  'compare·suggest·growth·tier는 같은 엔진 판·같은 요청의 시뮬 결과를 다시 계산하지 않는다(캐시):',
+  '  node src/cli.mjs intercept --account <계정.json> [--bosses <보스 묶음.json, 기본 data/intercept/anomaly.json>] [--boss <보스 이름 또는 id>]',
+  '      요격전(이상 개체) 보스마다 보유 니케로 총딜이 가장 큰 편성을 추천한다. --boss로 한 보스만 계산할 수 있다',
+  '      [--top <보스별 표시 수, 기본 3>]   [--budget <전체 시뮬 횟수의 상한, 기본 300 — 보스 수로 나눈다>]   [--json <결과.json>]',
+  'compare·suggest·growth·tier·intercept는 같은 엔진 판·같은 요청의 시뮬 결과를 다시 계산하지 않는다(캐시):',
   '  [--no-cache] 캐시를 읽지도 쓰지도 않는다   [--cache-dir <폴더, 기본 data/cache/sim>]',
 ].join('\n');
 
@@ -106,7 +114,7 @@ function engineDeps() {
 try {
   let report;
   let render = renderReport;
-  const deps = ['compare', 'suggest', 'growth', 'tier'].includes(command) ? engineDeps() : {};
+  const deps = ['compare', 'suggest', 'growth', 'tier', 'intercept'].includes(command) ? engineDeps() : {};
   if (command === 'tier') {
     if (opts._[0] !== 'build' || opts._.length > 1) {
       throw new InputError('인자가 잘못됐다', [{ path: 'tier', message: '하위 명령은 build뿐이다 — node src/cli.mjs tier build [--only <이름,이름>]' }]);
@@ -138,6 +146,27 @@ try {
       },
     );
     render = renderTierReport;
+  } else if (command === 'intercept') {
+    for (const key of ['bosses', 'boss']) {
+      if (opts[key] === true) throw new InputError('인자가 빠졌다', [{ path: `--${key}`, message: '값이 필요하다' }]);
+    }
+    if (opts._.length > 0) {
+      throw new InputError('인자가 잘못됐다', [{ path: opts._[0], message: '이름 없는 인자는 받지 않는다 — 보스는 --boss <이름 또는 id>로 고른다' }]);
+    }
+    report = await recommendIntercept(
+      {
+        account: readJsonFile('account', opts.account),
+        bundle: readJsonFile('bosses', opts.bosses ?? INTERCEPT_BOSSES),
+        boss: opts.boss,
+      },
+      { top: readCount('top', opts.top), budget: readCount('budget', opts.budget) },
+      {
+        ...deps,
+        // 진행은 표준 오류로만 낸다 — 표준 출력은 결과 표다.
+        onBoss: ({ index, total, boss, budget }) => process.stderr.write(`보스 ${index + 1}/${total} ${boss.name} — 시뮬 예산 ${budget}건\n`),
+      },
+    );
+    render = renderInterceptReport;
   } else if (command === 'growth') {
     const upgradesDoc = readJsonFile('upgrades', opts.upgrades);
     report = await compareGrowth({

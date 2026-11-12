@@ -12,6 +12,8 @@ export const GROWTH_FIELDS = [
   'collection_stage', 'favorite_stage', 'equip_skills', 'equipment', 'console', 'cube',
 ];
 const META_FIELDS = ['unknown', 'note'];
+/** 동기화 레벨(`account.synchro_level`)의 상한 — 엔진이 받는 레벨 범위(vendor/nikke-calc/docs/SIM-JSON.md §육성 `level` 1~1000). */
+export const SYNCHRO_LEVEL_MAX = 1000;
 
 const isInt = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
 
@@ -33,6 +35,13 @@ export function validateAccount(account, catalog) {
   }
   if (typeof account.is_test_data !== 'boolean') {
     err('/is_test_data', '검증용 데이터인지 실제 계정인지 true/false로 밝혀야 한다');
+  }
+  if (account.account !== undefined) {
+    if (account.account === null || typeof account.account !== 'object' || Array.isArray(account.account)) {
+      err('/account', 'account는 계정 단위 값(console, synchro_level 등)을 담는 객체여야 한다');
+    } else if ('synchro_level' in account.account && !isInt(account.account.synchro_level, 1, SYNCHRO_LEVEL_MAX)) {
+      err('/account/synchro_level', `동기화 레벨은 1~${SYNCHRO_LEVEL_MAX}의 정수여야 한다`);
+    }
   }
   if (account.nikkes === null || typeof account.nikkes !== 'object' || Array.isArray(account.nikkes)) {
     err('/nikkes', 'nikkes는 {니케 이름: 육성 상태} 객체여야 한다');
@@ -145,8 +154,12 @@ export function toEngineEntry(entry) {
 /**
  * 엔진 인라인 프로필을 만든다. 편성에 들어간 니케만 싣는다.
  * base는 항상 "ungrown" — 프로필에 없는 이름이 만렙 가상 캐릭터로 계산되는 일이 없게 한다.
+ *
+ * `level`(src/core/condition.mjs의 `levelPlan` 결과)이 엔진 정책 `sync`를 쓰면 계산할 레벨을
+ * `_account.synchro_level`에 싣는다 — 계정의 동기화 레벨 그대로가 아니라 콘텐츠 상한을 적용한 값이다.
+ * 주지 않거나 `fixed`면 종전과 같은 프로필이다(레벨을 싣지 않는다).
  */
-export function toEngineProfile(account, names) {
+export function toEngineProfile(account, names, level = null) {
   const chars = {};
   for (const name of names) {
     const entry = account.nikkes[name];
@@ -154,6 +167,9 @@ export function toEngineProfile(account, names) {
     chars[name] = toEngineEntry(entry);
   }
   const profile = { base: 'ungrown', chars, _meta: { name: account.name ?? '계정' } };
-  if (account.account?.console) profile._account = { console: account.account.console };
+  const acct = {};
+  if (account.account?.console) acct.console = account.account.console;
+  if (level?.engine_policy === 'sync') acct.synchro_level = level.level;
+  if (Object.keys(acct).length) profile._account = acct;
   return profile;
 }

@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "content": "anomaly_interception",
+  "is_test_data": false,
+  "name": "이상 개체 요격전 — 보스 5종",
+  "version": "2026-11-12.1",
+  "source": "docs/intercept.md §확인한 사실 — 2026-11-12 사용자 계정의 게임 화면 캡처 16장에서 읽은 값",
+  "note": "게임 화면에서 확인한 값만 담는다. 방어력·코어·파츠·교전 거리·전투 시간은 화면에서 확인하지 못해 넣지 않았다(미확인). 기억이나 추정으로 채우지 않는다. 값을 더하려면 docs/intercept.md에 출처와 함께 먼저 적는다.",
+  "bosses": [
+    {
+      "id": "indivilia",
+      "name": "인디빌리아",
+      "enemy": { "code": "풍압" },
+      "weak_to": "작열",
+      "level_cap": 400,
+      "reward": "몸통 장비",
+      "source": "docs/intercept.md §이상 개체 요격전 — 보스 5종: 육각형의 속성 아이콘(보스 속성), 편성 화면의 \"약점 작열\"·\"최대 레벨 400 제한\"·보상",
+      "confirmation": {
+        "confirmed": ["code", "weak_to", "level_cap"],
+        "unconfirmed": ["duration", "def", "core_px", "distance", "has_parts", "part_break_interval", "optimal_range_weapons"]
+      }
+    },
+    {
+      "id": "ultra",
+      "name": "울트라",
+      "enemy": { "code": "전격" },
+      "weak_to": "철갑",
+      "level_cap": 400,
+      "reward": "머리 장비",
+      "source": "docs/intercept.md §이상 개체 요격전 — 보스 5종: 육각형의 속성 아이콘(보스 속성), 편성 화면의 \"약점 철갑\"·\"최대 레벨 400 제한\"·보상",
+      "confirmation": {
+        "confirmed": ["code", "weak_to", "level_cap"],
+        "unconfirmed": ["duration", "def", "core_px", "distance", "has_parts", "part_break_interval", "optimal_range_weapons"]
+      }
+    },
+    {
+      "id": "harvester",
+      "name": "하베스터",
+      "enemy": { "code": "작열" },
+      "weak_to": "수냉",
+      "level_cap": 400,
+      "reward": "다리 장비",
+      "source": "docs/intercept.md §이상 개체 요격전 — 보스 5종: 육각형의 속성 아이콘(보스 속성), 편성 화면의 \"약점 수냉\"·\"최대 레벨 400 제한\"·보상",
+      "confirmation": {
+        "confirmed": ["code", "weak_to", "level_cap"],
+        "unconfirmed": ["duration", "def", "core_px", "distance", "has_parts", "part_break_interval", "optimal_range_weapons"]
+      }
+    },
+    {
+      "id": "kraken",
+      "name": "크라켄",
+      "enemy": { "code": "철갑" },
+      "weak_to": "풍압",
+      "level_cap": 400,
+      "reward": "커스텀 모듈",
+      "source": "docs/intercept.md §이상 개체 요격전 — 보스 5종: 육각형의 속성 아이콘(보스 속성), 편성 화면의 \"약점 풍압\"·\"최대 레벨 400 제한\"·보상",
+      "confirmation": {
+        "confirmed": ["code", "weak_to", "level_cap"],
+        "unconfirmed": ["duration", "def", "core_px", "distance", "has_parts", "part_break_interval", "optimal_range_weapons"]
+      }
+    },
+    {
+      "id": "mirror_container",
+      "name": "미러 컨테이너",
+      "enemy": { "code": "수냉" },
+      "weak_to": "전격",
+      "level_cap": 400,
+      "reward": "팔 장비",
+      "source": "docs/intercept.md §이상 개체 요격전 — 보스 5종: 육각형의 속성 아이콘(보스 속성), 편성 화면의 \"약점 전격\"·\"최대 레벨 400 제한\"·보상",
+      "confirmation": {
+        "confirmed": ["code", "weak_to", "level_cap"],
+        "unconfirmed": ["duration", "def", "core_px", "distance", "has_parts", "part_break_interval", "optimal_range_weapons"]
+      }
+    }
+  ]
+}

@@ -23,10 +23,19 @@ node scripts/harness-selftest.mjs        # 하네스 자체 검증 (모델 호�
 node src/cli.mjs compare --account data/samples/account.sample.json --condition data/samples/condition.solo-raid.json --squads data/samples/squads.sample.json
 ```
 
-`compare`·`suggest`·`growth`는 시뮬 결과를 `data/cache/sim/`(gitignore)에 캐시한다. `--no-cache`로 끄고, 폴더를 지우면
+`compare`·`suggest`·`growth`·`tier`·`intercept`는 시뮬 결과를 `data/cache/sim/`(gitignore)에 캐시한다. `--no-cache`로 끄고, 폴더를 지우면
 비워진다(`docs/data-model.md` §시뮬 결과 캐시).
 `suggest`는 상위 조합의 배치 순서도 탐색한다(2단계). `--no-refine`으로 끄고, `--budget <시뮬 횟수>`(기본 120)로 전체
 시뮬 횟수를 묶는다(`docs/data-model.md` §배치 탐색).
+
+요격전(이상 개체) 보스별 편성 추천(보스 값은 `data/intercept/anomaly.json` — 게임 화면에서 확인한 것만 담는다. 형식은
+`docs/data-model.md` §보스 묶음·§요격전 추천 결과):
+
+```bash
+node src/cli.mjs intercept --account data/samples/account.sample.json                      # 보스 5종, 시뮬 예산 300건(보스당 60건) — 몇 분
+node src/cli.mjs intercept --account data/samples/account.sample.json --boss 크라켄 --budget 30 --top 3 --json intercept.json
+node src/cli.mjs intercept --account data/samples/account.sample.json --bosses data/samples/bosses.anomaly.sample.json --budget 25   # 검증용 보스 묶음
+```
 
 자동 티어(엔진 계산으로 티어표 — 방법·한계는 `docs/tier-method.md`, 기준 편성·등급 규칙은 `data/tier/`):
 

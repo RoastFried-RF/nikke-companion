@@ -2,7 +2,7 @@
 // 원래 계정 문서는 바꾸지 않는다(후보마다 복사본에 적용한다). 재화·비용은 다루지 않는다 — 후보는 입력이다.
 // 형식 설명은 docs/data-model.md §성장 투자 비교.
 import { validateAccount, toEngineProfile, GROWTH_FIELDS, overloadOptionId as overloadId } from './account.mjs';
-import { validateCondition, toEngineBase, assumptionsOf } from './condition.mjs';
+import { validateCondition, toEngineBase, assumptionsOf, levelPlan, levelCaveats } from './condition.mjs';
 import { InputError, squadProblems, squadNotes } from './compare.mjs';
 import { engineAccess } from './runtime.mjs';
 
@@ -218,8 +218,10 @@ export async function compareGrowth({ account, condition, squad, upgrades }, dep
   }
 
   const members = squad.members;
-  const base = toEngineBase(condition);
-  const baseProfile = toEngineProfile(account, members);
+  // 레벨은 조건과 계정 단위 값이 정한다(업그레이드 후보는 니케 육성 칸만 바꾼다) — 기준과 후보가 같은 레벨이다.
+  const level = levelPlan(condition, account);
+  const base = toEngineBase(condition, level);
+  const baseProfile = toEngineProfile(account, members, level);
 
   const rejected = [];
   const accepted = [];
@@ -236,7 +238,7 @@ export async function compareGrowth({ account, condition, squad, upgrades }, dep
     if (reasons.length === 0) {
       const touched = [...new Set(r.changes.map((ch) => ch.nikke))];
       const outside = touched.filter((n) => !members.includes(n));
-      profile = toEngineProfile(r.account, members);
+      profile = toEngineProfile(r.account, members, level);
       if (outside.length === touched.length) reasons.push(`기준 편성에 없는 니케만 바꾼다(${outside.join(', ')}) — 이 편성의 총딜은 달라지지 않는다`);
       else if (same(profile, baseProfile)) reasons.push('현재 상태와 같다 — 달라지는 것이 없다');
       else if (outside.length) notes.push(`기준 편성에 없는 니케의 변경은 총딜에 반영되지 않는다: ${outside.join(', ')}`);
@@ -289,7 +291,7 @@ export async function compareGrowth({ account, condition, squad, upgrades }, dep
     generated_at: (deps.now ?? (() => new Date()))().toISOString(),
     account: { name: account.name ?? null, is_test_data: account.is_test_data, updated_at: account.updated_at ?? null },
     condition,
-    assumptions: assumptionsOf(condition),
+    assumptions: assumptionsOf(condition, level),
     engine: before.evaluator ?? (await engine.version()),
     // 시뮬 결과 캐시 통계(src/core/cache.mjs). 캐시를 쓰지 않는 런타임이면 null이다.
     cache,
@@ -309,6 +311,7 @@ export async function compareGrowth({ account, condition, squad, upgrades }, dep
       '재화·비용은 고려하지 않았다. 증가율이 높다고 투자 효율이 높다는 뜻은 아니다.',
       '후보는 하나씩 따로 적용했다. 여러 후보를 함께 적용한 효과는 각각의 합과 다를 수 있다.',
       '수치는 시뮬레이션 추정치다. 실제 게임 기록과 대조하지 않았다.',
+      ...levelCaveats(level),
       ...a.warnings,
     ],
   };

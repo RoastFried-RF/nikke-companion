@@ -11,7 +11,10 @@
   "name": "검증용 샘플 계정",
   "source": "manual",              // manual | import (§계정 가져오기)
   "updated_at": "2026-11-12T02:00:00+09:00",
-  "account": { "console": { } },   // 선택. 엔진 `_account.console` 형식 그대로
+  "account": {                     // 선택. 계정 단위 값
+    "console": { },                //   엔진 `_account.console` 형식 그대로
+    "synchro_level": 258           //   동기화 레벨(1~1000의 정수). 레벨 상한이 있는 콘텐츠에서만 쓴다(§전투 조건 §레벨)
+  },
   "nikkes": {                      // 여기 있는 이름 = 보유 니케 (엔진 정식 명칭)
     "크라운": {
       "skill_levels": [10, 10, 10],
@@ -28,7 +31,9 @@
 - 육성 칸의 이름과 표기는 엔진 프로필과 같다(`vendor/nikke-calc/docs/SIM-JSON.md` §육성).
 - 적지 않은 칸은 **미육성 값**으로 계산된다(돌파 0 · 스킬 1/1/1 · 소장품 없음 · 오버로드 0줄). 모르는 칸은 `unknown`에 적어 결과에 드러나게 한다.
 - 오버로드 줄을 적고 `equipment`를 적지 않으면 엔진 기본 오버로드 장비를 낀 것으로 계산한다. 오버로드 줄이 없으면 장비 미장착이다.
-- 캐릭터 레벨은 계정 상태가 아니다. 콘텐츠가 정한다(솔로 레이드 = 400 고정).
+- 니케별 레벨은 계정 상태에 없다. 레벨은 콘텐츠가 정한다 — 솔로 레이드는 400 고정이고, 레벨 **상한**이 있는 콘텐츠
+  (이상 개체 요격전)는 계정의 동기화 레벨 `account.synchro_level`을 상한까지 반영한다(§전투 조건 §레벨). 가져온 계정에는
+  이 칸이 들어 있고(§계정 가져오기), 수동 계정은 인게임 동기화 레벨을 직접 적는다. 없으면 상한 값으로 가정하고 결과에 그렇게 적힌다.
 - 실제 계정 파일은 `data/accounts/`에 둔다(gitignore).
 
 ## 계정 가져오기 — `src/core/import-profile.mjs`
@@ -53,7 +58,7 @@ node src/cli.mjs import-profile <프로필.json> [--name <계정 이름>] [--out
 | `equipment` | 그대로, 주석 키(`_track`)만 뗀다 |
 | `equip_skills`(합산 퍼센트) + `_overload`(부위별 줄 목록) | `overload` `{인게임 이름: [줄별 레벨]}`. 9개 옵션을 모두 적고 줄이 없는 옵션은 `[]` |
 | `_unsynced` | `note`(동기화 소대 밖이었다는 메모) |
-| `_account.console` | `account.console`. `synchro_level`·`cubes`(장착 중 관찰된 보유 하한)는 `account`에 기록만 한다 |
+| `_account.console` | `account.console`. `synchro_level`은 `account.synchro_level`(레벨 상한이 있는 콘텐츠의 계산에 쓰인다 — §전투 조건 §레벨), `cubes`(장착 중 관찰된 보유 하한)는 `account`에 기록만 한다 |
 | `_meta.openid` · `level` · 그 밖의 `_` 키 | 옮기지 않는다 |
 
 - **옮기지 못한 칸은 값을 지어내지 않고 그 니케의 `unknown`에 남긴다.** 이유는 `import.warnings`와 결과의 `warnings`에 적힌다.
@@ -91,7 +96,29 @@ node src/cli.mjs import-profile <프로필.json> [--name <계정 이름>] [--out
 { "schema_version": 1, "content": "solo_raid", "boss": "솔로 레이드 S40", "duration": 180, "enemy": { "code": "풍압" } }
 ```
 
-`boss`는 엔진 프리셋 이름(`vendor/nikke-calc/data/boss_presets.json`). `enemy`는 그 위에 덮는 적 스탯.
+`boss`는 엔진 프리셋 이름(`vendor/nikke-calc/data/boss_presets.json`). `enemy`는 그 위에 덮는 적 스탯
+(`def` · `code` · `core_px` · `distance` · `has_parts` · `part_break_interval` · `optimal_range_weapons` — 엔진 요청의 `enemy`와 같다).
+
+- `content`: `solo_raid` · `union_raid` · `custom` · `anomaly_interception`(이상 개체 요격전) · `interception`(일반·특수 개체 요격전).
+- `level_cap`(선택, 1~1000의 정수): 콘텐츠의 레벨 상한. 요격전 조건은 보스 묶음에서 만들어진다(§보스 묶음).
+
+### 레벨
+
+엔진의 레벨 정책은 둘뿐이다(`vendor/nikke-calc/runner/spec.py`의 `LEVEL_MODES`, `docs/HARNESS.md` §레벨 정책): `fixed`(레벨 400
+고정 — 솔로 레이드)와 `sync`(프로필의 `_account.synchro_level`, 편성 전원 같은 값). `levelPlan(조건, 계정)`이 무엇으로
+계산할지 정한다.
+
+| 조건 | 계정 | 계산하는 레벨 | 엔진에 보내는 것 |
+|---|---|---|---|
+| `level_cap` 없음 | (무관) | 400 | `profile_level: "fixed"` — 종전 그대로 |
+| `level_cap` 있음 | `account.synchro_level` 있음 | min(동기화 레벨, 상한) | 400이면 `fixed`, 아니면 `sync` + 프로필의 `_account.synchro_level`에 그 레벨 |
+| `level_cap` 있음 | 동기화 레벨 없음 | 상한(**가정**) | 위와 같다. 결과의 `caveats`에 「상한으로 계산했다 — 실제 레벨이 더 낮으면 총딜이 과대」가 붙는다 |
+
+- 이상 개체 요격전의 "최대 레벨 400 제한"은 고정이 아니라 상한이다(`docs/intercept.md`). 그래서 계정 상태에
+  `account.synchro_level`을 뒀다 — 있으면 실제 레벨로 계산한다.
+- 엔진의 `sync`는 동기화 소대 밖의 니케도 같은 레벨로 본다(소대에 넣기만 하면 그 레벨이 되므로). 니케마다 다른 레벨은
+  계산하지 않는다 — 결과의 `caveats`에 적힌다.
+- 무엇으로 계산했는지는 결과의 `assumptions` 셋째 줄에 나온다(`캐릭터 레벨 258 — 계정의 동기화 레벨(…)`).
 
 ## 후보 편성
 
@@ -286,6 +313,132 @@ CLI: `suggest --refine`(기본) / `--no-refine`(1단계만) · `--budget <시뮬
 - 엔진 요청은 기준 1건 + 계산한 후보 수다. 캐시에 있는 것은 엔진에 보내지 않는다(기준 편성은 `compare`가 이미
   계산했으면 적중한다).
 
+## 보스 묶음 — `src/core/intercept.mjs`
+
+요격전 보스를 담는 문서. 엔진에는 요격전 보스 프리셋이 없어(`vendor/nikke-calc/data/boss_presets.json`은 솔로 레이드 S40뿐)
+보스를 전투 조건의 적 설정(`enemy`)으로 표현한다. **확인한 값만 넣는다** — 모르는 값은 넣지 않고 미확인으로 표시한다.
+
+| 파일 | 내용 |
+|---|---|
+| `data/intercept/anomaly.json` | 이상 개체 요격전의 실제 보스 5종. `docs/intercept.md`의 표(게임 화면 캡처에서 읽은 값)를 옮긴 것이다. 커밋한다 |
+| `data/samples/bosses.anomaly.sample.json` | 검증용(`is_test_data: true`) — 시험 보스 A~E. 약점만 있는 보스, 속성을 모르는 보스가 섞여 있다 |
+
+```jsonc
+{
+  "schema_version": 1,
+  "content": "anomaly_interception",        // anomaly_interception | interception — 전투 조건의 content가 된다
+  "is_test_data": false,                    // 필수. 지어낸 값이면 true
+  "name": "…", "version": "2026-11-12.1", "note": "…", "updated_at": "…",   // 선택
+  "source": "docs/intercept.md §확인한 사실 — …",   // 필수. 값의 출처
+  "bosses": [
+    {
+      "id": "indivilia", "name": "인디빌리아",      // 필수. 묶음 안에서 겹치지 않는다
+      "enemy": { "code": "풍압" },                  // 필수(확인한 칸이 없으면 {}). 전투 조건의 enemy와 같은 칸. code = 보스 자신의 속성
+      "weak_to": "작열",                            // 선택. 약점 속성
+      "level_cap": 400,                             // 선택. 레벨 상한(§전투 조건 §레벨)
+      "duration": 180,                              // 선택. 전투 시간(초)
+      "reward": "몸통 장비",                        // 선택. 계산에는 쓰지 않는다
+      "source": "docs/intercept.md §… : 육각형의 속성 아이콘, 편성 화면의 \"약점 작열\" …",   // 필수. 이 보스 값의 출처
+      "confirmation": {                             // 필수. 확인 여부
+        "confirmed":   ["code", "weak_to", "level_cap"],
+        "unconfirmed": ["duration", "def", "core_px", "distance", "has_parts", "part_break_interval", "optimal_range_weapons"]
+      }
+    }
+  ]
+}
+```
+
+- **확인 여부.** 추적 칸은 열 개다: `code`(보스 속성) · `weak_to` · `level_cap` · `duration` · `def` · `core_px` · `distance` ·
+  `has_parts` · `part_break_interval` · `optimal_range_weapons`. 칸마다 `confirmed`(값이 있다)나 `unconfirmed`(값이 없다) 한쪽에
+  빠짐없이 적는다. 값을 적고 미확인이라 하거나, 값 없이 확인됐다 하거나, 어느 쪽에도 적지 않으면 오류다 — 확인하지 않은
+  값이 조용히 계산에 들어가지 않게 하려는 것이다.
+- **검사**는 `validateBossBundle(묶음)` → `{ok, errors: [{path, message}], warnings}`. 오류는 한국어 문장과 JSON 경로
+  (`/bosses/1/enemy/def`)로 온다. 값의 형·범위는 엔진 요청 스키마(`vendor/nikke-calc/runner/request.py`의 `enemy`)와 같다.
+  모르는 칸은 오류다(`weakto` 같은 오타가 조용히 지나가지 않는다).
+- **속성 상성.** 규칙은 엔진의 것이다 — 정본은 `vendor/nikke-calc/calculator/damage.py`의 `_CODE_ADVANTAGE`
+  (키 속성이 값 속성에 우월: 작열 → 풍압 → 철갑 → 전격 → 수냉 → 작열). `src/core/intercept.mjs`의 `ELEMENT_ADVANTAGE`가
+  이를 옮겨 적었고, `tests/integration/intercept.engine.test.mjs`가 엔진의 표와 같은지 대조한다.
+  - `weak_to`와 `enemy.code`를 둘 다 적었으면 약점이 보스 속성에 우월한 속성이어야 한다. 아니면 오류다(`/bosses/N/weak_to`).
+  - `weak_to`만 있는 보스는 같은 규칙으로 적 속성을 정한다(`resolveElement` — 약점 수냉 → 적 속성 작열). 결과에는
+    「화면에서 확인한 값이 아니라 약점에서 정했다」가 붙는다.
+  - 둘 다 없는 보스는 적 속성 없이 계산한다 — 엔진 기본 적은 속성이 없어 어느 니케에도 우월 코드 보너스가 붙지 않는다.
+    결과에 **속성 상성 미반영**이 붙는다.
+- **변환.** `bossCondition(보스, content)` → 전투 조건. 확인된 칸만 싣는다(적 설정 + 정해진 속성, `duration`, `level_cap`).
+  실제 보스 5종의 조건은 `{content, enemy: {code}, level_cap: 400}`뿐이다.
+- **미확인 칸의 계산 값.** 적지 않은 적 칸은 엔진 기본 적으로 계산된다 — 정본은 `vendor/nikke-calc/calculator/timeline.py`의
+  `DEFAULT_ENEMY`: 방어력 31,784(솔로 레이드 Lv 400 보스) · 속성 없음 · 코어 없음(0) · 파츠 없음 · 파츠 파괴 없음(0) ·
+  거리 없음 · 적정 거리 무기군 없음. 전투 시간은 180초, 레벨 상한이 없으면 `fixed`(400). `ENGINE_ENEMY_DEFAULTS`가 옮겨 적었고
+  통합 테스트가 엔진 결과의 `boss`(실제로 적용된 적)와 대조한다. `unconfirmedOf(보스)`가 칸마다 무엇으로 계산했는지 돌려준다.
+
+## 요격전 추천 결과 — `src/core/intercept.mjs`
+
+`recommendIntercept({account, bundle, boss}, {top = 3, budget = 300}, deps)` — 보스 묶음의 보스마다 기존 추천
+(`suggestSquads` — 멤버 조합 + 배치 탐색 + 캐시)을 돌린다. `deps`는 추천과 같고, `onBoss({index, total, boss: {id, name}, budget})`가
+더해진다(그 보스의 계산 직전).
+
+```bash
+node src/cli.mjs intercept --account <계정.json> [--bosses <보스 묶음, 기본 data/intercept/anomaly.json>] [--boss <이름 또는 id>]
+                           [--top <보스별 표시 수, 기본 3>] [--budget <전체 시뮬 횟수, 기본 300>] [--json <결과.json>] [--no-cache] [--cache-dir <폴더>]
+```
+
+```jsonc
+{
+  "schema_version": 1, "kind": "intercept_report", "generated_at": "…",
+  "account": { "name": "…", "is_test_data": true, "updated_at": "…" },
+  "content": "anomaly_interception",
+  "bundle": { "name": "…", "version": "2026-11-12.1", "is_test_data": false, "source": "docs/intercept.md …", "bosses": 5 },
+  "assumptions": ["이상 개체 요격전 — 보스는 엔진 프리셋이 아니라 전투 조건의 적 설정으로 표현했다 …"],   // 공통 가정
+  "engine": { "repo": "Jgaram/nikke-calc", "commit": "67835ca…", "dirty": false },
+  "cache": { "hits": 0, "misses": 15, "stored": 15, "warnings": [] },   // 보스별 통계의 합. 캐시 없이 계산했으면 null
+  "top": 3,
+  "sims": { "budget": 300, "used": 287,                                 // 엔진에 맡긴 요청 수(캐시 적중 포함). budget을 넘지 않는다
+            "per_boss": [ { "id": "indivilia", "name": "인디빌리아", "budget": 60, "used": 57 } ] },
+  "bosses": [
+    {
+      "id": "indivilia", "name": "인디빌리아", "reward": "몸통 장비",    // 보상을 모르면 null
+      "element": { "code": "풍압", "code_source": "bundle",              // bundle(묶음에 적힘) | weak_to(약점에서 정함) | null(모름)
+                   "weak_to": "작열", "weak_to_source": "bundle",        // bundle | code(보스 속성에서 정함) | null
+                   "reflected": true },                                  // 속성 상성이 계산에 들어갔나
+      "level": { "mode": "cap", "level": 400, "cap": 400, "synchro_level": null, "assumed": true, "engine_policy": "fixed" },   // §전투 조건 §레벨
+      "duration": 180,                                                   // 계산한 전투 시간(미확인이면 엔진 기본값 — unconfirmed에 있다)
+      "source": "docs/intercept.md §…",
+      "condition": { "schema_version": 1, "content": "anomaly_interception", "enemy": { "code": "풍압" }, "level_cap": 400 },   // 실제로 쓴 전투 조건
+      "confirmed": ["code", "weak_to", "level_cap"],
+      "unconfirmed": [ { "field": "def", "label": "방어력", "computed_as": 31784,     // 무엇이 미확인이고 무엇으로 계산했나
+                         "text": "31,784(엔진 기본값 — 솔로 레이드 Lv 400 보스 방어력)" } ],
+      "flags": [],                                                       // 속성을 모르면 ["속성 상성 미반영"]
+      "status": "computed",                                              // computed | not_computed(예산이 돌아가지 않았다)
+      "budget": 60, "sims": 57,                                          // 이 보스의 몫과 쓴 시뮬 횟수
+      "assumptions": ["전투 180초, …", "…", "캐릭터 레벨 400 — 콘텐츠의 레벨 상한 400으로 가정했다(…)", "…"],
+      "ranking": [ { "rank": 1, "name": "후보 3", "total_damage": 0, "relative_to_best": 1,     // §비교 결과·§배치 탐색의 순위 항목 그대로
+                     "members": [ { "name": "…", "damage": 0, "share": 0.2 } ], "notes": [], "placement": { } } ],
+      "rejected": [], "failed": [],
+      "suggestion": { "search": { "budget": 60, "sims": 57 } },          // §후보 생성·§배치 탐색의 suggestion 그대로
+      "weak_pool": { "element": "작열", "owned": ["…"], "pooled": ["…"], "not_pooled": [] },   // 약점 속성 보유 니케가 후보 풀에 들었나. 알 수 없으면 null
+      "notes": ["약점 속성(작열) 보유 니케 3명 중 1명은 후보 풀에 들지 못했다(…) — …"],
+      "caveats": ["…"]                                                   // 이 보스의 추천이 낸 주의 문장 전부
+    }
+  ],
+  "caveats": ["수치는 시뮬레이션 추정치다. 실제 요격전 기록과 대조하지 않았다 …", "보스 패턴 미반영: …"]
+}
+```
+
+- **예산.** 전체 예산을 계산할 보스 수로 나눈다(`splitBudget` — 합이 정확히 예산, 나머지는 앞 보스부터 한 건씩). 보스마다
+  그 몫이 `suggestSquads`의 `budget`이 된다(1단계 조합 → 2단계 배치 순으로 쓴다 — §배치 탐색 §시뮬 예산). `--boss`로 한
+  보스만 고르면 그 보스가 전체를 쓴다. 예산이 보스 수보다 적으면 뒤쪽 보스는 `status: "not_computed"`다(순위가 비어 있다 —
+  0딜이 아니다). 예산 때문에 줄인 것은 `caveats`에 적힌다(「전체 시뮬 예산 300건을 보스 5종에 60건씩 나눴다」,
+  「[보스 이름] 시뮬 예산 N건이 모자라 후보 K개…를 계산하지 못했다」).
+- **미확인.** `unconfirmed`는 미확인 칸마다 `computed_as`(실제로 계산에 쓴 값)와 `text`를 싣는다. 속성을 모르는 보스는
+  `flags: ["속성 상성 미반영"]`, `element.reflected: false`이고 표에서는 보스 이름 바로 아래에 `!! 속성 상성 미반영 !!`가 따로 나온다.
+- **주의 문장.** 최상위 `caveats`: 요격전 공통 문장(실제 요격전 기록과 대조하지 않았다 · 보스 패턴 미반영 · 미확인 값 ·
+  예산 · 후보 풀은 약점 속성을 우선하지 않는다) 뒤에 보스별 추천의 주의 문장을 합친 것이 온다 — 계산한 모든 보스에 공통인
+  문장은 한 번, 일부 보스의 것은 `[보스 이름, …]`이 앞에 붙는다. 레벨을 가정한 경우의 문장도 여기에 온다.
+- **후보는 보스마다 같다.** 후보 풀은 투자 점수로만 고른다(§후보 생성) — 보스의 약점 속성 니케를 우선하지 않는다.
+  덜 키운 약점 속성 니케는 후보에 없을 수 있고, 그럴 때 `weak_pool.not_pooled`와 보스의 `notes`에 이름이 적힌다.
+- 같은 입력(계정·보스 묶음·`top`·`budget`·엔진 판)이면 `generated_at`과 `cache` 말고는 같은 문서가 나온다.
+- 입력 오류(종료 코드 2): 잘못된 보스 묶음·계정, 없는 보스 이름, 후보 편성을 만들 수 없는 계정.
+- 표 출력은 `renderInterceptReport`(`src/core/render.mjs`). 오버레이 화면은 아직 없다(P-017).
+
 ## 시뮬 결과 캐시 — `src/core/cache.mjs`
 
 엔진 시뮬 1회가 4~5초라서, 같은 엔진 판·같은 요청의 결과는 다시 계산하지 않는다. `withCache(runtime, store)`가
@@ -294,7 +447,7 @@ CLI: `suggest --refine`(기본) / `--no-refine`(1단계만) · `--budget <시뮬
 
 | 쓰는 곳 | 저장소 | 남는 기간 |
 |---|---|---|
-| CLI `compare`·`suggest`·`growth` | 파일 — `createFileCacheStore(dir)`(`src/runtime/node.mjs`), 기본 `data/cache/sim/`(gitignore) | 지울 때까지 |
+| CLI `compare`·`suggest`·`growth`·`tier`·`intercept` | 파일 — `createFileCacheStore(dir)`(`src/runtime/node.mjs`), 기본 `data/cache/sim/`(gitignore) | 지울 때까지 |
 | 오버레이(`app/`) | 메모리 — `createMemoryStore()`(최근 500건) | 앱을 끌 때까지 |
 
 CLI는 `--no-cache`로 끄고(읽지도 쓰지도 않는다) `--cache-dir <폴더>`로 폴더를 바꾼다.

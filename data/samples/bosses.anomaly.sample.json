@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "content": "anomaly_interception",
+  "is_test_data": true,
+  "name": "검증용 보스 묶음",
+  "version": "sample.1",
+  "source": "검증용으로 지어낸 값 — 게임에서 확인한 값이 아니다",
+  "note": "형식·변환·표시를 테스트하려고 만든 묶음이다. A는 적 설정을 여러 칸 채웠고, B는 속성과 약점만, C·D는 약점만(적 속성은 엔진 상성 규칙으로 정한다), E는 속성도 약점도 모른다(속성 상성 미반영).",
+  "bosses": [
+    {
+      "id": "test-a",
+      "name": "시험 보스 A",
+      "enemy": { "code": "풍압", "def": 20000, "core_px": 30, "has_parts": false },
+      "weak_to": "작열",
+      "level_cap": 400,
+      "duration": 120,
+      "reward": "시험 보상 A",
+      "source": "검증용으로 지어낸 값",
+      "confirmation": {
+        "confirmed": ["code", "weak_to", "level_cap", "duration", "def", "core_px", "has_parts"],
+        "unconfirmed": ["distance", "part_break_interval", "optimal_range_weapons"]
+      }
+    },
+    {
+      "id": "test-b",
+      "name": "시험 보스 B",
+      "enemy": { "code": "철갑" },
+      "weak_to": "풍압",
+      "level_cap": 400,
+      "reward": "시험 보상 B",
+      "source": "검증용으로 지어낸 값",
+      "confirmation": {
+        "confirmed": ["code", "weak_to", "level_cap"],
+        "unconfirmed": ["duration", "def", "core_px", "distance", "has_parts", "part_break_interval", "optimal_range_weapons"]
+      }
+    },
+    {
+      "id": "test-c",
+      "name": "시험 보스 C",
+      "enemy": {},
+      "weak_to": "수냉",
+      "level_cap": 400,
+      "source": "검증용으로 지어낸 값",
+      "confirmation": {
+        "confirmed": ["weak_to", "level_cap"],
+        "unconfirmed": ["code", "duration", "def", "core_px", "distance", "has_parts", "part_break_interval", "optimal_range_weapons"]
+      }
+    },
+    {
+      "id": "test-d",
+      "name": "시험 보스 D",
+      "enemy": {},
+      "weak_to": "전격",
+      "level_cap": 200,
+      "source": "검증용으로 지어낸 값",
+      "confirmation": {
+        "confirmed": ["weak_to", "level_cap"],
+        "unconfirmed": ["code", "duration", "def", "core_px", "distance", "has_parts", "part_break_interval", "optimal_range_weapons"]
+      }
+    },
+    {
+      "id": "test-e",
+      "name": "시험 보스 E",
+      "enemy": {},
+      "source": "검증용으로 지어낸 값",
+      "confirmation": {
+        "confirmed": [],
+        "unconfirmed": ["code", "weak_to", "level_cap", "duration", "def", "core_px", "distance", "has_parts", "part_break_interval", "optimal_range_weapons"]
+      }
+    }
+  ]
+}

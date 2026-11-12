@@ -13,7 +13,7 @@ import { createNodeRuntime, nodeRuntime } from '../../src/runtime/node.mjs';
 const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const CORE = path.join(ROOT, 'src/core');
 /** 웹뷰와 Node CLI가 함께 쓰는 계산 모듈. */
-const PURE_MODULES = ['account', 'condition', 'compare', 'candidates', 'search', 'growth', 'format', 'render', 'cache'];
+const PURE_MODULES = ['account', 'condition', 'compare', 'candidates', 'search', 'growth', 'format', 'render', 'cache', 'intercept'];
 
 /** 주석을 뺀 소스. 문자열 안의 `//`(경로 등)는 건드리지 않게 줄 맨 앞·공백 뒤의 주석만 지운다. */
 function code(source) {
