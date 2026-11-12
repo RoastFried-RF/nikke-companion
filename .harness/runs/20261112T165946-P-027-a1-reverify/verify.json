@@ -1,0 +1,65 @@
+{
+  "task": "P-027",
+  "started_at": "2026-11-12T16:59:46.428Z",
+  "head": "4389190d79663bc4904421dd4c2c9f9556ccbed0",
+  "tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+  "dirty": true,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "unit",
+      "cmd": "node --test tests/unit/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 2658,
+      "log": "verify-1-unit.log"
+    },
+    {
+      "name": "integration",
+      "cmd": "node --test tests/integration/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 78978,
+      "log": "verify-2-integration.log"
+    },
+    {
+      "name": "install",
+      "cmd": "npm --prefix app install",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 1328,
+      "log": "verify-3-install.log"
+    },
+    {
+      "name": "frontend-build",
+      "cmd": "npm --prefix app run build",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 5488,
+      "log": "verify-4-frontend-build.log"
+    },
+    {
+      "name": "frontend-test",
+      "cmd": "npm --prefix app test",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 7699,
+      "log": "verify-5-frontend-test.log"
+    },
+    {
+      "name": "rust-test",
+      "cmd": "cargo test --manifest-path app/src-tauri/Cargo.toml",
+      "exit_code": 101,
+      "timed_out": false,
+      "duration_ms": 7111,
+      "log": "verify-6-rust-test.log",
+      "tail": "test a_successful_fetch_writes_the_profile_and_hands_over_every_line ... ok\ntest an_expired_session_is_reported_as_such_with_the_scripts_lines ... ok\ntest fetching_again_replaces_the_profile_and_a_run_that_writes_nothing_is_not_a_success ... ok\ntest no_cookie_reaches_the_standard_output ... ok\ntest only_the_engine_folders_fetch_script_is_run ... ok\ntest stopping_a_fetch_returns_within_seconds_and_leaves_no_process ... FAILED\ntest the_fake_cookie_never_appears_in_results_errors_or_progress_lines ... ok\n\nfailures:\n\n---- a_fetch_that_runs_too_long_is_stopped_with_its_child_processes stdout ----\n\nthread 'a_fetch_that_runs_too_long_is_stopped_with_its_child_processes' (28940) panicked at tests\\account_fetch.rs:637:5:\nassertion `left == right` failed: 시작 전에 띄워 둔 프로세스가 있다\n  left: [(44420, \"MoNotificationUx.exe\")]\n right: []\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n---- stopping_a_fetch_returns_within_seconds_and_leaves_no_process stdout ----\n\nthread 'stopping_a_fetch_returns_within_seconds_and_leaves_no_process' (20424) panicked at tests\\account_fetch.rs:659:5:\nassertion `left == right` failed: 시작 전에 띄워 둔 프로세스가 있다\n  left: [(44420, \"MoNotificationUx.exe\")]\n right: []\n\n\nfailures:\n    a_fetch_that_runs_too_long_is_stopped_with_its_child_processes\n    stopping_a_fetch_returns_within_seconds_and_leaves_no_process\n\ntest result: FAILED. 8 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.54s\n\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.27s\n     Running unittests src\\lib.rs (app\\src-tauri\\target\\debug\\deps\\nikke_companion_lib-6c1851aa9bd4f3e4.exe)\n     Running unittests src\\bin\\nikke-capture.rs (app\\src-tauri\\target\\debug\\deps\\nikke_capture-6e7eb5dea5fa33e0.exe)\n     Running unittests src\\main.rs (app\\src-tauri\\target\\debug\\deps\\nikke_companion-2d1a12c1de113dcc.exe)\n     Running tests\\account_fetch.rs (app\\src-tauri\\target\\debug\\deps\\account_fetch-057e14640d52b642.exe)\nerror: test failed, to rerun pass `--test account_fetch`\n"
+    }
+  ],
+  "passed": false,
+  "reason": "검증 실패: rust-test(exit 101)",
+  "env_skipped": [],
+  "env_only": false,
+  "tree_after": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+  "finished_at": "2026-11-12T17:01:29.981Z"
+}

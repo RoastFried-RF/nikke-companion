@@ -36,8 +36,8 @@
         "verified_tree": "8cbbff934b0862401bffcd58cec94e16a5892bd9",
         "verified_at": "2026-11-11T17:08:05.684Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T07:54:30.796Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:29:47.673Z"
       }
     },
     {
@@ -72,8 +72,8 @@
         "verified_tree": "8cbbff934b0862401bffcd58cec94e16a5892bd9",
         "verified_at": "2026-11-11T17:08:25.994Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T07:55:47.735Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:31:05.309Z"
       }
     },
     {
@@ -108,8 +108,8 @@
         "verified_tree": "8cbbff934b0862401bffcd58cec94e16a5892bd9",
         "verified_at": "2026-11-11T17:08:26.646Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T07:55:48.139Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:31:05.735Z"
       }
     },
     {
@@ -153,8 +153,8 @@
         "verified_tree": "8cbbff934b0862401bffcd58cec94e16a5892bd9",
         "verified_at": "2026-11-11T17:08:47.050Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T07:57:11.704Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:32:23.941Z"
       }
     },
     {
@@ -198,8 +198,8 @@
         "verified_tree": "75211f1cc80d56b8ac29c40d4f47d4933918e087",
         "verified_at": "2026-11-11T17:15:35.832Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T07:58:39.050Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:33:46.535Z"
       }
     },
     {
@@ -233,8 +233,8 @@
         "verified_tree": "75211f1cc80d56b8ac29c40d4f47d4933918e087",
         "verified_at": "2026-11-11T17:15:54.097Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T07:58:39.406Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:33:46.911Z"
       }
     },
     {
@@ -276,8 +276,8 @@
         "verified_tree": "d80e4a132a516870bb2eca392ab1986cae21123b",
         "verified_at": "2026-11-11T17:22:22.403Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:00:07.103Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:35:06.566Z"
       }
     },
     {
@@ -317,8 +317,8 @@
         "verified_tree": "b89038ca20f819d0dee57a166c9bfd3510c965df",
         "verified_at": "2026-11-11T17:29:17.844Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:01:32.463Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:36:26.754Z"
       }
     },
     {
@@ -354,8 +354,8 @@
         "verified_tree": "e89c408934017ae86672e6b49706b1819350fd61",
         "verified_at": "2026-11-11T17:35:16.826Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:01:35.629Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:36:29.707Z"
       }
     },
     {
@@ -393,8 +393,8 @@
         "verified_tree": "9eed22478354fd73aa6619012b1675ab41d9ad31",
         "verified_at": "2026-11-11T17:48:03.253Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:01:38.809Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:36:32.655Z"
       }
     },
     {
@@ -467,8 +467,8 @@
         "verified_tree": "3001d4d9663e18d7d30577b7f9dee0b86e535625",
         "verified_at": "2026-11-11T19:00:30.963Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:02:11.501Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:37:13.414Z"
       },
       "manual_notes": [
         "2026-11-12 사용자 확인: 개발 실행에서 오버레이 표시와 단축키 \"정상\". 실제 니케 위(창 모드·전체 화면)에서 확인했는지는 말하지 않았다 — 그 항목은 대기로 둔다."
@@ -534,7 +534,9 @@
         "run": ".harness/runs/20261112T082013-P-010-a1-manual",
         "verified_tree": "54310c81171cb5a6596232aad9332ea83052492d",
         "verified_at": "2026-11-12T08:21:58.556Z",
-        "commit": null
+        "commit": null,
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:39:13.170Z"
       }
     },
     {
@@ -678,8 +680,8 @@
         "verified_tree": "b8104404ee2ed2160b9ec5c613d55d1c72ae6dd3",
         "verified_at": "2026-11-12T02:32:26.708Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:06:23.998Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:41:53.733Z"
       }
     },
     {
@@ -743,8 +745,8 @@
         "verified_tree": "30c22d810c00c10af73eb99a5773e3fccf13128a",
         "verified_at": "2026-11-12T02:55:56.545Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:08:09.791Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:43:54.422Z"
       }
     },
     {
@@ -804,8 +806,8 @@
         "verified_tree": "94adad7d651ca7dbf0119b5be93874eba7d3810b",
         "verified_at": "2026-11-12T03:21:45.400Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:08:41.140Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:44:33.861Z"
       }
     },
     {
@@ -866,8 +868,8 @@
         "verified_tree": "e8d0b1644bf59b976303a4b3885010d5eb21ca18",
         "verified_at": "2026-11-12T03:39:47.925Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:10:07.478Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:46:13.007Z"
       }
     },
     {
@@ -933,8 +935,8 @@
         "verified_tree": "7f37718e786911a285fd533259f860f15f857b3e",
         "verified_at": "2026-11-12T04:09:36.424Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:11:32.609Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:47:50.972Z"
       }
     },
     {
@@ -1005,8 +1007,8 @@
         "verified_tree": "b7e0f57ce6acf2c0ce415452e97859a122d61408",
         "verified_at": "2026-11-12T04:37:54.050Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:12:19.916Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:48:47.357Z"
       }
     },
     {
@@ -1075,8 +1077,8 @@
         "verified_tree": "95569a6977fafc433cbd99c5af94353adda6d72c",
         "verified_at": "2026-11-12T05:08:39.598Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:14:03.017Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:50:54.719Z"
       }
     },
     {
@@ -1137,8 +1139,8 @@
         "verified_tree": "d8f35c29d0ffcbcb1d5447422dd6fade90c74a33",
         "verified_at": "2026-11-12T06:03:26.670Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:15:27.125Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:52:32.939Z"
       }
     },
     {
@@ -1211,8 +1213,8 @@
         "verified_tree": "23874ee9d5b99fff46dfdbc17810edc7cbb8213e",
         "verified_at": "2026-11-12T06:57:49.777Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:16:14.211Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:53:30.499Z"
       }
     },
     {
@@ -1278,8 +1280,8 @@
         "verified_tree": "395e659611225e396f9641988a543961858d3c18",
         "verified_at": "2026-11-12T07:09:42.289Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:17:01.058Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:54:26.632Z"
       }
     },
     {
@@ -1354,8 +1356,8 @@
         "verified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
         "verified_at": "2026-11-12T07:53:37.290Z",
         "commit": null,
-        "reverified_tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
-        "reverified_at": "2026-11-12T08:18:44.247Z"
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:56:25.648Z"
       }
     },
     {
@@ -1418,7 +1420,9 @@
         "run": ".harness/runs/20261112T082205-P-024-a1",
         "verified_tree": "fe276a33a3a323c22f7bf608869e80f301f89bc9",
         "verified_at": "2026-11-12T09:00:34.919Z",
-        "commit": null
+        "commit": null,
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:57:06.983Z"
       }
     },
     {
@@ -1487,7 +1491,9 @@
         "run": ".harness/runs/20261112T090035-P-025-a1",
         "verified_tree": "e17c2de069516285c3c8f026ec8606611262e778",
         "verified_at": "2026-11-12T09:34:57.749Z",
-        "commit": null
+        "commit": null,
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:57:46.983Z"
       }
     },
     {
@@ -1557,7 +1563,9 @@
         "run": ".harness/runs/20261112T093526-P-026-a1",
         "verified_tree": "058197d8169153d66e6801f591872f8c75e90fef",
         "verified_at": "2026-11-12T10:10:29.291Z",
-        "commit": null
+        "commit": null,
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T16:59:46.427Z"
       }
     },
     {
@@ -1624,9 +1632,9 @@
       "last_failure": null,
       "manual_status": "pending",
       "evidence": {
-        "run": ".harness/runs/20261112T111332-P-027-a1",
-        "verified_tree": "eb01a5cb2ff3dd6cf61112c917b216e3d007c4cf",
-        "verified_at": "2026-11-12T11:18:36.182Z",
+        "run": ".harness/runs/20261112T171629-P-027-a1-manual",
+        "verified_tree": "e512917e90ad330b41e22791adf60c5605d94b3c",
+        "verified_at": "2026-11-12T17:18:29.953Z",
         "commit": null
       }
     },
@@ -1695,7 +1703,9 @@
         "run": ".harness/runs/20261112T111836-P-028-a1",
         "verified_tree": "da3b6cce94bac11dce0ae91ce8fab062e57b1d9a",
         "verified_at": "2026-11-12T12:12:51.964Z",
-        "commit": null
+        "commit": null,
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T17:03:29.257Z"
       }
     },
     {
@@ -1762,7 +1772,9 @@
         "run": ".harness/runs/20261112T121310-P-029-a1",
         "verified_tree": "7207ffec9caf6ce4625c24a29af6282cf4218d05",
         "verified_at": "2026-11-12T12:34:42.519Z",
-        "commit": null
+        "commit": null,
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T17:05:29.536Z"
       }
     },
     {
@@ -1829,7 +1841,9 @@
         "run": ".harness/runs/20261112T123442-P-030-a1",
         "verified_tree": "a10c19ca8dea9f9a00886fcab812e130921b3229",
         "verified_at": "2026-11-12T13:20:35.707Z",
-        "commit": null
+        "commit": null,
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T17:07:32.286Z"
       }
     },
     {
@@ -1882,18 +1896,35 @@
         "실제 계정의 요격전 1위 편성으로 효율표를 돌려 보고, 1위로 나온 육성이 실제로 딜을 올리는지 게임에서 확인한다"
       ],
       "protected": [],
-      "status": "done",
+      "status": "pending",
       "attempts": 1,
       "agent_errors": 0,
       "blocked_reason": null,
       "resume_condition": null,
-      "last_failure": null,
+      "last_failure": {
+        "reason": "검증 실패: unit(exit 1)",
+        "commands": [
+          {
+            "name": "unit",
+            "cmd": "node --test tests/unit/",
+            "exit_code": 1,
+            "timed_out": false,
+            "duration_ms": 2750,
+            "log": "verify-1-unit.log",
+            "tail": "ok 398 - 고정: 계산하지 못한 고정 덱은 0이 아니라 「계산하지 못함」이고 까닭이 남는다 — 그 니케는 다른 덱에도 쓰이지 않는다\n  ---\n  duration_ms: 1.3012\n  ...\n# Subtest: 덱별 조건: 덱마다 다른 조건을 받아 조건마다 따로 계산한다 — 조건이 같은 덱끼리만 자리를 바꾼다\nok 399 - 덱별 조건: 덱마다 다른 조건을 받아 조건마다 따로 계산한다 — 조건이 같은 덱끼리만 자리를 바꾼다\n  ---\n  duration_ms: 4.9032\n  ...\n# Subtest: 「안 씀」: 뺀 니케는 어느 덱에도 없고 쓰지 않은 니케에도 없다 — 뺐다는 사실이 결과에 남는다. 고정한 니케는 빼지 않는다\nok 400 - 「안 씀」: 뺀 니케는 어느 덱에도 없고 쓰지 않은 니케에도 없다 — 뺐다는 사실이 결과에 남는다. 고정한 니케는 빼지 않는다\n  ---\n  duration_ms: 5.2553\n  ...\n# Subtest: 잘못된 입력은 한국어 문장의 입력 오류다\nok 401 - 잘못된 입력은 한국어 문장의 입력 오류다\n  ---\n  duration_ms: 0.557\n  ...\n# Subtest: 표(CLI): 덱별 멤버·총딜·합계, 쓰지 않은 니케, 모자란 까닭, 고정·빈 덱, 주의가 글로 나온다\nok 402 - 표(CLI): 덱별 멤버·총딜·합계, 쓰지 않은 니케, 모자란 까닭, 고정·빈 덱, 주의가 글로 나온다\n  ---\n  duration_ms: 4.6547\n  ...\n# Subtest: 진행 알림: 엔진 배치를 맡기기 직전에 단계와 그때까지 쓴 건수를 알린다\nok 403 - 진행 알림: 엔진 배치를 맡기기 직전에 단계와 그때까지 쓴 건수를 알린다\n  ---\n  duration_ms: 2.6779\n  ...\n1..403\n# tests 403\n# suites 0\n# pass 402\n# fail 1\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 2676.4481\n\n"
+          }
+        ]
+      },
       "manual_status": "pending",
       "evidence": {
         "run": ".harness/runs/20261112T132035-P-031-a1",
         "verified_tree": "469783b7e573f2bb9831bbfb55ccd887209140ca",
         "verified_at": "2026-11-12T13:50:56.588Z",
         "commit": null
+      },
+      "regressed": {
+        "at": "2026-11-12T16:18:34.108Z",
+        "reason": "검증 실패: unit(exit 1)"
       }
     },
     {
@@ -1956,7 +1987,9 @@
         "run": ".harness/runs/20261112T135108-P-032-a1",
         "verified_tree": "a693ac1a5c7a75476bad84feee421ccd4adf0dbb",
         "verified_at": "2026-11-12T14:15:30.839Z",
-        "commit": null
+        "commit": null,
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T17:09:30.455Z"
       }
     },
     {
@@ -2021,7 +2054,9 @@
         "run": ".harness/runs/20261112T141531-P-033-a1",
         "verified_tree": "e5d3b4f56336d57e80c699a09edf98855b3cc9c2",
         "verified_at": "2026-11-12T14:58:27.218Z",
-        "commit": null
+        "commit": null,
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T17:11:28.634Z"
       }
     },
     {
@@ -2084,7 +2119,9 @@
         "run": ".harness/runs/20261112T145827-P-034-a1",
         "verified_tree": "a6d5255e47999ea5d1217bb43ee4920e93eb1da7",
         "verified_at": "2026-11-12T15:10:39.040Z",
-        "commit": null
+        "commit": null,
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T17:13:28.069Z"
       }
     },
     {
@@ -2151,7 +2188,9 @@
         "run": ".harness/runs/20261112T151039-P-014-a1",
         "verified_tree": "22578197adf5c44cb170c8b2018eddce59009858",
         "verified_at": "2026-11-12T15:37:25.471Z",
-        "commit": null
+        "commit": null,
+        "reverified_tree": "108acecbb6949904a2084e1f4c76d6f7b15dd636",
+        "reverified_at": "2026-11-12T17:15:27.410Z"
       }
     }
   ]

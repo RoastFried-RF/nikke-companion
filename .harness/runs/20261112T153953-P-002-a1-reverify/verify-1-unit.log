@@ -1,0 +1,62 @@
+$ node --test tests/unit/account.test.mjs
+TAP version 13
+# Subtest: 올바른 계정은 통과하고 검증용 데이터임을 경고로 알린다
+ok 1 - 올바른 계정은 통과하고 검증용 데이터임을 경고로 알린다
+  ---
+  duration_ms: 0.9338
+  ...
+# Subtest: 검증용 여부를 밝히지 않으면 오류다
+ok 2 - 검증용 여부를 밝히지 않으면 오류다
+  ---
+  duration_ms: 0.49
+  ...
+# Subtest: 엔진이 모르는 니케 이름은 경로와 함께 오류다
+ok 3 - 엔진이 모르는 니케 이름은 경로와 함께 오류다
+  ---
+  duration_ms: 0.4152
+  ...
+# Subtest: 범위를 벗어난 값과 모르는 칸을 잡는다
+ok 4 - 범위를 벗어난 값과 모르는 칸을 잡는다
+  ---
+  duration_ms: 0.1236
+  ...
+# Subtest: 값을 적은 칸을 미확인으로 표시하면 오류다
+ok 5 - 값을 적은 칸을 미확인으로 표시하면 오류다
+  ---
+  duration_ms: 0.1092
+  ...
+# Subtest: 엔진 프로필에는 편성 멤버만 싣고 base는 ungrown이며 메타 칸은 넘기지 않는다
+ok 6 - 엔진 프로필에는 편성 멤버만 싣고 base는 ungrown이며 메타 칸은 넘기지 않는다
+  ---
+  duration_ms: 0.2366
+  ...
+# Subtest: 적지 않은 칸은 미육성 값으로 채운다: 빈 항목은 장비 미장착·오버로드 0줄
+ok 7 - 적지 않은 칸은 미육성 값으로 채운다: 빈 항목은 장비 미장착·오버로드 0줄
+  ---
+  duration_ms: 0.169
+  ...
+# Subtest: 오버로드 줄을 적으면 그 옵션만 남기고 나머지는 0줄, 장비는 엔진 기본(오버로드 장비)에 맡긴다
+ok 8 - 오버로드 줄을 적으면 그 옵션만 남기고 나머지는 0줄, 장비는 엔진 기본(오버로드 장비)에 맡긴다
+  ---
+  duration_ms: 0.2169
+  ...
+# Subtest: 장비를 직접 적었으면 그대로 넘기고, 오버로드가 전부 0줄이면 미장착으로 본다
+ok 9 - 장비를 직접 적었으면 그대로 넘기고, 오버로드가 전부 0줄이면 미장착으로 본다
+  ---
+  duration_ms: 0.2345
+  ...
+# Subtest: equip_skills로 적은 옵션은 overload에 다시 넣지 않는다
+ok 10 - equip_skills로 적은 옵션은 overload에 다시 넣지 않는다
+  ---
+  duration_ms: 0.2007
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 65.2176
+

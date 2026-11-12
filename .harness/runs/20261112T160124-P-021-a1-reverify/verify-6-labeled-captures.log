@@ -1,0 +1,16 @@
+$ cargo test --manifest-path app/src-tauri/Cargo.toml --test live_recognize -- --ignored
+
+running 7 tests
+test labels_cover_both_anomaly_screens_for_every_boss_and_some_other_screens ... ok
+test every_labeled_capture_gets_the_right_screen_and_boss ... ok
+test one_recognition_is_fast_and_looks_at_a_few_points_only ... ok
+test frames_with_another_aspect_ratio_are_unknown_instead_of_wrong ... ok
+test brightness_and_weak_noise_do_not_change_the_answer ... ok
+test captures_with_the_battle_button_greyed_out_get_the_same_answer ... ok
+test resampled_captures_get_the_same_answer ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.73s
+
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.27s
+     Running tests\live_recognize.rs (app\src-tauri\target\debug\deps\live_recognize-5b23e08b983e9ad9.exe)

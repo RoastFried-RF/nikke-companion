@@ -1,0 +1,65 @@
+{
+  "task": "P-031",
+  "started_at": "2026-11-12T16:16:35.412Z",
+  "head": "4f5a6d90c662ae9007439237d2f6a9a0cea04c3a",
+  "tree": "c525d912c187261c436ecf450de92f96ff2f065a",
+  "dirty": true,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "unit",
+      "cmd": "node --test tests/unit/",
+      "exit_code": 1,
+      "timed_out": false,
+      "duration_ms": 2750,
+      "log": "verify-1-unit.log",
+      "tail": "ok 398 - 고정: 계산하지 못한 고정 덱은 0이 아니라 「계산하지 못함」이고 까닭이 남는다 — 그 니케는 다른 덱에도 쓰이지 않는다\n  ---\n  duration_ms: 1.3012\n  ...\n# Subtest: 덱별 조건: 덱마다 다른 조건을 받아 조건마다 따로 계산한다 — 조건이 같은 덱끼리만 자리를 바꾼다\nok 399 - 덱별 조건: 덱마다 다른 조건을 받아 조건마다 따로 계산한다 — 조건이 같은 덱끼리만 자리를 바꾼다\n  ---\n  duration_ms: 4.9032\n  ...\n# Subtest: 「안 씀」: 뺀 니케는 어느 덱에도 없고 쓰지 않은 니케에도 없다 — 뺐다는 사실이 결과에 남는다. 고정한 니케는 빼지 않는다\nok 400 - 「안 씀」: 뺀 니케는 어느 덱에도 없고 쓰지 않은 니케에도 없다 — 뺐다는 사실이 결과에 남는다. 고정한 니케는 빼지 않는다\n  ---\n  duration_ms: 5.2553\n  ...\n# Subtest: 잘못된 입력은 한국어 문장의 입력 오류다\nok 401 - 잘못된 입력은 한국어 문장의 입력 오류다\n  ---\n  duration_ms: 0.557\n  ...\n# Subtest: 표(CLI): 덱별 멤버·총딜·합계, 쓰지 않은 니케, 모자란 까닭, 고정·빈 덱, 주의가 글로 나온다\nok 402 - 표(CLI): 덱별 멤버·총딜·합계, 쓰지 않은 니케, 모자란 까닭, 고정·빈 덱, 주의가 글로 나온다\n  ---\n  duration_ms: 4.6547\n  ...\n# Subtest: 진행 알림: 엔진 배치를 맡기기 직전에 단계와 그때까지 쓴 건수를 알린다\nok 403 - 진행 알림: 엔진 배치를 맡기기 직전에 단계와 그때까지 쓴 건수를 알린다\n  ---\n  duration_ms: 2.6779\n  ...\n1..403\n# tests 403\n# suites 0\n# pass 402\n# fail 1\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 2676.4481\n\n"
+    },
+    {
+      "name": "integration",
+      "cmd": "node --test tests/integration/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 78633,
+      "log": "verify-2-integration.log"
+    },
+    {
+      "name": "install",
+      "cmd": "npm --prefix app install",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 835,
+      "log": "verify-3-install.log"
+    },
+    {
+      "name": "frontend-build",
+      "cmd": "npm --prefix app run build",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 5525,
+      "log": "verify-4-frontend-build.log"
+    },
+    {
+      "name": "frontend-test",
+      "cmd": "npm --prefix app test",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 7821,
+      "log": "verify-5-frontend-test.log"
+    },
+    {
+      "name": "rust-test",
+      "cmd": "cargo test --manifest-path app/src-tauri/Cargo.toml",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 22832,
+      "log": "verify-6-rust-test.log"
+    }
+  ],
+  "passed": false,
+  "reason": "검증 실패: unit(exit 1)",
+  "env_skipped": [],
+  "env_only": false,
+  "tree_after": "c525d912c187261c436ecf450de92f96ff2f065a",
+  "finished_at": "2026-11-12T16:18:34.108Z"
+}
