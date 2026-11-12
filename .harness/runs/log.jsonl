@@ -256,3 +256,5 @@
 {"at":"2026-11-12T17:13:28.069Z","event":"reverify","task":"P-034","passed":true,"tree":"108acecbb6949904a2084e1f4c76d6f7b15dd636","reason":null}
 {"at":"2026-11-12T17:15:27.411Z","event":"reverify","task":"P-014","passed":true,"tree":"108acecbb6949904a2084e1f4c76d6f7b15dd636","reason":null}
 {"at":"2026-11-12T17:18:29.956Z","event":"manual_verify","task":"P-027","passed":true,"tree":"e512917e90ad330b41e22791adf60c5605d94b3c","reason":null}
+{"at":"2026-11-12T17:18:31.167Z","event":"checkpoint","task":"P-027","commit":"b007df60dec51f6587f15bc3d068a3f63808980c","tree":"e512917e90ad330b41e22791adf60c5605d94b3c"}
+{"at":"2026-11-12T17:20:29.068Z","event":"manual_verify","task":"P-031","passed":true,"tree":"e512917e90ad330b41e22791adf60c5605d94b3c","reason":null}

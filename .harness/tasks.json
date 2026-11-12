@@ -1896,35 +1896,18 @@
         "실제 계정의 요격전 1위 편성으로 효율표를 돌려 보고, 1위로 나온 육성이 실제로 딜을 올리는지 게임에서 확인한다"
       ],
       "protected": [],
-      "status": "pending",
+      "status": "done",
       "attempts": 1,
       "agent_errors": 0,
       "blocked_reason": null,
       "resume_condition": null,
-      "last_failure": {
-        "reason": "검증 실패: unit(exit 1)",
-        "commands": [
-          {
-            "name": "unit",
-            "cmd": "node --test tests/unit/",
-            "exit_code": 1,
-            "timed_out": false,
-            "duration_ms": 2750,
-            "log": "verify-1-unit.log",
-            "tail": "ok 398 - 고정: 계산하지 못한 고정 덱은 0이 아니라 「계산하지 못함」이고 까닭이 남는다 — 그 니케는 다른 덱에도 쓰이지 않는다\n  ---\n  duration_ms: 1.3012\n  ...\n# Subtest: 덱별 조건: 덱마다 다른 조건을 받아 조건마다 따로 계산한다 — 조건이 같은 덱끼리만 자리를 바꾼다\nok 399 - 덱별 조건: 덱마다 다른 조건을 받아 조건마다 따로 계산한다 — 조건이 같은 덱끼리만 자리를 바꾼다\n  ---\n  duration_ms: 4.9032\n  ...\n# Subtest: 「안 씀」: 뺀 니케는 어느 덱에도 없고 쓰지 않은 니케에도 없다 — 뺐다는 사실이 결과에 남는다. 고정한 니케는 빼지 않는다\nok 400 - 「안 씀」: 뺀 니케는 어느 덱에도 없고 쓰지 않은 니케에도 없다 — 뺐다는 사실이 결과에 남는다. 고정한 니케는 빼지 않는다\n  ---\n  duration_ms: 5.2553\n  ...\n# Subtest: 잘못된 입력은 한국어 문장의 입력 오류다\nok 401 - 잘못된 입력은 한국어 문장의 입력 오류다\n  ---\n  duration_ms: 0.557\n  ...\n# Subtest: 표(CLI): 덱별 멤버·총딜·합계, 쓰지 않은 니케, 모자란 까닭, 고정·빈 덱, 주의가 글로 나온다\nok 402 - 표(CLI): 덱별 멤버·총딜·합계, 쓰지 않은 니케, 모자란 까닭, 고정·빈 덱, 주의가 글로 나온다\n  ---\n  duration_ms: 4.6547\n  ...\n# Subtest: 진행 알림: 엔진 배치를 맡기기 직전에 단계와 그때까지 쓴 건수를 알린다\nok 403 - 진행 알림: 엔진 배치를 맡기기 직전에 단계와 그때까지 쓴 건수를 알린다\n  ---\n  duration_ms: 2.6779\n  ...\n1..403\n# tests 403\n# suites 0\n# pass 402\n# fail 1\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 2676.4481\n\n"
-          }
-        ]
-      },
+      "last_failure": null,
       "manual_status": "pending",
       "evidence": {
-        "run": ".harness/runs/20261112T132035-P-031-a1",
-        "verified_tree": "469783b7e573f2bb9831bbfb55ccd887209140ca",
-        "verified_at": "2026-11-12T13:50:56.588Z",
+        "run": ".harness/runs/20261112T171831-P-031-a1-manual",
+        "verified_tree": "e512917e90ad330b41e22791adf60c5605d94b3c",
+        "verified_at": "2026-11-12T17:20:29.065Z",
         "commit": null
-      },
-      "regressed": {
-        "at": "2026-11-12T16:18:34.108Z",
-        "reason": "검증 실패: unit(exit 1)"
       }
     },
     {
