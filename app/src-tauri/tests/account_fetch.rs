@@ -217,6 +217,7 @@ fn texts(lines: &[FetchLine]) -> Vec<&str> {
 mod processes {
     use std::collections::{HashMap, HashSet};
     use std::mem::size_of;
+    use std::sync::Mutex;
 
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -258,13 +259,31 @@ mod processes {
         found
     }
 
+    /// 테스트를 시작할 때 이미 있던 프로세스들. Toolhelp의 "부모 번호"는 그 부모가 끝난 뒤에도 남고, Windows는 프로세스
+    /// 번호를 다시 쓴다 — 오래전에 끝난 부모의 번호를 이 테스트 프로세스(나 그 자식)가 물려받으면, 그 부모가 띄웠던 남의
+    /// 프로세스(실제로 MoNotificationUx.exe가 그랬다)가 이 테스트의 자손으로 잘못 세어진다. 시작 전에 있던 프로세스는
+    /// 자손일 수 없다(`engine_cancel.rs`와 같은 처방).
+    static BASELINE: Mutex<Option<HashSet<u32>>> = Mutex::new(None);
+
+    /// 지금 있는 프로세스를 "시작 전에 있던 것"으로 적어 둔다. 테스트마다 무엇을 띄우기 전에 부른다.
+    pub fn mark_start() {
+        let now: HashSet<u32> = all().into_keys().collect();
+        *BASELINE.lock().unwrap_or_else(|e| e.into_inner()) = Some(now);
+    }
+
+    /// 이 테스트 프로세스의 자손들(테스트를 시작한 뒤에 생긴 것만).
     pub fn spawned_by_this_test() -> Vec<(u32, String)> {
         let all = all();
+        let baseline = BASELINE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_default();
         let mut family: HashSet<u32> = HashSet::from([std::process::id()]);
         loop {
             let before = family.len();
             for (pid, (parent, _)) in &all {
-                if family.contains(parent) {
+                if family.contains(parent) && !baseline.contains(pid) {
                     family.insert(*pid);
                 }
             }
@@ -293,6 +312,8 @@ mod processes {
 
 #[cfg(not(windows))]
 mod processes {
+    pub fn mark_start() {}
+
     pub fn spawned_by_this_test() -> Vec<(u32, String)> {
         Vec::new()
     }
@@ -634,6 +655,7 @@ fn a_missing_cookie_file_is_reported_before_the_script_runs() {
 #[test]
 fn a_fetch_that_runs_too_long_is_stopped_with_its_child_processes() {
     let _serial = serial();
+    processes::mark_start();
     assert_eq!(processes::spawned_by_this_test(), Vec::new(), "시작 전에 띄워 둔 프로세스가 있다");
     let engine = FakeEngine::new("timeout", HANGS).with_cookie();
 
@@ -656,6 +678,7 @@ fn a_fetch_that_runs_too_long_is_stopped_with_its_child_processes() {
 #[test]
 fn stopping_a_fetch_returns_within_seconds_and_leaves_no_process() {
     let _serial = serial();
+    processes::mark_start();
     assert_eq!(processes::spawned_by_this_test(), Vec::new(), "시작 전에 띄워 둔 프로세스가 있다");
     let engine = FakeEngine::new("stop", HANGS).with_cookie();
     let config = engine.config(Duration::from_secs(300));
