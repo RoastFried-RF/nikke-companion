@@ -1818,9 +1818,19 @@
         "실제 계정으로 편성을 짜고 한 명 바꾸기·자리 순서 비교가 납득이 간다"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261112T123442-P-030-a1",
+        "verified_tree": "a10c19ca8dea9f9a00886fcab812e130921b3229",
+        "verified_at": "2026-11-12T13:20:35.707Z",
+        "commit": null
+      }
     },
     {
       "id": "P-031",

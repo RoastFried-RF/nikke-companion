@@ -863,3 +863,112 @@ export interface Coverage {
   weakest: string[];
   unsure: string[];
 }
+
+// ── 덱 빌더(P-030 — 루트 src/core/deck.mjs, docs/data-model.md §덱 빌더) ─────────────────────
+
+/** 고를 수 있는 상대 하나(이상 개체 보스 · 솔로 레이드 프리셋 · 속성만 정하기). */
+export interface OpponentOption {
+  /** `boss:<id>` · `preset:<이름>` · `element:<속성|none>`. */
+  key: string;
+  kind: 'boss' | 'preset' | 'element';
+  id: string;
+  label: string;
+  weak_to: string | null;
+}
+
+/** 고른 상대 → 전투 조건과 함께 보여야 하는 것(resolveOpponent의 결과). */
+export interface DeckOpponent extends OpponentOption {
+  condition: Record<string, unknown>;
+  element: { code: string | null; weak_to: string | null; reflected: boolean; known: boolean; code_source?: string | null; weak_to_source?: string | null };
+  /** 확인하지 못해 기본값으로 계산하는 칸(요격전 화면의 「미확인 값」과 같은 것). */
+  unconfirmed: { field: string; label: string; computed_as: unknown; text: string }[];
+  /** 눈에 띄어야 하는 표시(「속성 상성 미반영」). */
+  flags: string[];
+  notes: string[];
+  is_test_data: boolean;
+}
+
+/** 한 육성 기준의 계산 결과. 계산하지 못한 것은 0이 아니라 그렇게 적힌다. */
+export type DeckOutcome =
+  | { status: 'computed'; total_damage: number; members: ReportMember[]; notes: string[]; engine_warnings: string[]; ungrown_members: string[]; level: number | null }
+  | { status: 'rejected'; reasons: string[] }
+  | { status: 'failed'; error: { type?: string; message?: string; path?: string | null } };
+
+/** 덱 계산 결과(evaluateDeck) — 한 편성을 두 육성 기준으로 계산한 것. */
+export interface DeckReport {
+  schema_version: number;
+  kind: 'deck_report';
+  generated_at: string;
+  /** 어느 편성·어느 상대의 결과인지(자리 순서 포함). */
+  key: string;
+  account: { name?: string | null; is_test_data?: boolean; updated_at?: string | null };
+  opponent: DeckOpponent;
+  members: string[];
+  results: { account: DeckOutcome; engine_default: DeckOutcome };
+  /** 「내 계정 육성」 ÷ 「모두 최대 육성」과 그 한 줄. 둘 중 하나라도 계산하지 못했으면 null. */
+  growth: { ratio: number; text: string } | null;
+  /** 「모두 최대 육성」이 무엇인지 한 줄. */
+  engine_default_spec: string;
+  assumptions: string[];
+  engine?: EngineVersion | null;
+  cache?: CacheStats | null;
+  caveats: string[];
+}
+
+/** 「한 명을 바꾼다면」의 결과(swapOne). */
+export interface DeckSwapReport {
+  kind: 'deck_swap';
+  key: string;
+  slot: number;
+  /** 그 자리에 있던 니케. */
+  out: string | null;
+  group: string | null;
+  baseline: DeckOutcome;
+  /** 총딜이 큰 순. `change` +0.08 = 8% 증가(지금 편성을 계산하지 못했으면 null). */
+  rows: { name: string; members: string[]; total_damage: number; change: number | null; engine_warnings: string[] }[];
+  /** 계산하지 못한 니케(0으로 두지 않는다). */
+  failed: { name: string; reason: string }[];
+  /** 상한 때문에 보지 못한 니케. */
+  skipped: string[];
+  candidates: { total: number; limit: number; computed: number; failed: number; skipped: number };
+  cache?: CacheStats | null;
+  caveats: string[];
+}
+
+/** 「자리 순서 비교」의 결과(compareOrders). */
+export interface DeckOrderReport {
+  kind: 'deck_order';
+  key: string;
+  current: { members: string[]; total_damage: number };
+  best: { members: string[]; total_damage: number };
+  /** 지금 순서가 아닌 순서가 가장 좋았나. */
+  changed: boolean;
+  changes: string[];
+  gain_ratio: number | null;
+  gain_text: string | null;
+  variants: { total: number; simulated: number; skipped: number; failed: number; limit: number };
+  cache?: CacheStats | null;
+  caveats: string[];
+}
+
+/** 저장한 편성 하나. 자리는 다섯이고 빈 자리는 null이다. */
+export interface SavedDeck {
+  /** 이름 붙인 목록의 항목에만 있다. */
+  id?: string;
+  name: string;
+  members: (string | null)[];
+  /** 상대의 열쇠(`boss:kraken` 등). 정하지 않았으면 null. */
+  opponent: string | null;
+  opponent_label: string | null;
+  /** 저장할 때의 추정 총딜(내 계정 육성 기준). 계산하지 않았으면 null. */
+  total_damage: number | null;
+  saved_at: string | null;
+}
+
+/** 계정마다 두는 내 편성: 번호 칸 다섯(01~05)과 이름 붙인 목록(계정 폴더의 `<계정>.decks.json`). */
+export interface DeckBook {
+  schema_version: number;
+  kind: string;
+  slots: (SavedDeck | null)[];
+  saved: SavedDeck[];
+}

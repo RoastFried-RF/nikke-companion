@@ -9,6 +9,31 @@ export const SQUAD_SIZE = 5;
 /** 모든 비교 결과에 붙는 주의 문장. 요격전 추천은 더 구체적인 문장을 쓰므로 이것을 걸러 낸다(src/core/intercept.mjs). */
 export const CAVEAT_NOT_VERIFIED = '수치는 시뮬레이션 추정치다. 실제 게임 기록과 대조하지 않았다.';
 
+/**
+ * 편성의 육성 기준(편성 항목의 `growth`). 적지 않으면 계정의 육성이다.
+ *   account         계정 문서에 적힌 육성(적지 않은 칸·미확인 칸은 미육성)
+ *   engine_default  엔진 기본 스펙 — 계정의 육성 값을 쓰지 않는다(vendor/nikke-calc/docs/HARNESS.md §기본 스펙:
+ *                   돌파 3 · 코어 강화 0 · 스킬 10/10/10 · 오버로드 장비 5강 · 큐브·소장품 포함). 덱 빌더의 「모두 최대 육성」이 쓴다.
+ */
+export const GROWTH_ACCOUNT = 'account';
+export const GROWTH_ENGINE_DEFAULT = 'engine_default';
+export const GROWTH_BASES = Object.freeze([GROWTH_ACCOUNT, GROWTH_ENGINE_DEFAULT]);
+/** 엔진 기본 스펙이 무엇인지 한 줄(결과의 메모·caveats에 쓴다). 「전부 최대」가 아니다 — 코어 강화는 0이다. */
+export const ENGINE_DEFAULT_SPEC_TEXT = '돌파 3 · 코어 강화 0 · 스킬 10/10/10 · 오버로드 장비 5강 · 소장품 SR15 · 애장품 3단계 · 큐브 Lv.15(엔진 문서 HARNESS.md §기본 스펙)';
+
+const usesEngineDefault = (squad) => squad?.growth === GROWTH_ENGINE_DEFAULT;
+
+/**
+ * 엔진 기본 스펙으로 계산할 때의 프로필: 프로필에 없는 니케를 기본 스펙으로 계산하게 하고(`base: "default"`) 아무도 적지 않는다
+ * (vendor/nikke-calc/docs/SIM-JSON.md §육성 — 「`base: "default"` + 빈 `chars`는 총딜이 기본 스펙과 같다」).
+ * 레벨은 `levelPlan(condition, null)`이 정한다: 상한이 없으면 fixed(400), 있으면 상한 값(엔진 정책 sync에 실어 보낸다).
+ */
+function engineDefaultProfile(level) {
+  const profile = { base: 'default', chars: {}, _meta: { name: '엔진 기본 스펙' } };
+  if (level.engine_policy === 'sync') profile._account = { synchro_level: level.level };
+  return profile;
+}
+
 export class InputError extends Error {
   constructor(what, errors) {
     super(`${what}: ${errors.map((e) => `${e.path || '/'} ${e.message}`).join('; ')}`);
@@ -29,6 +54,7 @@ export function squadProblems(squad, account, catalog) {
   if (unknown.length) problems.push(`엔진이 모르는 이름: ${unknown.join(', ')}`);
   const unowned = members.filter((m) => m in catalog.nikkes && !(m in account.nikkes));
   if (unowned.length) problems.push(`보유하지 않은 니케: ${unowned.join(', ')}`);
+  if (squad.growth !== undefined && !GROWTH_BASES.includes(squad.growth)) problems.push(`모르는 육성 기준이다: ${String(squad.growth)} (쓸 수 있는 값: ${GROWTH_BASES.join(', ')})`);
   return problems;
 }
 
@@ -39,6 +65,11 @@ export function squadNotes(squad, account, catalog) {
   if (!stages.has('A')) {
     const missing = ['1', '2', '3'].filter((s) => !stages.has(s));
     if (missing.length) notes.push(`버스트 ${missing.join('·')}단계 니케가 없다 — 풀 버스트가 열리지 않을 수 있다`);
+  }
+  if (usesEngineDefault(squad)) {
+    // 계정의 육성 값을 쓰지 않으므로 미확인 칸 이야기는 하지 않는다.
+    notes.push(`육성 기준: 엔진 기본 스펙 — 계정의 육성 값을 쓰지 않았다(${ENGINE_DEFAULT_SPEC_TEXT})`);
+    return notes;
   }
   for (const m of squad.members) {
     const u = unconfirmedFields(account, m);
@@ -51,7 +82,9 @@ export function squadNotes(squad, account, catalog) {
  * @param {object} input
  * @param {object} input.account   계정 상태 문서
  * @param {object} input.condition 전투 조건 문서
- * @param {{name?: string, members: string[]}[]} input.squads 후보 편성
+ * @param {{name?: string, members: string[], growth?: 'account'|'engine_default'}[]} input.squads 후보 편성.
+ *   `growth: 'engine_default'`인 편성은 계정의 육성 대신 엔진 기본 스펙으로 계산한다(순위 항목에 `growth`가 실린다).
+ *   적지 않으면 종전 그대로다 — 결과 문서도 이 칸이 생기기 전과 같다.
  * @param {object} [deps] `runtime`(src/core/runtime.mjs의 계약 — 엔진 실행·카탈로그·버전), `concurrency`, `now`.
  *   런타임을 `withCache`(src/core/cache.mjs)로 감싸 주면 같은 요청을 다시 계산하지 않고 결과에 `cache` 통계가 실린다.
  *   `catalog`·`runBatch`를 직접 주면 런타임보다 먼저다(테스트에서 엔진을 바꿔 끼울 때 쓴다)
@@ -80,7 +113,14 @@ export async function compareSquads({ account, condition, squads }, deps = {}) {
   // 레벨: 조건에 상한(level_cap)이 있으면 계정의 동기화 레벨을 상한까지 반영한다. 없으면 종전대로 fixed(400).
   const level = levelPlan(condition, account);
   const base = toEngineBase(condition, level);
-  const requests = accepted.map((s) => ({ ...base, squad: s.members, profile: toEngineProfile(account, s.members, level) }));
+  // 엔진 기본 스펙 편성: 계정의 동기화 레벨을 쓰지 않는다 — 상한이 있으면 상한 레벨, 없으면 fixed(400).
+  const defaultLevel = levelPlan(condition, null);
+  const defaultBase = toEngineBase(condition, defaultLevel);
+  const requests = accepted.map((s) =>
+    usesEngineDefault(s)
+      ? { ...defaultBase, squad: s.members, profile: engineDefaultProfile(defaultLevel) }
+      : { ...base, squad: s.members, profile: toEngineProfile(account, s.members, level) },
+  );
   const { results, cache } = await engine.runBatchWithStats(requests, { concurrency: deps.concurrency });
 
   const ranking = [];
@@ -100,6 +140,8 @@ export async function compareSquads({ account, condition, squads }, deps = {}) {
       notes: squadNotes(s, account, catalog),
       engine_warnings: r.warnings ?? [],
       ungrown_members: r.spec?.profile?.ungrown ?? [],
+      // 육성 기준을 따로 준 편성에만 싣는다.
+      ...(usesEngineDefault(s) ? { growth: GROWTH_ENGINE_DEFAULT, level: defaultLevel.level } : {}),
     });
   }
   // 같은 총딜이면 입력 순서를 지킨다(안정 정렬) — 실행마다 순위가 바뀌지 않게.
@@ -126,6 +168,12 @@ export async function compareSquads({ account, condition, squads }, deps = {}) {
       '후보로 준 편성 안에서의 비교다. 전체에서 가장 좋은 편성이라는 뜻이 아니다.',
       CAVEAT_NOT_VERIFIED,
       ...levelCaveats(level),
+      ...(accepted.some(usesEngineDefault)
+        ? [
+            `육성 기준이 「엔진 기본 스펙」인 편성은 계정의 육성과 무관하다: 캐릭터 레벨 ${defaultLevel.level} · ${ENGINE_DEFAULT_SPEC_TEXT}. ` +
+              '「전부 최대」가 아니다 — 코어 강화까지 올린 계정은 이 기준보다 높게 나올 수 있다.',
+          ]
+        : []),
       ...a.warnings,
     ],
   };

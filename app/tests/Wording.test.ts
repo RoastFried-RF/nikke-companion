@@ -83,6 +83,11 @@ describe('문구 — 개발 용어를 쓰지 않는다', () => {
         '../src/views/SquadBoard.vue',
         '../src/views/GrowthBoard.vue',
         '../src/views/TierBoard.vue',
+        // P-030: 덱 빌더의 그림 넷도 같은 규칙을 따른다(「엔진」이라 하지 않고 「계산 도구」라고 한다 등).
+        '../src/views/DeckBuilder.vue',
+        '../src/views/DeckOpponent.vue',
+        '../src/views/DeckRoster.vue',
+        '../src/views/DeckBook.vue',
         '../src/screens/AccountScreen.vue',
       ]),
     );

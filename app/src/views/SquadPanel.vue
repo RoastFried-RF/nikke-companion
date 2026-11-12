@@ -17,9 +17,13 @@ const props = withDefaults(
     weak?: string[];
     /** 타일 크기: 데스크톱 앱은 lg, 오버레이는 sm. */
     size?: 'lg' | 'sm';
+    /** 지금 보이는 편성을 덱 빌더로 가져가는 단추를 보일지(부모가 `open-deck`을 받아 옮긴다). */
+    deckLink?: boolean;
   }>(),
-  { weak: () => [], size: 'lg' },
+  { weak: () => [], size: 'lg', deckLink: false },
 );
+
+defineEmits<{ 'open-deck': [entry: RankingEntry] }>();
 
 /** 지금 타일로 보이는 편성(ranking의 몇 번째인가). */
 const shown = ref(0);
@@ -51,6 +55,9 @@ const caption = computed(() => {
       <StatusPill label="추정" tone="estimate" solid detail="계산으로 어림한 값이다. 실제 전투 기록과 맞춰 본 적이 없다." data-role="estimate" />
       <span class="squad__caption" data-testid="squad-caption">{{ caption }}</span>
       <span class="squad__name" data-testid="squad-name">{{ entry.name }}</span>
+      <button v-if="deckLink" type="button" class="nk-btn squad__open" title="이 편성을 덱 빌더로 가져가 한 명을 바꾸거나 자리 순서를 바꿔 본다" data-testid="open-in-deck" @click="$emit('open-deck', entry)">
+        덱 빌더에서 열기
+      </button>
     </div>
 
     <div class="squad__tiles" data-testid="squad-tiles">
@@ -124,6 +131,11 @@ const caption = computed(() => {
   color: var(--nk-text-faint);
   font-size: var(--nk-font-sm);
   overflow-wrap: anywhere;
+}
+
+.squad__open {
+  margin-left: auto;
+  align-self: center;
 }
 
 .squad__tiles {

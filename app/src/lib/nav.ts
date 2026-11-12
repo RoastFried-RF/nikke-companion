@@ -36,6 +36,7 @@ export type AdvancedTab = (typeof ADVANCED_TABS)[number]['key'];
 /** 편성 도구의 탭. */
 export const TOOL_TABS = [
   { key: 'suggest', label: '추천' },
+  { key: 'deck', label: '덱 빌더' },
   { key: 'compare', label: '비교' },
   { key: 'growth', label: '성장' },
 ] as const;
@@ -45,6 +46,8 @@ export type ToolTab = (typeof TOOL_TABS)[number]['key'];
 export const RUN_INTERCEPT = 'intercept-page';
 /** 편성 도구의 추천이 돌리는 계산의 이름. */
 export const RUN_SUGGEST = 'tools-suggest';
+/** 편성 도구의 덱 빌더가 돌리는 계산의 이름(바로 계산·한 명 바꾸기·자리 순서 비교). */
+export const RUN_DECK = 'tools-deck';
 
 /**
  * 계산을 돌리는 화면의 이름(useEngineRun의 이름) → 메뉴의 어느 화면인가. 메뉴에 「계산 중」을 표시하는 데 쓴다.
@@ -53,7 +56,7 @@ export const RUN_SUGGEST = 'tools-suggest';
 export function pageOfRun(run: string | null | undefined): PageKey | null {
   if (!run) return null;
   if (run === RUN_INTERCEPT) return 'intercept';
-  if (run === RUN_SUGGEST) return 'tools';
+  if (run === RUN_SUGGEST || run === RUN_DECK) return 'tools';
   return ADVANCED_TABS.some((t) => t.key === run) ? 'settings' : null;
 }
 

@@ -17,6 +17,9 @@ import {
   computeActivity,
   loadPlan,
   savePlan,
+  loadDecks,
+  saveDecks,
+  copyText,
   ENGINE_PROGRESS_EVENT,
   engineCancel,
   engineCatalog,
@@ -74,6 +77,7 @@ import cargoToml from '../src-tauri/Cargo.toml?raw';
 import accountSyncRs from '../src-tauri/src/account_sync.rs?raw';
 import captureRs from '../src-tauri/src/capture.rs?raw';
 import captureCliRs from '../src-tauri/src/capture_cli.rs?raw';
+import clipboardRs from '../src-tauri/src/clipboard.rs?raw';
 import cookieRs from '../src-tauri/src/cookie.rs?raw';
 import engineRs from '../src-tauri/src/engine.rs?raw';
 import engineWin32Rs from '../src-tauri/src/engine_win32.rs?raw';
@@ -165,6 +169,11 @@ const COMMANDS = [
   // P-029: 요격전 계획(손으로 적은 요격전 기록·즐겨찾기)을 계정 폴더에 두고 읽는 명령 둘 — 데스크톱 앱 창의 것이다.
   'load_plan',
   'save_plan',
+  // P-030: 덱 빌더 — 저장한 편성(번호 칸 다섯과 이름 붙인 목록)을 계정 폴더에 두고 읽는 명령 둘, 편성을 글자로 클립보드에 쓰는 명령 하나.
+  // 셋 다 데스크톱 앱 창의 것이다.
+  'load_decks',
+  'save_decks',
+  'copy_text',
 ];
 
 /**
@@ -205,7 +214,18 @@ const SHARED_COMMANDS = COMMANDS.slice(32, 40);
 /** 오버레이 위젯(P-028)에서 더한 명령 아홉 개. */
 const WIDGET_COMMANDS = [COMMANDS[3], ...COMMANDS.slice(40, 48)];
 /** 요격전 계획(P-029)에서 더한 명령 두 개. */
-const PLAN_COMMANDS = COMMANDS.slice(48);
+const PLAN_COMMANDS = COMMANDS.slice(48, 50);
+/** 덱 빌더(P-030)에서 더한 명령 세 개. */
+const DECK_COMMANDS = COMMANDS.slice(50);
+/** 내 편성(P-030) — 지어낸 편성 한 벌. */
+const deckBook = {
+  schema_version: 1,
+  kind: 'deck_book',
+  slots: [{ name: '편성 01', members: ['크라운', '헬름', null, null, null], opponent: 'boss:kraken', opponent_label: '크라켄', total_damage: null, saved_at: null }, null, null, null, null],
+  saved: [],
+};
+/** 복사할 글(지어낸 값). */
+const deckCopy = '편성: 1. 크라운 / 2. 헬름\n상대: 크라켄 (약점 풍압)\n총딜 계산 전';
 /** 위젯 상태·계산 진행(지어낸 값). */
 const widgetSnapshot = {
   shape: 'card',
@@ -340,6 +360,7 @@ describe('Rust 명령 호출', () => {
       if (['overlay_widget', 'overlay_shape', 'overlay_pin', 'set_overlay_prefs', 'reset_overlay_position'].includes(cmd)) return widgetSnapshot;
       if (cmd === 'announce_activity' || cmd === 'compute_activity') return activity;
       if (cmd === 'load_plan') return planDoc;
+      if (cmd === 'load_decks') return deckBook;
       return null;
     });
     await expect(loadReport('D:\\r.json')).resolves.toEqual({ schema_version: 1 });
@@ -392,9 +413,16 @@ describe('Rust 명령 호출', () => {
     await expect(computeActivity()).resolves.toEqual(activity);
     await expect(loadPlan()).resolves.toEqual(planDoc);
     await expect(savePlan(null, planDoc)).resolves.toBeNull();
+    await expect(loadDecks()).resolves.toEqual(deckBook);
+    await expect(saveDecks(null, deckBook)).resolves.toBeNull();
+    await expect(copyText(deckCopy)).resolves.toBeNull();
     // 요격전 계획: 화면이 넘기는 것은 계정 이름(경로가 아니다 — 주지 않으면 지금 쓰는 계정)과 계획 문서뿐이다.
     expect(calls[48].args).toEqual({ name: null });
     expect(calls[49].args).toEqual({ name: null, plan: planDoc });
+    // 덱 빌더: 화면이 넘기는 것은 계정 이름(경로가 아니다)·편성 묶음, 그리고 클립보드에 쓸 글자뿐이다.
+    expect(calls[50].args).toEqual({ name: null });
+    expect(calls[51].args).toEqual({ name: null, decks: deckBook });
+    expect(calls[52].args).toEqual({ text: deckCopy });
     expect(calls.map((c) => c.cmd)).toEqual(COMMANDS);
     expect(WIDGET_COMMANDS).toHaveLength(9);
     expect(calls[0].args).toEqual({ path: 'D:\\r.json' });
@@ -1293,6 +1321,43 @@ describe('권한(capability)', () => {
       expect(capability.permissions, cmd).not.toContain(allow([cmd])[0]);
       expect(appCapability.permissions, cmd).toContain(allow([cmd])[0]);
     }
+    // P-030: 편성을 저장하고 클립보드에 쓰는 것도 데스크톱 앱 창의 일이다 — 게임 위의 오버레이 창은 클립보드를 건드리지 못한다.
+    for (const cmd of DECK_COMMANDS) {
+      expect(capability.permissions, cmd).not.toContain(allow([cmd])[0]);
+      expect(appCapability.permissions, cmd).toContain(allow([cmd])[0]);
+    }
+  });
+
+  it('클립보드는 쓰기만 한다 — 플러그인이 아니라 앱 명령 하나이고, 읽는 명령도 읽는 코드도 없다', () => {
+    // 클립보드 플러그인을 쓰면 읽기 권한이 함께 생길 수 있다. 쓰기 한 가지만 앱 명령(copy_text)으로 만들었다.
+    expect(cargoToml).not.toMatch(/tauri-plugin-clipboard/);
+    expect(libRs).not.toMatch(/tauri_plugin_clipboard/);
+    for (const p of [...capability.permissions, ...appCapability.permissions]) expect(p).not.toMatch(/clipboard/);
+    expect(appCapability.permissions.filter((p) => /copy|paste/.test(p))).toEqual(['allow-copy-text']);
+    expect(libRs).toContain('async fn copy_text(text: String) -> Result<(), String>');
+    expect(libRs).toContain('clipboard::write_text(&text)');
+    expect(COMMANDS.filter((c) => /clipboard|paste|read_text/.test(c))).toEqual([]);
+    // Rust 소스 어디에도 클립보드를 읽는 호출이 없다(쓴 것을 확인하는 읽기는 통합 테스트 tests/live_clipboard.rs에만 있다).
+    const noComments = (text: string) =>
+      text
+        .split('\n')
+        .filter((line) => !/^\s*\/\//.test(line))
+        .join('\n');
+    for (const [file, text] of Object.entries(allRust)) {
+      expect(noComments(text), file).not.toMatch(/GetClipboardData|EnumClipboardFormats|IsClipboardFormatAvailable|GetClipboardOwner|AddClipboardFormatListener/);
+    }
+    // 쓰는 것은 유니코드 글자 하나뿐이고, 길이에 상한이 있다. 넘길 메모리 덩이는 COM의 메모리 스트림으로 만든다 —
+    // 메모리를 직접 잡고 잠그는 API(그 기능 묶음은 「게임 프로세스를 열거나 메모리를 읽거나…」가 금지한다)는 쓰지 않는다.
+    expect(clipboardRs).toContain('pub const MAX_CHARS: usize = 4000;');
+    expect(clipboardRs).toContain('const UNICODE_TEXT: u32 = 13;');
+    expect(noComments(clipboardRs).match(/SetClipboardData\(/g)).toHaveLength(1);
+    expect(noComments(clipboardRs)).toContain('CreateStreamOnHGlobal(HGLOBAL::default(), false)');
+    expect(noComments(clipboardRs)).not.toMatch(/GlobalAlloc|GlobalLock|GlobalUnlock/);
+    // 클립보드를 여는 창 핸들을 넘기지 않는다 — 어느 창도 클립보드의 주인이 되지 않는다(게임 창은 물론 이 앱의 창도).
+    expect(noComments(clipboardRs)).toContain('OpenClipboard(None)');
+    expect(noComments(clipboardRs)).not.toMatch(/HWND|game_win32|game_window/);
+    // 화면 코드도 브라우저의 클립보드 API를 쓰지 않는다 — 읽기(붙여넣기)를 부를 길이 없다.
+    for (const [file, text] of Object.entries(sources)) expect(text, file).not.toMatch(/navigator\.clipboard|execCommand/);
   });
 
   it('데스크톱 앱 창은 쓰는 것만 허용한다 — 창 끌기와 끝내기 명령은 없다', () => {
@@ -1301,7 +1366,8 @@ describe('권한(capability)', () => {
     expect(appCapability.windows).toEqual(['app']);
     // P-028: 38 → 42(위젯 상태 읽기·오버레이 설정 바꾸기·자리 초기화·계산 진행 알리기).
     // P-029: 42 → 44(요격전 계획 읽기·저장 — 손으로 적은 기록과 즐겨찾기를 계정 폴더에 둔다).
-    expect(forApp).toHaveLength(44);
+    // P-030: 44 → 47(덱 빌더 — 저장한 편성 읽기·저장, 편성을 글자로 클립보드에 쓰기).
+    expect(forApp).toHaveLength(47);
     // 끝내기 명령은 어느 창에도 없다 — 앱에 그런 명령이 없다.
     for (const p of [...capability.permissions, ...appCapability.permissions]) expect(p).not.toMatch(/quit|exit/);
     expect(COMMANDS).not.toContain('quit_app');
@@ -1385,7 +1451,13 @@ describe('엔진 호출(Rust)', () => {
     // 오버레이 위젯(P-028)의 아홉에서 끝내기 하나를 뺐다(40 − 1 + 9 = 48): 위젯 상태 읽기, 자기 창의 조작 넷(모양·핀·창 크기 맞춤·숨기기),
     // 앱 창의 것 셋(설정 바꾸기·자리 초기화·계산 진행 알리기), 계산 진행 읽기. 화면은 여전히 폴더·파일 이름도 창의 자리도 넘기지 않는다.
     // 요격전 계획(P-029)의 둘: 손으로 적은 요격전 기록·즐겨찾기를 계정 폴더에 계정마다 두고 읽는다(48 → 50). 화면이 넘기는 계정 이름은 경로가 아니다.
-    expect(COMMANDS).toHaveLength(50);
+    // 덱 빌더(P-030)의 셋: 저장한 편성을 계정 폴더에 계정마다 두고 읽는 둘과, 편성을 글자로 클립보드에 쓰는 하나(50 → 53).
+    // 계산에는 명령을 더하지 않았다 — 덱 빌더의 계산은 이미 있는 engine_run_batch로 돈다.
+    expect(COMMANDS).toHaveLength(53);
+    expect(DECK_COMMANDS).toEqual(['load_decks', 'save_decks', 'copy_text']);
+    expect(libRs).toContain('async fn load_decks(name: Option<String>) -> Result<Option<Value>, String>');
+    expect(libRs).toContain('async fn save_decks(name: Option<String>, decks: Value) -> Result<(), String>');
+    expect(sources['../src/lib/compute.ts']).toMatch(/import \{[^}]*\bevaluateDeck\b[^}]*\} from '@core\/deck\.mjs'/);
     expect(PLAN_COMMANDS).toEqual(['load_plan', 'save_plan']);
     expect(libRs).toContain('async fn load_plan(name: Option<String>) -> Result<Option<Value>, String>');
     expect(libRs).toContain('async fn save_plan(name: Option<String>, plan: Value) -> Result<(), String>');

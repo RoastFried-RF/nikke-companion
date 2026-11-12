@@ -66,7 +66,7 @@ npm --prefix app run fixture                              # 컴포넌트 테스�
 **창이 둘이다**(P-027 — `app/README.md` §창 둘 — 데스크톱 앱과 오버레이): **데스크톱 앱 창**(`app` — 테두리가 있는 보통 창, 1100×720,
 `app/src/App.vue`)이 전부 한다 — 왼쪽 메뉴의 홈 · 요격전 · 내 니케 · 편성 도구 · 티어 · 설정(계정 연결 · 오버레이 · 계산 도구 ·
 고급). **오버레이 창**(`main` — 게임 위의 작은 위젯, `app/src/Overlay.vue`)은 마지막 요격전 추천만 보여 준다. 권한도 창마다 따로다
-(`src-tauri/capabilities/app.json` 명령 44개 / `overlay.json` 명령 15개 — 결과·상태 읽기와 자기 창의 조작). 앱을 실행하면 앱 창이 뜨고 오버레이는
+(`src-tauri/capabilities/app.json` 명령 47개 / `overlay.json` 명령 15개 — 결과·상태 읽기와 자기 창의 조작). 앱을 실행하면 앱 창이 뜨고 오버레이는
 설정대로 뜬다(앱과 함께 — 기본 · 게임을 찾았을 때 · 직접). **앱 창을 닫으면 앱이 끝난다**(오버레이 창은 닫히지 않고 숨는다. 끝내기
 명령은 없다 — 오버레이 위젯의 `×`는 숨기기다).
 화면은 파일 경로를 묻지 않는다: 계정은 기본 계정(이름 — 경로가 아니다), 보스 값은 내장한 `data/intercept/anomaly.json`.
@@ -87,6 +87,24 @@ npm --prefix app run fixture                              # 컴포넌트 테스�
 ```bash
 node --test tests/unit/plan.test.mjs                      # 순수 함수: 장비 상태 분류·주력 선정·보스 추천과 동률·기록 비교·커버리지 기준
 npm --prefix app test -- InterceptPlan                    # 화면(가짜 backend): 장비 칸·추천 문장·기록 입력과 복원·배지 변화·홈 카드
+```
+
+**덱 빌더**(P-030 — `app/README.md` §덱 빌더, 형식·규칙은 `docs/data-model.md` §덱 빌더): 편성 도구의 「덱 빌더」 탭 — 보유 니케의 초상화에서
+다섯을 골라 자리에 놓고(같은 니케는 한 번만, 버스트 단계 구성에서 모자란 것을 바로 말한다) 상대(이상 개체 보스 5종 · 엔진의 솔로 레이드
+프리셋 · 「속성만 정하기」)를 골라 「계산」을 누르면 총딜과 니케별 딜이 나온다. 「내 계정 육성」과 「모두 최대 육성」(엔진 기본 스펙 —
+코어 강화 0이라 전부 최대는 아니다)을 나란히 보이고, 한 자리를 다른 보유 니케로 바꿔 보거나(「한 명을 바꾼다면」 — 한 번에 12명까지),
+같은 다섯의 자리 순서를 견준다(P-013의 변형 규칙 — 한 번에 24가지까지). 규칙은 순수 모듈 `src/core/deck.mjs`(계산은 `compareSquads`를
+그대로 부른다 — 편성 항목의 `growth: "engine_default"`가 엔진 기본 스펙이다), 화면은 `app/src/lib/deck.ts`·`app/src/views/Deck*.vue`.
+내 편성(번호 칸 01~05와 이름 붙인 목록)은 계정 폴더의 `<계정>.decks.json`(gitignore — Rust `shared_state.rs`의 `load_decks`·`save_decks`),
+편성 복사는 앱 명령 `copy_text`(`src-tauri/src/clipboard.rs` — **쓰기만 한다. 클립보드를 읽는 코드를 넣지 않는다**, 메모리를 직접 잡는
+`Win32_System_Memory`는 켜지 않는다). 자동 계산은 설정 > 계산 도구에서 켠다(기본 꺼짐). **계산하지 못한 편성은 0이 아니라 「계산하지 못함」**
+이고, 상한 때문에 못 본 것은 화면에 적는다.
+
+```bash
+node --test tests/unit/deck.test.mjs                      # 순수 함수: 자리에 넣고 빼기·버스트 구성·상대 → 전투 조건·두 육성 기준·한 명 바꾸기·자리 순서·저장 문서·복사 글
+node --test tests/integration/deck.engine.test.mjs        # 실제 엔진(약 20초): 두 기준 계산과 캐시, 한 명 바꾸기, 자리 순서, 엔진 기본 스펙 = 프로필 없는 계산
+npm --prefix app test -- DeckBuilder                      # 화면(가짜 backend): 편성 짜기·상대·계산·바꿔 보기·자리 순서·저장과 복원·덱 빌더에서 열기·복사·자동 계산
+cargo test --manifest-path app/src-tauri/Cargo.toml --test live_clipboard -- --ignored --nocapture   # 이 PC의 클립보드에 실제로 쓴다(끝나면 앞의 글자를 되돌린다)
 ```
 
 **오버레이는 작은 위젯이다**(P-028 — `app/README.md` §오버레이 위젯): 모양 셋 — 접힘(알약: 보스 얼굴·이름·총딜) · 한 줄 카드(기본:

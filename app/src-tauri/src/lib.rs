@@ -31,6 +31,7 @@
 //! - `overlay_widget`: 오버레이 위젯의 규칙(P-028) — 모양 셋(접힘·한 줄 카드·펼침), 설정, 자동 표시(이상 개체 화면을
 //!   떠나면 잠시 뒤 접거나 쉬고 돌아오면 되돌린다), 위젯에 맞춘 창 크기, 끌어 둔 자리와 화면 안으로 되돌리기(순수)
 //! - `overlay_store`: 위젯의 설정·자리를 계정 폴더의 파일 하나에 기억한다
+//! - `clipboard`: 클립보드에 글자 쓰기(덱 빌더의 「편성 복사」) — 쓰기만 한다. 읽는 코드는 없다
 //!
 //! 오버레이 창은 위젯만큼만 크다: 화면이 잰 위젯의 크기를 `overlay_fit`으로 알려 주면 창 크기를 거기에 맞춘다 —
 //! 빈 투명 영역이 게임 클릭을 가로막지 않는다. 옮기고 크기를 바꾸는 것은 오버레이 **자기 창**뿐이다.
@@ -62,6 +63,7 @@ pub mod account_sync;
 pub mod assets;
 pub mod capture;
 pub mod capture_cli;
+pub mod clipboard;
 pub mod cookie;
 pub mod engine;
 #[cfg(windows)]
@@ -1502,6 +1504,32 @@ async fn save_plan(name: Option<String>, plan: Value) -> Result<(), String> {
     .await
 }
 
+/// 내 편성(P-030 — 덱 빌더에서 저장한 편성: 번호 칸 다섯과 이름 붙인 목록)을 읽는다. 이름을 주지 않으면 지금 쓰는 계정이다.
+/// 없으면 null. 화면이 넘기는 이름은 경로가 아니다 — 계정 폴더의 `<이름>.decks.json`만 읽는다.
+#[tauri::command]
+async fn load_decks(name: Option<String>) -> Result<Option<Value>, String> {
+    blocking(move || {
+        shared_state::load_decks(&shared_dir()?, name.as_deref()).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// 내 편성을 계정 폴더에 저장한다. 종류·판·모양이 맞지 않으면 쓰지 않고 한국어로 거부한다 — 앞서 저장한 것은 그대로다.
+#[tauri::command]
+async fn save_decks(name: Option<String>, decks: Value) -> Result<(), String> {
+    blocking(move || {
+        shared_state::save_decks(&shared_dir()?, name.as_deref(), &decks).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// 글자를 클립보드에 쓴다(P-030 — 덱 빌더의 「편성 복사」). 쓰기만 한다: 클립보드를 읽는 명령은 앱에 없다.
+/// 화면이 넘기는 것은 글자뿐이고, 길이와 내용은 `clipboard::payload`가 확인한다.
+#[tauri::command]
+async fn copy_text(text: String) -> Result<(), String> {
+    blocking(move || clipboard::write_text(&text).map_err(|e| e.to_string())).await
+}
+
 /// 데스크톱 앱 창을 앞으로 가져온다(최소화돼 있으면 되돌린다). 오버레이의 「앱 열기」와 두 번째 실행이 부른다 —
 /// 둘 다 사용자가 방금 한 일이라 이 창이 활성화돼도 된다. 게임 창은 건드리지 않는다.
 fn focus_app_window(app: &AppHandle) -> Result<(), String> {
@@ -2048,7 +2076,10 @@ pub fn run() {
             announce_activity,
             compute_activity,
             load_plan,
-            save_plan
+            save_plan,
+            load_decks,
+            save_decks,
+            copy_text
         ])
         .setup(|app| {
             let window = app

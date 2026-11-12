@@ -5,6 +5,7 @@
 // 메뉴에는 지금 화면과 계산 중인 화면이 표시된다.
 import { computed, KeepAlive, onMounted, ref, watch } from 'vue';
 import { provideAccountLink } from './lib/accountLink';
+import { provideDecks } from './lib/deck';
 import { setFollowGame, startupReportPath } from './lib/backend';
 import { provideEngineOwner } from './lib/engineRun';
 import { provideExtensionLink } from './lib/extensionLink';
@@ -40,6 +41,8 @@ const computingPage = computed(() => pageOfRun(computingRun.value));
 const shared = provideShared();
 // 요격전 계획(P-029): 계정마다 손으로 적어 두는 요격전 기록과 즐겨찾기. 기본 계정이 바뀌면 그 계정의 것을 읽는다.
 providePlan(shared);
+// 덱 빌더(P-030): 계정마다 저장하는 내 편성(번호 칸 다섯과 이름 붙인 목록), 요격전 추천에서 덱 빌더로 넘기는 편성.
+provideDecks(shared);
 // 고급에서 낸 비교·성장·티어 결과를 편성 도구·티어 화면에 올리는 자리.
 provideToolResults();
 // 계정 화면이 저장한 계정 파일의 경로를 고급의 계정 칸에 넣는 통로(lib/accountLink.ts).

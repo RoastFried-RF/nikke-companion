@@ -1,10 +1,11 @@
 <script setup lang="ts">
-// 편성 도구(데스크톱 앱): 추천 · 비교 · 성장.
+// 편성 도구(데스크톱 앱): 추천 · 덱 빌더 · 비교 · 성장.
 //   추천 — 기본 계정의 니케로 총딜이 큰 편성을 찾는다(내장 전투 조건). 단추 하나 + 정밀도.
+//   덱 빌더 — 초상화로 다섯 자리를 직접 짜고 바로 계산한다(views/DeckBuilder.vue — P-030).
 //   비교 · 성장 — 견줄 편성과 육성 선택지를 직접 골라야 하는 계산이다. 고르는 곳은 설정의 「고급」이고,
 //                 거기서 계산하거나 불러온 결과가 여기에 새 부품(니케 타일·딜 막대)으로 보인다.
 // 계산은 루트의 suggestSquads(CLI의 `suggest`와 같은 함수)가 한다 — 화면에 계산 규칙을 다시 쓰지 않는다.
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { DEFAULT_CONDITION, DEFAULT_CONDITION_LABEL } from '../lib/builtin';
 import { runSuggestWith } from '../lib/compute';
 import { useEngineRun } from '../lib/engineRun';
@@ -16,6 +17,7 @@ import { useToolResults } from '../lib/toolResults';
 import type { CompareReport } from '../types';
 import EmptyState from '../ui/EmptyState.vue';
 import ProgressPanel from '../ui/ProgressPanel.vue';
+import DeckBuilder from '../views/DeckBuilder.vue';
 import GrowthBoard from '../views/GrowthBoard.vue';
 import SquadBoard from '../views/SquadBoard.vue';
 
@@ -31,6 +33,15 @@ const engine = useEngineRun(RUN_SUGGEST);
 /** 앱 밖에서(화면만 띄운 테스트) 쓰일 때의 탭. 앱 안에서는 탐색 상태(lib/nav.ts)의 것을 쓴다. */
 const ownTab = ref<ToolTab>('suggest');
 const tab = computed<ToolTab>(() => nav?.tool.value ?? ownTab.value);
+/** 덱 빌더 탭을 한 번이라도 열었는가. 처음 열 때 만들고, 그 뒤에는 다른 탭을 봐도 남겨 둔다(숨기기만 한다). */
+const deckSeen = ref(false);
+watch(
+  tab,
+  (now) => {
+    if (now === 'deck') deckSeen.value = true;
+  },
+  { immediate: true },
+);
 function openTab(next: ToolTab): void {
   if (nav) nav.openTool(next);
   else ownTab.value = next;
@@ -185,8 +196,12 @@ async function run(): Promise<void> {
       </template>
     </template>
 
+    <!-- 덱 빌더 ───────────────────────────────────────────────────────────── -->
+    <!-- 탭을 옮겨도 짜던 편성과 결과가 남게 숨기기만 한다(계산이 도는 동안 다른 탭을 봐도 끊기지 않는다). -->
+    <DeckBuilder v-if="deckSeen" v-show="tab === 'deck'" />
+
     <!-- 비교 ─────────────────────────────────────────────────────────────── -->
-    <template v-else-if="tab === 'compare'">
+    <template v-if="tab === 'compare'">
       <SquadBoard v-if="compared" :report="compared" />
       <EmptyState
         v-else
@@ -199,7 +214,7 @@ async function run(): Promise<void> {
     </template>
 
     <!-- 성장 ─────────────────────────────────────────────────────────────── -->
-    <template v-else>
+    <template v-if="tab === 'growth'">
       <GrowthBoard v-if="growth" :report="growth" />
       <EmptyState
         v-else

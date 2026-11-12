@@ -53,6 +53,9 @@ fn main() {
             "compute_activity",
             "load_plan",
             "save_plan",
+            "load_decks",
+            "save_decks",
+            "copy_text",
         ]),
     );
     tauri_build::try_build(attributes).expect("tauri-build 실패");

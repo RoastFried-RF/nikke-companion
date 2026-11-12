@@ -103,6 +103,8 @@ pub enum SharedError {
     UnknownLaunch { found: String },
     /// 요격전 계획(기록·즐겨찾기) 문서의 모양이 다르다.
     PlanInvalid { reason: String },
+    /// 내 편성(덱 빌더의 저장 묶음) 문서의 모양이 다르다.
+    DecksInvalid { reason: String },
 }
 
 impl fmt::Display for SharedError {
@@ -134,6 +136,10 @@ impl fmt::Display for SharedError {
             Self::PlanInvalid { reason } => write!(
                 f,
                 "요격전 기록이 아니다({reason}). 앞서 저장한 기록은 그대로 둔다"
+            ),
+            Self::DecksInvalid { reason } => write!(
+                f,
+                "저장한 편성이 아니다({reason}). 앞서 저장한 편성은 그대로 둔다"
             ),
         }
     }
@@ -506,6 +512,74 @@ pub fn save_plan(dir: &Path, name: Option<&str>, plan: &Value) -> Result<(), Sha
     write_json(dir, &plan_file(&name), plan, "요격전 기록")
 }
 
+// ── 내 편성(P-030): 계정마다 덱 빌더에서 저장한 편성 — 번호 칸 다섯과 이름 붙인 목록 ───────────────────
+
+/// 내 편성 문서의 종류와 판(`src/core/deck.mjs`의 DECK_BOOK_KIND·DECK_BOOK_SCHEMA_VERSION과 같아야 한다).
+pub const DECKS_KIND: &str = "deck_book";
+pub const DECKS_SCHEMA_VERSION: u64 = 1;
+/// 편성 파일 이름의 꼬리: `<계정 이름>.decks.json`. 이름에 점이 더 있어 계정 목록에 들지 않는다.
+pub const DECKS_SUFFIX: &str = ".decks.json";
+/// 번호 칸의 수(게임의 편성 칸과 같다).
+pub const DECKS_SLOTS: usize = 5;
+/// 받아 주는 이름 붙인 편성의 수(화면의 계산 코드는 50개까지만 남긴다 — 그보다 넉넉히).
+pub const DECKS_MAX_SAVED: usize = 200;
+
+fn decks_file(name: &str) -> String {
+    format!("{name}{DECKS_SUFFIX}")
+}
+
+/// 내 편성 문서의 모양을 확인한다(종류·판·번호 칸 다섯·목록). 편성 하나하나의 값은 화면의 계산 코드(`src/core/deck.mjs`)가 본다.
+pub fn check_decks(doc: &Value) -> Result<(), SharedError> {
+    let wrong = |reason: &str| SharedError::DecksInvalid {
+        reason: reason.to_string(),
+    };
+    let obj = doc.as_object().ok_or_else(|| wrong("객체가 아니다"))?;
+    if obj.get("kind").and_then(Value::as_str) != Some(DECKS_KIND) {
+        return Err(wrong("종류가 다르다"));
+    }
+    if obj.get("schema_version").and_then(Value::as_u64) != Some(DECKS_SCHEMA_VERSION) {
+        return Err(wrong("판이 다르다"));
+    }
+    match obj.get("slots").and_then(Value::as_array) {
+        Some(slots) if slots.len() == DECKS_SLOTS => {
+            if !slots.iter().all(|slot| slot.is_null() || slot.is_object()) {
+                return Err(wrong("번호 칸의 모양이 다르다"));
+            }
+        }
+        Some(_) => return Err(wrong("번호 칸이 다섯이 아니다")),
+        None => return Err(wrong("번호 칸이 없다")),
+    }
+    match obj.get("saved").and_then(Value::as_array) {
+        Some(list) if list.len() <= DECKS_MAX_SAVED => {
+            if !list.iter().all(Value::is_object) {
+                return Err(wrong("목록의 모양이 다르다"));
+            }
+        }
+        Some(_) => return Err(wrong("항목이 너무 많다")),
+        None => return Err(wrong("목록 칸이 없다")),
+    }
+    Ok(())
+}
+
+/// 그 계정의 내 편성. 아직 없으면 `None`. 읽을 수 없으면 한국어로 알린다(파일은 건드리지 않는다).
+pub fn load_decks(dir: &Path, name: Option<&str>) -> Result<Option<Value>, SharedError> {
+    let name = plan_account(dir, name)?;
+    let path = dir.join(decks_file(&name));
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let doc = read_json(&path, "저장한 편성")?;
+    check_decks(&doc)?;
+    Ok(Some(doc))
+}
+
+/// 그 계정의 내 편성을 저장한다. 모양이 맞지 않으면 쓰지 않는다 — 앞서 저장한 것이 그대로 남는다.
+pub fn save_decks(dir: &Path, name: Option<&str>, decks: &Value) -> Result<(), SharedError> {
+    check_decks(decks)?;
+    let name = plan_account(dir, name)?;
+    write_json(dir, &decks_file(&name), decks, "저장한 편성")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -833,6 +907,85 @@ mod tests {
         let err = load_plan(&dir.0, Some("me")).unwrap_err();
         assert!(has_korean(&err.to_string()));
         assert!(dir.0.join("me.plan.json").is_file());
+    }
+
+    fn decks(marker: &str) -> Value {
+        json!({
+            "schema_version": 1,
+            "kind": "deck_book",
+            "slots": [{ "name": marker, "members": ["크라운", null, null, null, null] }, null, null, null, null],
+            "saved": [{ "id": "d1", "name": "솔레 1덱", "members": ["크라운", "헬름", null, null, null] }],
+        })
+    }
+
+    #[test]
+    fn saved_decks_are_kept_per_account_and_survive_a_restart() {
+        let dir = TempDir::new();
+        // 계정이 없으면 저장한 편성도 없다(없는 계정의 것을 만들지 않는다).
+        assert_eq!(load_decks(&dir.0, None).unwrap_err(), SharedError::NoAccount);
+        assert_eq!(save_decks(&dir.0, None, &decks("x")).unwrap_err(), SharedError::NoAccount);
+        dir.account("me");
+        assert_eq!(load_decks(&dir.0, None).unwrap(), None);
+        save_decks(&dir.0, None, &decks("크라켄용")).unwrap();
+        // 다시 읽으면(= 앱을 다시 켜면) 그대로다.
+        assert_eq!(load_decks(&dir.0, None).unwrap(), Some(decks("크라켄용")));
+        assert!(dir.0.join("me.decks.json").is_file());
+        assert!(!dir.0.join("me.decks.json.tmp").exists());
+
+        // 계정마다 따로다. 편성 파일은 계정 목록에 들지 않고, 요격전 기록과도 따로다.
+        dir.account("sub");
+        save_decks(&dir.0, Some("sub"), &decks("부계정")).unwrap();
+        save_plan(&dir.0, Some("me"), &plan("크라운")).unwrap();
+        assert_eq!(load_decks(&dir.0, Some("me")).unwrap().unwrap()["slots"][0]["name"], "크라켄용");
+        assert_eq!(load_decks(&dir.0, Some(" sub ")).unwrap().unwrap()["slots"][0]["name"], "부계정");
+        assert_eq!(load_plan(&dir.0, Some("me")).unwrap().unwrap()["favorites"][0], "크라운");
+        let names: Vec<String> = list_accounts(&dir.0).into_iter().map(|a| a.name).collect();
+        assert_eq!(names, ["me", "sub"]);
+    }
+
+    #[test]
+    fn decks_of_another_shape_are_refused_and_the_previous_ones_stay() {
+        let dir = TempDir::new();
+        dir.account("me");
+        save_decks(&dir.0, Some("me"), &decks("앞의 것")).unwrap();
+
+        let mut other_kind = decks("x");
+        other_kind["kind"] = json!("intercept_plan");
+        let mut newer = decks("x");
+        newer["schema_version"] = json!(2);
+        let mut four_slots = decks("x");
+        four_slots["slots"] = json!([null, null, null, null]);
+        let mut odd_slot = decks("x");
+        odd_slot["slots"] = json!(["글자", null, null, null, null]);
+        let mut no_saved = decks("x");
+        no_saved.as_object_mut().unwrap().remove("saved");
+        let mut huge = decks("x");
+        huge["saved"] = Value::Array(vec![json!({}); DECKS_MAX_SAVED + 1]);
+        for doc in [other_kind, newer, four_slots, odd_slot, no_saved, huge, json!([1])] {
+            let err = save_decks(&dir.0, Some("me"), &doc).unwrap_err();
+            assert!(matches!(err, SharedError::DecksInvalid { .. }), "{err:?}");
+            assert!(has_korean(&err.to_string()));
+            assert!(err.to_string().contains("그대로 둔다"));
+            assert_eq!(load_decks(&dir.0, Some("me")).unwrap().unwrap()["slots"][0]["name"], "앞의 것");
+        }
+
+        // 이름은 경로가 아니다. 없는 계정에는 쓰지 않는다.
+        for bad in ["../me", "..\\me", "me.decks", "C:\\x", "a/b"] {
+            let err = save_decks(&dir.0, Some(bad), &decks("x")).unwrap_err();
+            assert!(matches!(err, SharedError::NameInvalid { .. }), "{bad}: {err:?}");
+            assert!(matches!(load_decks(&dir.0, Some(bad)).unwrap_err(), SharedError::NameInvalid { .. }), "{bad}");
+        }
+        assert_eq!(
+            save_decks(&dir.0, Some("nobody"), &decks("x")).unwrap_err(),
+            SharedError::AccountMissing { name: "nobody".into() }
+        );
+        assert!(!dir.0.join("nobody.decks.json").exists());
+
+        // 깨진 파일은 한국어로 알리고 지우지 않는다.
+        fs::write(dir.0.join("me.decks.json"), "{ 깨진").unwrap();
+        let err = load_decks(&dir.0, Some("me")).unwrap_err();
+        assert!(has_korean(&err.to_string()));
+        assert!(dir.0.join("me.decks.json").is_file());
     }
 
     #[test]

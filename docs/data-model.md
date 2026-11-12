@@ -339,7 +339,10 @@ CLI: `suggest --refine`(기본) / `--no-refine`(1단계만) · `--budget <시뮬
 }
 ```
 
-- `rejected`: 시뮬 전에 걸러진 편성(미보유·중복·인원 수·모르는 이름). 엔진에 보내지 않는다.
+- `rejected`: 시뮬 전에 걸러진 편성(미보유·중복·인원 수·모르는 이름·모르는 육성 기준). 엔진에 보내지 않는다.
+- 편성 항목의 `growth`(선택 — P-030): `"engine_default"`면 그 편성은 계정의 육성 대신 엔진 기본 스펙으로 계산된다(§덱 빌더 §육성 기준).
+  그런 편성의 순위 항목에는 `growth: "engine_default"`와 `level`(계산한 레벨)이 실리고, caveats에 그 기준의 뜻이 한 줄 붙는다.
+  적지 않으면(`"account"`도 같다) 종전 그대로다 — 결과 문서도 이 칸이 생기기 전과 같다.
 - `failed`: 엔진이 오류를 낸 편성. 순위에 넣지 않는다.
 - 총딜은 정수 원값을 그대로 둔다. 단위 표기는 표시 단계의 일이다.
 - `cache`: 이 계산에서 캐시가 한 일(§시뮬 결과 캐시). 수치에는 영향이 없다 — 같은 입력이면 `cache`와 `generated_at`
@@ -647,6 +650,160 @@ P-029. 계정 상태·요격전 추천 결과·보스 묶음을 이어 「오늘
   `diff_pct` = (추정 − 기록) ÷ 기록 × 100(양수면 추정이 크다), `text`는 배지의 말(「기록과 12% 차이」 · 「기록과 1% 미만 차이」 ·
   「기록과 같다」). 보스의 **가장 최근 기록**(날짜가 늦은 것, 같은 날이면 나중에 적은 것)과 1위 편성의 총딜을 견준다(`recordCheck`).
   **추정치를 기록에 맞춰 고쳐 쓰지 않는다** — 차이를 알릴 뿐이다(보스 값 보정은 별도 작업이다. 차이가 크면 그 근거가 된다).
+
+## 덱 빌더 — `src/core/deck.mjs`
+
+P-030. 손으로 짠 편성 하나를 계산하고 바꿔 보는 순수 모듈이다(`node:` import 없음 — 웹뷰와 Node가 함께 쓴다).
+**엔진 요청을 만드는 코드는 여기에 없다**: 계산은 전부 `compareSquads`(§비교 결과)가 하고, 자리 변형은 §배치 탐색의
+`placementVariants`·`planRefinement`·`pickBestPlacement`, 보스 → 전투 조건과 미확인 칸은 §보스 묶음의 `bossCondition`·`unconfirmedOf`를
+그대로 쓴다. 커뮤니티 도구들(편성 화면·팀 빌더)의 **기능의 생각만** 참고했다 — 코드·이미지·데이터는 가져오지 않았다.
+
+### 편성 짜기
+
+자리는 다섯이고 값은 니케 이름 또는 `null`(빈 자리)이다. 함수는 모두 새 배열을 돌려준다(받은 것을 바꾸지 않는다).
+
+| 함수 | 하는 일 |
+|---|---|
+| `placeMember(slots, name, index?)` → `{slots, placed, problem}` | 첫 빈 자리(또는 고른 자리)에 넣는다. **같은 니케는 두 번 넣을 수 없다** — 이미 있으면 `problem`(한국어 문장)이 있고 자리는 그대로다. 다섯이 다 찼을 때도 그렇다 |
+| `removeMember(slots, index)` · `moveMember(slots, from, to)` | 자리를 비운다 · 두 자리를 맞바꾼다(빈 자리와도) |
+| `burstCheck(slots, catalog)` → `{counts, missing, uncovered, ok, full, text}` | 버스트 단계 구성. 1·2·3단계 가운데 없는 단계(`missing`)와, 어느 단계에서나 쓰는 니케(A)가 채우고도 남는 수(`uncovered`). `text`는 모자란 것이 있을 때의 한 문장(「버스트 1단계 니케가 없다. 풀 버스트가 열리지 않을 수 있다.」) — 자리가 덜 찼어도 지금 없는 단계를 말한다 |
+| `deckKey(slots, opponentKey)` | 결과가 어느 편성·어느 상대의 것인지 견주는 열쇠. 자리 순서가 다르면 다른 편성이다 |
+
+버스트 구성이 맞지 않아도 계산을 막지 않는다(경고만 한다) — 엔진은 그런 편성도 계산한다.
+
+### 상대
+
+`listOpponents({bundle, catalog})`가 고를 수 있는 상대를 이 순서로 돌려주고, `resolveOpponent(key, {bundle, catalog})`가 고른 상대를
+전투 조건과 표시로 바꾼다. 모르는 열쇠면 `null`.
+
+| 열쇠 | 무엇 | 전투 조건 | 미확인 칸(`unconfirmed`) |
+|---|---|---|---|
+| `boss:<id>` | 보스 묶음의 보스(이상 개체 5종) | `bossCondition(보스, content)` — 요격전 추천과 같다 | `unconfirmedOf(보스)`에서 약점을 뺀 것 — **요격전 화면과 같은 목록**이다 |
+| `preset:<이름>` | 엔진의 보스 프리셋(`catalog.bosses` — 지금은 「솔로 레이드 S40」 하나) | `{content: "solo_raid", boss: 이름}` | 없음. 보스의 속성·방어력은 엔진 안의 값이다 — 이 모듈은 그 약점을 모른다(`element.known: false`, 화면은 「약점 속성은 이 화면이 알지 못한다」) |
+| `element:<속성>` | 「속성만 정하기」 — 약점 속성 다섯 | `{content: "custom", enemy: {code}}` — 적 속성은 그 약점이 우월한 상대(엔진의 속성 상성 규칙) | 레벨 상한·전투 시간·방어력·코어·거리·파츠 둘·적정 거리(8칸) — 전부 엔진 기본 적 값으로 계산된다. 고른 속성은 미확인이 아니다 |
+| `element:none` | 속성 없음 | `{content: "custom"}` | 위 8칸 + 보스 속성(9칸). `flags: ["속성 상성 미반영"]` |
+
+돌려주는 것: `{key, kind, id, label, condition, element: {code, weak_to, reflected, known, …}, unconfirmed, flags, notes, is_test_data}`.
+
+### 육성 기준 — `compareSquads`의 `growth`
+
+편성 항목에 `growth: "engine_default"`를 적으면 그 편성은 계정의 육성 대신 **엔진 기본 스펙**으로 계산된다(§비교 결과).
+덱 빌더의 「모두 최대 육성」이 이것이다. 엔진 기본 스펙은 엔진 문서 `HARNESS.md` §기본 스펙의 값이다: 레벨 400 · 돌파 3 ·
+**코어 강화 0** · 스킬 10/10/10 · 오버로드 장비 5강(우월 코드 4줄·공격력 2줄·최대 장탄 2줄) · 소장품 SR15 · 애장품 3단계 · 큐브 Lv.15.
+**「전부 최대」가 아니다** — 코어 강화까지 올린 계정은 이 기준보다 높게 나올 수 있다(결과의 caveats에 적힌다).
+
+- 엔진에는 `profile: {base: "default", chars: {}}`로 보낸다(엔진 문서: 「총딜은 기본 스펙과 같다」 — 통합 테스트가 프로필 없이 돌린
+  값과 같은지 대조한다).
+- 레벨: 조건에 상한(`level_cap`)이 없으면 fixed(400), 있으면 **상한 레벨**(계정의 동기화 레벨이 아니다 — 엔진 정책 sync에 실어 보낸다).
+- 계정의 미확인 칸 메모는 붙지 않는다(계정 값을 쓰지 않았다). 순위 항목에 `growth`와 `level`이 실린다.
+
+### 계산 결과 — `evaluateDeck({account, opponent, members}, deps)`
+
+같은 다섯을 두 기준으로 한 번에 계산한다(엔진 요청 두 건 — 캐시에 있으면 엔진을 부르지 않는다).
+
+```jsonc
+{
+  "schema_version": 1,
+  "kind": "deck_report",
+  "generated_at": "…",
+  "key": "[[\"리틀 머메이드\",…],\"boss:kraken\"]",        // deckKey — 화면이 「지금 편성의 결과인가」를 견준다
+  "account": { "name": "…", "is_test_data": true, "updated_at": "…" },
+  "opponent": { "key": "boss:kraken", "kind": "boss", "label": "크라켄", "element": { }, "unconfirmed": [ ], "flags": [], "notes": [ ], "condition": { } },
+  "members": ["리틀 머메이드", "크라운", "라피 : 레드 후드", "헬름", "앨리스"],
+  "results": {
+    "account":        { "status": "computed", "total_damage": 2562132901, "members": [ { "name": "…", "damage": 0, "share": 0.2 } ],
+                        "notes": [], "engine_warnings": [], "ungrown_members": [], "level": null },
+    "engine_default": { "status": "computed", "total_damage": 3349646830, "members": [ ], "notes": [ ], "engine_warnings": [ ], "ungrown_members": [], "level": 400 }
+  },
+  "growth": { "ratio": 0.765, "text": "지금 육성으로는 모두 최대 육성일 때의 76%다 — 같은 조합을 끝까지 키우면 33.49억까지 오른다. 그 값도 낮으면 조합을 바꿔 본다." },
+  "engine_default_spec": "돌파 3 · 코어 강화 0 · …",
+  "assumptions": [ ], "engine": { }, "cache": { }, "caveats": [ ]
+}
+```
+
+- `results.<기준>.status`: `computed` · `rejected`(계산 전 검사에 걸림 — `reasons`) · `failed`(엔진이 계산하지 못함 — `error`).
+  **계산하지 못한 편성은 0이 아니다** — 총딜 칸이 없고, 화면은 「계산하지 못함」으로 그린다.
+- `growth`: 둘 다 계산됐을 때만. **판정을 내리지 않는다**(「조합이 약하다」·「덜 키웠다」) — 그럴 기준이 없다. 비율과 읽는 법만 말한다.
+- caveats에 「지원하지 않음」이 적힌다: 누가 버스트를 쓰지 않을지·조작 같은 운용 지정(엔진의 캐릭터별 기본값으로 계산), PVP,
+  다른 사람의 편성과 통계. 보스 상대에는 「보스 패턴 미반영」도.
+- 덜 찬 편성·상대 없음은 계산하지 않는다(`InputError`).
+
+### 한 명을 바꾼다면 — `swapOne({account, opponent, members, slot}, {limit}, deps)`
+
+그 자리의 니케와 **같은 버스트 묶음**(§배치 탐색의 `burstOrderGroup` — 어느 단계에서나 쓰는 니케는 3단계 묶음)이고 편성에 없는
+보유 니케를 하나씩 넣어 계산한다. 계정의 육성 기준이다. 넣어 볼 순서는 많이 키운 순(투자 점수 — 성능 추정이 아니다), 같으면 이름순이고
+**`limit`명(기본 12)까지만** 계산한다(`swapCandidates`가 고른다 — 엔진을 부르지 않는다).
+
+```jsonc
+{
+  "kind": "deck_swap", "key": "…", "slot": 4, "out": "앨리스", "group": "3",
+  "baseline": { "status": "computed", "total_damage": 2562132901 },
+  "rows": [ { "name": "미하라", "members": ["…", "미하라"], "total_damage": 2494783930, "change": -0.0263, "engine_warnings": [] } ],   // 총딜이 큰 순
+  "failed":  [ { "name": "…", "reason": "엔진의 오류 문장" } ],      // 계산하지 못한 니케 — 0으로 두지 않고 뺀다
+  "skipped": ["…"],                                                  // 상한 때문에 보지 못한 니케(덜 키운 쪽)
+  "candidates": { "total": 13, "limit": 12, "computed": 12, "failed": 0, "skipped": 1 },
+  "caveats": [ ]
+}
+```
+
+`change` = (바꾼 총딜 − 지금 총딜) ÷ 지금 총딜(+0.08 = 8% 증가). 지금 편성을 계산하지 못했으면 `null`이다. 한 명만 바꾼 값이다 —
+바꾼 뒤의 가장 좋은 자리 순서는 따로 보지 않는다(caveats).
+
+### 자리 순서 비교 — `compareOrders({account, opponent, members}, {limit}, deps)`
+
+같은 다섯의 자리 변형(§배치 탐색 §변형 규칙 — 같은 버스트 단계 안의 순서, 3번 자리에 누가 서는가)을 `limit`가지(기본 24)까지 계산해
+가장 좋은 순서를 고른다. 지금 순서도 후보라서 가장 좋은 순서의 총딜은 지금 이상이다.
+
+```jsonc
+{
+  "kind": "deck_order", "key": "…",
+  "current": { "members": [ ], "total_damage": 2562132901 },
+  "best":    { "members": [ ], "total_damage": 2714910367 },
+  "changed": true,                                   // 지금 순서가 아닌 순서가 가장 좋았나
+  "changes": ["버스트 3단계 순서 라피 : 레드 후드 → 앨리스 → 헬름"],
+  "gain_ratio": 1.0596, "gain_text": "106.0%",       // 가장 좋은 순서 ÷ 지금 순서
+  "variants": { "total": 17, "simulated": 3, "skipped": 14, "failed": 0, "limit": 3 },
+  "caveats": [ ]
+}
+```
+
+### 내 편성 — 저장 문서
+
+번호 칸 다섯(01~05 — 게임의 편성 칸과 같은 수)과 이름 붙인 목록(50개까지). 계정마다 한 파일이다:
+**계정 폴더의 `<계정 이름>.decks.json`**(`data/accounts/` — gitignore). 읽고 쓰는 것은 Rust
+(`app/src-tauri/src/shared_state.rs`의 `load_decks`·`save_decks` — 종류·판·번호 칸 다섯·목록 200개까지만 확인), 값의 검사는 이 모듈이 한다.
+
+```jsonc
+{
+  "schema_version": 1,
+  "kind": "deck_book",
+  "slots": [
+    null,
+    { "name": "편성 02", "members": ["리틀 머메이드", "크라운", "라피 : 레드 후드", "헬름", "앨리스"],   // 다섯 자리(빈 자리는 null)
+      "opponent": "boss:kraken", "opponent_label": "크라켄",                                          // 상대의 열쇠와 이름(없으면 null)
+      "total_damage": 2562132901,                                                                     // 저장할 때의 추정 총딜(계정 육성 기준) 또는 null(계산 전)
+      "saved_at": "2026-11-12T12:00:00.000Z" },
+    null, null, null
+  ],
+  "saved": [ { "id": "d1", "name": "솔레 1덱", "members": [ ], "opponent": null, "opponent_label": null, "total_damage": null, "saved_at": "…" } ]
+}
+```
+
+- `saveSlot(book, index, deck)`(이름이 없으면 「편성 02」) · `clearSlot` · `addSaved(book, deck)`(이름 필수, 맨 앞에 넣는다, `id`는 `d<번호>`) ·
+  `removeSaved` — 모두 새 문서를 돌려준다. 저장하지 않는 것: 빈 편성, 같은 니케 두 번, 다섯 자리가 아닌 것, 30자를 넘는 이름.
+- `readDeckBook(문서)` → `{book, dropped}`: 종류·판이 다르면 빈 묶음, 읽을 수 없는 편성은 빼고 그 수를 알린다.
+- `deckFromRanking(순위 항목, 보스 id)`: 요격전 추천 결과의 편성 한 줄 → `{members, opponent: "boss:<id>"}`(「덱 빌더에서 열기」).
+- 저장한 총딜은 저장할 때의 추정치다 — 다시 계산해 맞추지 않는다(화면이 「추정」을 붙인다).
+
+### 편성을 글자로 — `deckText({members, opponent_label, weak_to, total_damage, basis})`
+
+```text
+편성: 1. 리틀 머메이드 / 2. 크라운 / 3. 라피 : 레드 후드 / 4. 헬름 / 5. 앨리스
+상대: 크라켄 (약점 풍압)
+총딜 25.62억 (추정 · 실전 미대조 · 내 계정 육성 기준)
+```
+
+계산하지 않았으면 마지막 줄은 「총딜 계산 전」이다(지어내지 않는다). 빈 자리는 「(빈 자리)」.
 
 ## 시뮬 결과 캐시 — `src/core/cache.mjs`
 

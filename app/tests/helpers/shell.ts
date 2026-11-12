@@ -46,6 +46,10 @@ export function shellMocks(): Record<string, ReturnType<typeof vi.fn>> {
     // 요격전 계획(P-029): 계정마다 두는 요격전 기록·즐겨찾기.
     'loadPlan',
     'savePlan',
+    // 덱 빌더(P-030): 계정마다 두는 내 편성, 편성을 글자로 클립보드에 쓰기.
+    'loadDecks',
+    'saveDecks',
+    'copyText',
   ];
   return Object.fromEntries(names.map((name) => [name, vi.fn()]));
 }
@@ -109,6 +113,10 @@ export class FakeDisk {
   problems: string[] = [];
   /** 계정마다 둔 요격전 계획(`<계정>.plan.json` — 기록·즐겨찾기). */
   plans = new Map<string, unknown>();
+  /** 계정마다 둔 내 편성(`<계정>.decks.json` — 번호 칸 다섯과 이름 붙인 목록). */
+  decks = new Map<string, unknown>();
+  /** 클립보드에 쓴 글(쓴 순서대로). 읽는 길은 없다 — 테스트가 여기서 본다. */
+  clipboard: string[] = [];
   /** `shared-state` 이벤트를 듣는 창들. */
   listeners = new Set<(snapshot: SharedSnapshot) => void>();
   private clock = 0;
@@ -223,6 +231,24 @@ export function installShell(api: Api, disk: FakeDisk = new FakeDisk()): FakeDis
       throw '요격전 기록이 아니다(종류가 다르다). 앞서 저장한 기록은 그대로 둔다';
     }
     disk.plans.set(planAccount(name), structuredClone(plan));
+  });
+
+  // 내 편성: Rust의 규칙(shared_state.rs의 load_decks·save_decks) — 계정이 있어야 하고, 종류·판·번호 칸 다섯·목록을 확인한 뒤에만 쓴다.
+  api.loadDecks.mockImplementation(async (name: string | null = null) => {
+    const found = disk.decks.get(planAccount(name));
+    return found === undefined ? null : structuredClone(found);
+  });
+  api.saveDecks.mockImplementation(async (name: string | null, decks) => {
+    const doc = decks as unknown as { kind?: unknown; schema_version?: unknown; slots?: unknown; saved?: unknown };
+    if (doc.kind !== 'deck_book' || doc.schema_version !== 1 || !Array.isArray(doc.slots) || doc.slots.length !== 5 || !Array.isArray(doc.saved)) {
+      throw '저장한 편성이 아니다(종류가 다르다). 앞서 저장한 편성은 그대로 둔다';
+    }
+    disk.decks.set(planAccount(name), structuredClone(decks));
+  });
+  // 클립보드: Rust의 규칙(clipboard.rs) — 빈 글은 쓰지 않는다.
+  api.copyText.mockImplementation(async (text: string) => {
+    if (text.trim() === '') throw '복사할 글이 없다';
+    disk.clipboard.push(text);
   });
 
   // 오버레이 위젯: Rust가 쥔 상태를 흉내 낸다. 창 크기 맞춤·끌기·숨기기는 불린 것만 적는다.

@@ -11,6 +11,7 @@ import type {
   CompareReport,
   ComputeActivity,
   CookieSaved,
+  DeckBook,
   EngineCatalog,
   EngineProgress,
   EngineRequest,
@@ -389,6 +390,28 @@ export function loadPlan(name: string | null = null): Promise<unknown | null> {
 /** 그 계정의 요격전 계획을 저장한다. 종류·판·모양이 맞지 않으면 거부되고 앞서 저장한 것은 그대로다. */
 export function savePlan(name: string | null, plan: PlanDoc): Promise<void> {
   return invoke<void>('save_plan', { name, plan });
+}
+
+// ── 덱 빌더(P-030) ────────────────────────────────────────────────────────────
+// 저장한 편성(번호 칸 다섯과 이름 붙인 목록)은 Rust가 계정 폴더에 계정마다 둔다(src-tauri/src/shared_state.rs).
+// 화면이 넘기는 계정 이름은 경로가 아니다. 데스크톱 앱 창만 부른다(오버레이 창에는 권한이 없다).
+
+/** 그 계정의 내 편성. 이름을 주지 않으면 지금 쓰는 계정이다. 아직 없으면 null. */
+export function loadDecks(name: string | null = null): Promise<unknown | null> {
+  return invoke<unknown | null>('load_decks', { name });
+}
+
+/** 그 계정의 내 편성을 저장한다. 종류·판·모양이 맞지 않으면 거부되고 앞서 저장한 것은 그대로다. */
+export function saveDecks(name: string | null, decks: DeckBook): Promise<void> {
+  return invoke<void>('save_decks', { name, decks });
+}
+
+/**
+ * 글자를 클립보드에 쓴다(「편성 복사」). 쓰기만 한다 — 이 앱에는 클립보드를 읽는 명령이 없다.
+ * 빈 글·너무 긴 글이나 다른 프로그램이 클립보드를 쥐고 있으면 한국어 오류 문장으로 거부된다.
+ */
+export function copyText(text: string): Promise<void> {
+  return invoke<void>('copy_text', { text });
 }
 
 /** 위젯 상태가 바뀔 때마다 불린다(단축키·자동 표시·설정 변경). 돌려받은 함수로 구독을 끊는다. */

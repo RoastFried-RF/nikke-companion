@@ -37,6 +37,9 @@ raw-window-handle = "0.6"
 # 게임 창 찾기·창 정보·화면 캡처(src/game_win32.rs). Tauri가 이미 쓰는 판과 같다 — 기능만 더 켠다.
 # 표준 창 API만 쓴다: 창 열거, 창 사각형, DWM, Windows.Graphics.Capture.
 # Win32_Security·Win32_System_JobObjects는 이 앱이 띄운 엔진 프로세스를 묶어 끝내는 데만 쓴다(src/engine_win32.rs).
+# Win32_System_DataExchange·Win32_System_Com_StructuredStorage는 클립보드에 글자를 쓰는 데만 쓴다(src/clipboard.rs — 덱 빌더의
+# 「편성 복사」). 클립보드 플러그인을 더하지 않았다: 쓰기 한 가지만 필요하고, 읽기 권한이 딸려 오지 않게 앱 명령 하나(copy_text)로 만들었다.
+# 넘길 메모리 덩이는 COM의 메모리 스트림으로 만든다 — 메모리를 직접 잡고 잠그는 기능 묶음은 켜지 않는다(tests/contract.test.ts).
 windows = { version = "0.62", features = [
     "Foundation",
     "Graphics",
@@ -52,6 +55,8 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Gdi",
     "Win32_Security",
     "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_DataExchange",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_JobObjects",
     "Win32_System_SystemInformation",

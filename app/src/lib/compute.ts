@@ -5,9 +5,22 @@
 import { withCache } from '@core/cache.mjs';
 import { DEFAULT_BUDGET, DEFAULT_LIMIT, DEFAULT_TOP, suggestSquads } from '@core/candidates.mjs';
 import { compareSquads, InputError } from '@core/compare.mjs';
+import { compareOrders, evaluateDeck, swapOne } from '@core/deck.mjs';
 import { compareGrowth } from '@core/growth.mjs';
 import { DEFAULT_INTERCEPT_BUDGET, DEFAULT_INTERCEPT_TOP, recommendIntercept } from '@core/intercept.mjs';
-import type { BossProgress, CompareReport, EngineRuntime, GrowthReport, InterceptReport, SearchStage, SimCacheStore } from '../types';
+import type {
+  BossProgress,
+  CompareReport,
+  DeckOpponent,
+  DeckOrderReport,
+  DeckReport,
+  DeckSwapReport,
+  EngineRuntime,
+  GrowthReport,
+  InterceptReport,
+  SearchStage,
+  SimCacheStore,
+} from '../types';
 import { errorMessage, readJsonFile } from './backend';
 import { simCache, tauriRuntime } from './runtime';
 
@@ -245,6 +258,50 @@ export async function runCompare(input: CompareInput, deps: ComputeDeps = defaul
       coreDeps(deps),
     );
     return report as unknown as CompareReport;
+  } catch (e) {
+    throw asComputeError(e);
+  }
+}
+
+// ── 덱 빌더(P-030) ────────────────────────────────────────────────────────────
+// 손으로 짠 편성 하나를 계산한다. 규칙은 전부 루트의 src/core/deck.mjs에 있다(그 안에서 compareSquads를 부른다) —
+// 여기서는 런타임(캐시 포함)을 넘겨 부를 뿐이다. 같은 편성·같은 상대는 캐시에서 바로 나온다.
+
+/** 덱 계산의 입력: 읽어 둔 계정, 고른 상대(resolveOpponent의 결과), 다섯 자리. */
+export interface DeckInput {
+  account: unknown;
+  opponent: DeckOpponent;
+  members: (string | null)[];
+}
+
+/** 편성 하나를 「내 계정 육성」과 「모두 최대 육성」 둘로 계산한다. */
+export async function runDeckEvaluate(input: DeckInput, deps: ComputeDeps = defaultDeps): Promise<DeckReport> {
+  try {
+    return (await evaluateDeck({ account: input.account as object, opponent: input.opponent, members: input.members }, coreDeps(deps))) as unknown as DeckReport;
+  } catch (e) {
+    throw asComputeError(e);
+  }
+}
+
+/** 한 자리에 같은 버스트 묶음의 보유 니케를 하나씩 넣어 계산한다(`limit`명까지). */
+export async function runDeckSwap(input: DeckInput & { slot: number; limit?: number }, deps: ComputeDeps = defaultDeps): Promise<DeckSwapReport> {
+  try {
+    const report = await swapOne(
+      { account: input.account as object, opponent: input.opponent, members: input.members, slot: input.slot },
+      { limit: input.limit },
+      coreDeps(deps),
+    );
+    return report as unknown as DeckSwapReport;
+  } catch (e) {
+    throw asComputeError(e);
+  }
+}
+
+/** 같은 다섯의 자리 변형을 계산해 가장 좋은 순서를 찾는다(`limit`가지까지). */
+export async function runDeckOrder(input: DeckInput & { limit?: number }, deps: ComputeDeps = defaultDeps): Promise<DeckOrderReport> {
+  try {
+    const report = await compareOrders({ account: input.account as object, opponent: input.opponent, members: input.members }, { limit: input.limit }, coreDeps(deps));
+    return report as unknown as DeckOrderReport;
   } catch (e) {
     throw asComputeError(e);
   }

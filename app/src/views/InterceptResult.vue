@@ -7,12 +7,14 @@
 // 수치를 고치거나 다시 계산하지 않는다 — 결과 문서의 값을 그린다. 한 줄 요약은 루트의 순수 함수(src/core/summary.mjs)가 만든다.
 import { summarizeInterceptBoss } from '@core/summary.mjs';
 import { computed, onActivated, ref, watch } from 'vue';
+import { useDecks } from '../lib/deck';
 import { engineLabel, localTime } from '../lib/format';
+import { useNav } from '../lib/nav';
 import { recordCheck, usePlan } from '../lib/plan';
 import { recall, remember } from '../lib/remember';
 import { findBoss, LAST_BOSS, useScreenTrack } from '../lib/screenTrack';
 import { useNikkeCatalog } from '../lib/useNikkeCatalog';
-import type { InterceptBoss, InterceptReport } from '../types';
+import type { InterceptBoss, InterceptReport, RankingEntry } from '../types';
 import BossCard from '../ui/BossCard.vue';
 import DetailsFold from '../ui/DetailsFold.vue';
 import ElementChip from '../ui/ElementChip.vue';
@@ -39,6 +41,15 @@ const boss = computed<InterceptBoss | null>(() => bosses.value.find((b) => b.id 
 function pick(id: string): void {
   picked.value = id;
   remember(LAST_BOSS, id);
+}
+
+// 덱 빌더에서 열기(P-030): 지금 보이는 편성을 덱 빌더로 넘기고 그 화면을 연다. 데스크톱 앱 창에서만 된다(오버레이 창에는 없다).
+const decks = useDecks();
+const nav = useNav();
+function openInDeck(entry: RankingEntry): void {
+  if (!decks || !nav) return;
+  decks.openRanking(entry, boss.value?.id ?? null);
+  nav.openTool('deck');
 }
 
 // 요격전 기록(P-029): 고른 보스의 가장 최근 기록과 추정 총딜의 차이. 기록이 없으면(또는 이 창에 기록이 없으면) null.
@@ -194,7 +205,7 @@ const conditionCount = computed(() => {
       <p class="result__summary" data-testid="boss-summary">{{ summary }}</p>
 
       <p v-if="boss.status !== 'computed'" class="result__none" data-testid="boss-not-computed">이 보스는 아직 계산하지 않았다.</p>
-      <SquadPanel v-else :ranking="boss.ranking ?? []" :info="info" :weak="weakNames" :size="compact ? 'sm' : 'lg'" />
+      <SquadPanel v-else :ranking="boss.ranking ?? []" :info="info" :weak="weakNames" :size="compact ? 'sm' : 'lg'" :deck-link="!!decks && !!nav" @open-deck="openInDeck" />
 
       <p v-if="weakPool" class="result__weak" data-testid="weak-pool">
         약점 속성({{ weakPool.element }}) 보유 니케 {{ (weakPool.owned ?? []).length }}명 가운데 {{ (weakPool.pooled ?? []).length }}명을 이번 계산에 넣었다.

@@ -3,6 +3,7 @@
 // 이 화면은 읽기만 한다 — 계산 도구의 자리는 화면이 정하지 못한다(Rust가 설정에서 읽는다).
 import { onActivated, onMounted, ref } from 'vue';
 import { accountSyncStatus, engineCatalog, engineVersion, errorMessage } from '../../lib/backend';
+import { recallAuto, rememberAuto } from '../../lib/deck';
 import { engineLabel } from '../../lib/format';
 import { useShared } from '../../lib/shared';
 import type { EngineVersion } from '../../types';
@@ -42,6 +43,13 @@ async function check(): Promise<void> {
 
 onMounted(check);
 onActivated(check);
+
+// 덱 빌더의 자동 계산(P-030): 다섯 자리가 차면 「계산」을 누르지 않아도 계산한다. 기본은 꺼짐 — 이 PC에 기억한다.
+const autoDeck = ref(recallAuto());
+function onAutoDeck(event: Event): void {
+  autoDeck.value = (event.target as HTMLInputElement).checked;
+  rememberAuto(autoDeck.value);
+}
 </script>
 
 <template>
@@ -67,10 +75,26 @@ onActivated(check);
         </ul>
       </template>
     </section>
+
+    <section class="nk-card" aria-label="덱 빌더" data-testid="settings-deck">
+      <h2 class="nk-subtitle">덱 빌더</h2>
+      <label class="section__check">
+        <input type="checkbox" :checked="autoDeck" data-testid="deck-auto" @change="onAutoDeck" />
+        다섯 자리가 차면 바로 계산한다
+      </label>
+      <p class="nk-muted">켜 두면 편성 도구의 덱 빌더에서 다섯 자리를 채우거나 바꿀 때마다 스스로 계산한다. 꺼 두면 「계산」을 눌렀을 때만 계산한다.</p>
+    </section>
   </div>
 </template>
 
 <style scoped>
+.section__check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--nk-space-2);
+  cursor: pointer;
+}
+
 .section {
   display: flex;
   flex-direction: column;
