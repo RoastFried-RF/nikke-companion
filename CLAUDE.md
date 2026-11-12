@@ -27,6 +27,13 @@ node src/cli.mjs compare --account data/samples/account.sample.json --condition 
 `suggest`는 상위 조합의 배치 순서도 탐색한다(2단계). `--no-refine`으로 끄고, `--budget <시뮬 횟수>`(기본 120)로 전체
 시뮬 횟수를 묶는다(`docs/data-model.md` §배치 탐색).
 
+자동 티어(엔진 계산으로 티어표 — 방법·한계는 `docs/tier-method.md`, 기준 편성·등급 규칙은 `data/tier/`):
+
+```bash
+node src/cli.mjs tier build --only "헬름,크라운,리틀 머메이드" --json tier.json   # 일부만 (수십 초)
+node src/cli.mjs tier build --json tier.json                                    # 전원: 시뮬 1,769건, 수십 분. --budget으로 상한(기본 2000)
+```
+
 데스크톱 앱(`app/`, Tauri v2 + Vue 3 — 자체 package.json. 자세한 것은 `app/README.md`):
 
 ```bash

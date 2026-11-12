@@ -412,3 +412,94 @@ CLI는 이 JSON을 표준 출력에 그대로 낸다. 순수 비교만 필요하
 - `--from`이 `--to`의 조상 커밋이 아니면 방향이 뒤집혔을 수 있다는 문장이 `caveats`에 붙는다.
 - 보지 않는 것: 파싱된 효과를 엔진이 모두 계산하는지(지원 여부 판정은 다음 단계), 프리뷰 선행 등록 여부
   (`preview_skills.json` — 카드 기준 추정값), 두 파일 밖의 변경(엔진 코드·보스·장비 데이터).
+
+## 티어 결과 — `src/tier/evaluate.mjs`
+
+자동 티어의 2단계. 엔진 계산으로 니케별 등급을 낸다. 방법·가정·한계는 `docs/tier-method.md` — 여기는 형식만 적는다.
+
+`buildTier({references, rules, only, budget}, deps)`(CLI `tier build [--only <이름,이름>] [--budget <시뮬 횟수, 기본 2000>]
+[--json <결과.json>] [--references <파일>] [--rules <파일>] [--no-cache] [--cache-dir <폴더>]`).
+`deps`는 다른 계산 모듈과 같고(`runtime`·`now`·`concurrency`), 여기에 `engineData`(엔진 데이터 현황 — Node는
+`src/runtime/node.mjs`의 `loadEngineData()`: `{files: {파일: 내용 해시}, skills: {이름: 파싱된 효과 수}}`) · `batchSize`(기본 40) ·
+`onProgress({done, total})`가 더해진다. CLI는 진행을 표준 오류로만 낸다(`시뮬 85/140건`).
+
+### 입력 문서
+
+```jsonc
+// data/tier/reference-squads.json — 시나리오와 기준 편성. 바꾸면 version을 올린다
+{
+  "schema_version": 1, "version": "2026-11-12.1",
+  "source": { "summary": "…snapshot.py의 SQUADS…", "origin": "…", "selection": "…", "not_carried_over": "…", "checked_at": "2026-11-12" },
+  "scenario": { "id": "solo-raid-s40-default-spec", "boss": "솔로 레이드 S40", "duration": 180,
+                "growth": "engine_default",        // 표준 육성 조건. 지금은 이 값만 받는다(엔진 기본 스펙, 프로필 없음)
+                "enemy": { } },                    // 선택. 보스 위에 덮는 적 칸(전투 조건의 enemy와 같다)
+  "squads": [ { "id": "S40_토브드레이크", "members": ["…", "…", "…", "…", "…"], "source": "…" } ]   // 5명, 배치 순서가 뜻을 가진다
+}
+
+// data/tier/rules.json — 등급 규칙. 바꾸면 version을 올린다
+{
+  "schema_version": 1, "version": "2026-11-12.1",
+  "provisional": true,                             // 대표 사례로 검증하기 전에는 true — 결과 caveats에 임시라고 적힌다
+  "tiers": [ { "tier": "SSS", "min": 1.05 }, …, { "tier": "D", "min": 0 } ],   // 위 등급부터. min 이상이면 그 등급. 마지막은 0
+  "unsupported_warning_markers": ["효과 모델이 없", "미지원"]                   // 이 문구가 든 엔진 경고 = 미지원 효과
+}
+```
+
+### 결과
+
+```jsonc
+{
+  "schema_version": 1, "kind": "tier",
+  "generated_at": "2026-11-12T03:29:47.427Z",                         // 계산 시각
+  "method": { "id": "team-swap-ratio", "version": 1 },
+  "engine": { "repo": "Jgaram/nikke-calc", "commit": "67835ca…", "dirty": false },   // 엔진 커밋
+  "engine_data": { "version": "sha256:6b9f8225c2a5f426",              // 엔진 데이터 버전 = 아래 파일 해시들을 묶은 해시
+                   "files": { "data/parsed_nikke.json": "<64자>", "data/parsed_skills.json": "<64자>" } },   // 못 받았으면 null
+  "scenario": { "id": "…", "boss": "솔로 레이드 S40", "duration": 180, "enemy": null,
+                "growth": "engine_default", "growth_note": "…", "expected": true },
+  "assumptions": ["전투 180초, …"],
+  "references": { "version": "2026-11-12.1", "source": { },           // 기준 편성 버전과 출처
+                  "squads": [ { "id": "…", "members": [], "source": "…", "status": "used",   // used | unusable
+                                "reason": null, "total_damage": 5865088902 } ] },            // 기준 편성 그대로의 총딜
+  "rules": { "version": "2026-11-12.1", "provisional": true, "tiers": [ { "tier": "SSS", "min": 1.05 } ] },   // 등급 규칙 버전
+  "sims": { "budget": 2000, "used": 27, "baselines": 5, "variants": 22, "skipped_for_budget": 0 },           // 시뮬 횟수
+  "cache": { "hits": 0, "misses": 27, "stored": 27, "warnings": [] }, // §시뮬 결과 캐시(묶음별 통계의 합). 캐시 없이 계산했으면 null
+  "summary": { "requested": 4, "graded": 3, "hold": 1, "unsupported": 0,
+               "by_tier": { "SSS": 0, "SS": 1, "S": 2, "A": 0, "B": 0, "C": 0, "D": 0 },
+               "hold_by_reason": { "skills_empty": 1 } },
+  "entries": [
+    { "name": "크라운", "rank": 1, "burst_stage": "2",
+      "status": "예측 평가", "status_label": "예측 평가",
+      "tier": "SS", "tier_label": "SS",                               // 미지원 효과가 있으면 tier_label이 "SS (미지원 효과 있음)"
+      "score": 1.0296,                                                // comparisons[].ratio의 최댓값
+      "unsupported": false, "flags": [],                              // 있으면 true, ["미지원 효과 있음"]
+      "best": { "reference": "S40_앨리스모더니아", "slot": 1, "replaced": "그레이브",
+                "total_damage": 3925782856, "reference_total": 3812832549, "ratio": 1.0296 },
+      "comparisons": [ { "reference": "…", "slot": 1, "replaced": "…", "total_damage": 0, "reference_total": 0, "ratio": 0.73 } ],
+      "excluded_references": [ { "reference": "S40_퀸유키코", "reason": "self" } ],   // self(이미 들어 있다) | no_slot(같은 단계 자리 없음)
+      "hold": null,
+      "notes": ["기준 편성 S40_퀸유키코에 이미 들어 있어 …", "미지원 효과(엔진 경고): …"],
+      "engine_warnings": ["기본 스펙(1층) 이탈 1명 — 앨리스"] },         // 가장 좋은 자리의 시뮬이 실은 경고 전부
+    { "name": "test_B1", "rank": null, "burst_stage": "1",
+      "status": "평가 보류", "status_label": "평가 보류(스킬 효과 없음)",
+      "tier": null, "tier_label": null, "score": null,                // 0점이 아니다
+      "unsupported": false, "flags": [], "best": null, "comparisons": [], "excluded_references": [],
+      "hold": { "code": "skills_empty", "label": "스킬 효과 없음", "message": "파싱된 스킬 효과가 하나도 없다 …" },
+      "notes": ["파싱된 스킬 효과가 하나도 없다 …"], "engine_warnings": [] }
+  ],
+  "caveats": ["예측 평가다 …", "등급 규칙 2026-11-12.1은 임시다 — 대표 사례로 검증되지 않았다 …"]
+}
+```
+
+- `status`는 `예측 평가`(등급 있음) 또는 `평가 보류`(등급·점수 `null`) 둘뿐이다. `실측 대조 완료`는 쓰지 않는다.
+- `score` = 팀 총딜 비율: `comparisons[].ratio`(= `total_damage ÷ reference_total`)의 최댓값. `slot`은 기준 편성에서 바꿔 넣은
+  자리(0부터), `replaced`는 빠진 멤버다. 같은 비율이면 기준 편성 문서에서 먼저 나오는 자리가 `best`다.
+- `hold.code`: `skills_unparsed` · `skills_empty` · `preview` · `no_burst_stage` · `no_comparison` · `sim_error`(+ `errors`:
+  `[{reference, slot, replaced, error: {type, message, path}}]`) · `budget`(+ `needed`, `remaining`).
+  `status_label`은 `평가 보류(<label>)` — 예산이면 `평가 보류(예산)`.
+- `entries`의 순서: 등급을 매긴 항목이 점수 내림차순(같으면 이름의 코드 단위 순, `rank` 1부터) → 평가 보류 항목이 입력 순서
+  (`only`에 적은 순서, 주지 않으면 엔진 카탈로그 순서)대로.
+- `sims.used`는 엔진에 맡긴 요청 수(캐시 적중 포함)이고 `budget`을 넘지 않는다. `used = baselines + variants`.
+- 같은 입력(엔진 판·기준 편성·규칙·`only`·`budget`)이면 `generated_at`과 `cache` 말고는 같은 문서가 나온다.
+- 입력 오류(종료 코드 2): 모르는 니케 이름, 잘못된 규칙·기준 편성 문서, 쓸 수 있는 기준 편성이 없음. 엔진이 기준 편성을
+  하나도 계산하지 못하면 실행 오류(종료 코드 1)다.

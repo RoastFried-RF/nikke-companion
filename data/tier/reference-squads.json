@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "version": "2026-11-12.1",
+  "note": "자동 티어(방법 v1)의 시나리오와 기준 편성. 방법·가정·한계는 docs/tier-method.md. 편성이나 시나리오를 바꾸면 version을 올린다 — 점수는 이 파일의 판에 묶인다.",
+  "source": {
+    "summary": "엔진 회귀 하네스 스쿼드에서 골랐다: vendor/nikke-calc/runner/snapshot.py의 SQUADS (엔진 커밋 67835ca).",
+    "origin": "하네스 주석이 밝힌 출처 — enikk.app 솔로 레이드 시즌 36~40의 Teams 데이터(2026-08-26 수집, 파스 10회 이상). 멤버 순서는 enikk 표기 그대로다.",
+    "selection": "시나리오의 보스(솔로 레이드 S40, 적 풍압)와 같은 시즌의 S40_* 스쿼드 가운데 실사용 횟수(파스) 상위 5개. 실전 기록이 없는 커버_* 스쿼드는 쓰지 않았다.",
+    "not_carried_over": "하네스 스쿼드의 chars(조작 지정) · config(no_burst_char, burst_pattern, burst_gauge_mode) · enemy(core_px, has_parts 등)는 옮기지 않았다. 멤버와 배치 순서만 쓴다 — 니케를 바꿔 넣으면 그 지정이 가리키는 이름이 사라지기 때문이다.",
+    "checked_at": "2026-11-12"
+  },
+  "scenario": {
+    "id": "solo-raid-s40-default-spec",
+    "boss": "솔로 레이드 S40",
+    "duration": 180,
+    "growth": "engine_default",
+    "growth_note": "표준 육성 조건 = 엔진 기본 스펙(육성 프로필 없음): 돌파 3 · 스킬 10/10/10 · 오버로드 장비에 캐릭터별 기본 레이어(data/char_defaults.json)를 얹은 값. 정본은 vendor/nikke-calc/runner/spec.py."
+  },
+  "squads": [
+    {
+      "id": "S40_토브드레이크",
+      "members": ["토브", "아르카나 : 포츈 메이트", "도로시 : 세렌디피티", "드레이크", "솔린 : 프로스트 티켓"],
+      "source": "snapshot.py SQUADS['S40_토브드레이크'] — S40 1위(1797파스), S37에서도 1위(1281파스)"
+    },
+    {
+      "id": "S40_퀸유키코",
+      "members": ["리틀 머메이드", "크라운", "퀸(마코토)", "유키코", "마스트 : 로망틱 메이드"],
+      "source": "snapshot.py SQUADS['S40_퀸유키코'] — 1088파스"
+    },
+    {
+      "id": "S40_브리드라피",
+      "members": ["브리드 : 사일런트 트랙", "라피 : 레드 후드", "아니스 : 스타", "미하라 : 본딩 체인", "프리바티"],
+      "source": "snapshot.py SQUADS['S40_브리드라피'] — 834파스"
+    },
+    {
+      "id": "S40_앨리스모더니아",
+      "members": ["리타", "그레이브", "레이", "앨리스", "모더니아"],
+      "source": "snapshot.py SQUADS['S40_앨리스모더니아'] — 697파스"
+    },
+    {
+      "id": "S40_민트디젤",
+      "members": ["목단", "민트", "스노우 화이트 : 헤비암즈", "프리카", "디젤 : 윈터 스위츠"],
+      "source": "snapshot.py SQUADS['S40_민트디젤'] — 639파스"
+    }
+  ]
+}

@@ -6,17 +6,26 @@
 //   node src/cli.mjs growth  --account <계정.json> --condition <조건.json> --squads <편성.json> [--squad <편성 이름>] --upgrades <후보.json> [--json <결과.json>]
 //   node src/cli.mjs detect-changes --from <커밋> --to <커밋> [--engine <엔진 저장소 경로>] [--json <결과.json>]
 //   node src/cli.mjs import-profile <엔진 프로필.json> [--name <계정 이름>] [--out-dir <폴더>] [--force] [--json <결과.json>]
-// compare·suggest·growth는 시뮬 결과 캐시(data/cache/sim/)를 기본으로 쓴다: [--no-cache] [--cache-dir <폴더>]
+//   node src/cli.mjs tier build [--only <이름,이름>] [--budget <시뮬 횟수>] [--json <결과.json>]
+//                              [--references <기준 편성.json>] [--rules <등급 규칙.json>]
+// compare·suggest·growth·tier는 시뮬 결과 캐시(data/cache/sim/)를 기본으로 쓴다: [--no-cache] [--cache-dir <폴더>]
 // 종료 코드: 0 성공 · 1 실행 오류 · 2 입력 오류
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { withCache } from './core/cache.mjs';
 import { suggestSquads } from './core/candidates.mjs';
 import { compareSquads, InputError } from './core/compare.mjs';
 import { compareGrowth } from './core/growth.mjs';
 import { importProfileFile } from './core/import-profile.mjs';
 import { renderReport, renderGrowthReport, renderImportReport } from './core/render.mjs';
-import { createFileCacheStore, nodeRuntime } from './runtime/node.mjs';
+import { createFileCacheStore, loadEngineData, nodeRuntime } from './runtime/node.mjs';
 import { detectChanges } from './tier/detect.mjs';
+import { buildTier } from './tier/evaluate.mjs';
+import { renderTierReport } from './tier/render.mjs';
+
+/** 자동 티어의 기준 편성·등급 규칙(버전 있는 데이터 파일). --references·--rules로 바꿀 수 있다. */
+const TIER_REFERENCES = fileURLToPath(new URL('../data/tier/reference-squads.json', import.meta.url));
+const TIER_RULES = fileURLToPath(new URL('../data/tier/rules.json', import.meta.url));
 
 const USAGE = [
   '사용법:',
@@ -27,7 +36,10 @@ const USAGE = [
   '  node src/cli.mjs growth --account <계정.json> --condition <조건.json> --squads <편성.json> [--squad <기준 편성 이름, 기본 첫 편성>] --upgrades <후보.json> [--json <결과.json>]',
   '  node src/cli.mjs detect-changes --from <엔진 커밋> --to <엔진 커밋> [--engine <엔진 저장소, 기본 vendor/nikke-calc>] [--json <결과.json>]',
   '  node src/cli.mjs import-profile <엔진 프로필.json> [--name <계정 이름, 기본 프로필 이름>] [--out-dir <폴더, 기본 data/accounts>] [--force] [--json <결과.json>]',
-  'compare·suggest·growth는 같은 엔진 판·같은 요청의 시뮬 결과를 다시 계산하지 않는다(캐시):',
+  '  node src/cli.mjs tier build [--only <니케 이름,니케 이름>] [--budget <시뮬 횟수의 상한, 기본 2000>] [--json <결과.json>]',
+  '      엔진 계산으로 티어표를 만든다(전원 계산은 1,800건쯤 — 수십 분). --only로 일부만 계산할 수 있다',
+  '      [--references <기준 편성.json, 기본 data/tier/reference-squads.json>]   [--rules <등급 규칙.json, 기본 data/tier/rules.json>]',
+  'compare·suggest·growth·tier는 같은 엔진 판·같은 요청의 시뮬 결과를 다시 계산하지 않는다(캐시):',
   '  [--no-cache] 캐시를 읽지도 쓰지도 않는다   [--cache-dir <폴더, 기본 data/cache/sim>]',
 ].join('\n');
 
@@ -94,8 +106,39 @@ function engineDeps() {
 try {
   let report;
   let render = renderReport;
-  const deps = ['compare', 'suggest', 'growth'].includes(command) ? engineDeps() : {};
-  if (command === 'growth') {
+  const deps = ['compare', 'suggest', 'growth', 'tier'].includes(command) ? engineDeps() : {};
+  if (command === 'tier') {
+    if (opts._[0] !== 'build' || opts._.length > 1) {
+      throw new InputError('인자가 잘못됐다', [{ path: 'tier', message: '하위 명령은 build뿐이다 — node src/cli.mjs tier build [--only <이름,이름>]' }]);
+    }
+    for (const key of ['only', 'references', 'rules']) {
+      if (opts[key] === true) throw new InputError('인자가 빠졌다', [{ path: `--${key}`, message: '값이 필요하다' }]);
+    }
+    // 니케 이름에는 쉼표가 없다(공백·콜론·괄호는 있다) — 쉼표로만 나눈다.
+    const only = typeof opts.only === 'string' ? opts.only.split(',').map((n) => n.trim()).filter(Boolean) : undefined;
+    const budget = readCount('budget', opts.budget);
+    let shown = 0;
+    report = await buildTier(
+      {
+        references: readJsonFile('references', opts.references ?? TIER_REFERENCES),
+        rules: readJsonFile('rules', opts.rules ?? TIER_RULES),
+        only,
+        budget,
+      },
+      {
+        ...deps,
+        engineData: () => loadEngineData(),
+        // 진행은 표준 오류로만 낸다 — 표준 출력은 결과 표다. 오래 걸리는 계산이라 10%쯤마다 한 줄.
+        onProgress: ({ done, total }) => {
+          if (total < 40 || done === total || done - shown >= total / 10) {
+            shown = done;
+            process.stderr.write(`시뮬 ${done}/${total}건\n`);
+          }
+        },
+      },
+    );
+    render = renderTierReport;
+  } else if (command === 'growth') {
     const upgradesDoc = readJsonFile('upgrades', opts.upgrades);
     report = await compareGrowth({
       account: readJsonFile('account', opts.account),

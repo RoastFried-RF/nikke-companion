@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "version": "2026-11-12.1",
+  "provisional": true,
+  "note": "자동 티어(방법 v1)의 등급 규칙. 점수 = 기준 편성의 같은 버스트 단계 자리에 바꿔 넣었을 때의 팀 총딜 비율 중 최댓값(1.0 = 빠진 기준 멤버와 같은 팀 총딜). 경계는 임시다 — 대표 사례(실전에서 평가가 굳은 니케)로 검증하지 않았다. 경계를 바꾸면 version을 올린다. 설명은 docs/tier-method.md §등급 규칙.",
+  "metric": "team_damage_ratio_max",
+  "tiers": [
+    { "tier": "SSS", "min": 1.05, "meaning": "가장 잘 맞는 기준 편성의 멤버를 대신해 팀 총딜을 5% 넘게 올린다" },
+    { "tier": "SS", "min": 1.0, "meaning": "가장 잘 맞는 기준 편성의 멤버와 같거나 더 높은 팀 총딜" },
+    { "tier": "S", "min": 0.95, "meaning": "기준 멤버에 5% 안쪽으로 못 미친다" },
+    { "tier": "A", "min": 0.88, "meaning": "기준 멤버에 12% 안쪽으로 못 미친다" },
+    { "tier": "B", "min": 0.8, "meaning": "기준 멤버에 20% 안쪽으로 못 미친다" },
+    { "tier": "C", "min": 0.7, "meaning": "기준 멤버에 30% 안쪽으로 못 미친다" },
+    { "tier": "D", "min": 0, "meaning": "그보다 낮다" }
+  ],
+  "unsupported_warning_markers": ["효과 모델이 없", "미지원"]
+}

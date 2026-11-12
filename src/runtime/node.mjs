@@ -3,10 +3,12 @@
 // 데스크톱 앱에서는 같은 일을 Rust 명령(app/src-tauri/src/engine.rs)이 한다.
 // 엔진의 요청·결과 JSON 계약(vendor/nikke-calc/docs/SIM-JSON.md)만 쓴다. 엔진 코드는 고치지 않는다.
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { canonicalJson } from '../core/cache.mjs';
 import { ENGINE_REPO } from '../core/runtime.mjs';
 
 export const DEFAULT_ENGINE_DIR = path.resolve(fileURLToPath(new URL('../../vendor/nikke-calc', import.meta.url)));
@@ -17,6 +19,29 @@ export function loadCatalog(engineDir = DEFAULT_ENGINE_DIR) {
   const nikkes = read('data/parsed_nikke.json');
   const bosses = Object.keys(read('data/boss_presets.json')).filter((k) => !k.startsWith('_'));
   return { nikkes, bosses };
+}
+
+/** 자동 티어가 읽는 엔진 데이터 파일(엔진 저장소 기준 경로). */
+export const ENGINE_DATA_FILES = Object.freeze({ nikkes: 'data/parsed_nikke.json', skills: 'data/parsed_skills.json' });
+
+/**
+ * 엔진 데이터의 판과 스킬 파싱 현황 — 자동 티어(src/tier/evaluate.mjs의 `deps.engineData`)가 쓴다.
+ *   files:  파일 → 내용 해시(SHA-256). 파일 바이트가 아니라 정규화한 JSON(`canonicalJson`)의 해시라서 줄바꿈·공백·키 순서와
+ *           무관하다. 엔진 커밋이 같아도 데이터가 손으로 바뀌었으면(dirty) 이 값이 달라진다
+ *   skills: 니케 이름 → 파싱된 스킬 효과 수. 이름이 없으면 미파싱이다(엔진 `timeline._check_names`와 같은 기준)
+ * 런타임 계약(세 함수)에는 넣지 않았다 — 데스크톱 앱은 아직 티어를 계산하지 않는다.
+ */
+export function loadEngineData(engineDir = DEFAULT_ENGINE_DIR) {
+  const files = {};
+  const read = (rel) => {
+    const doc = JSON.parse(fs.readFileSync(path.join(engineDir, rel), 'utf8'));
+    files[rel] = createHash('sha256').update(canonicalJson(doc), 'utf8').digest('hex');
+    return doc;
+  };
+  read(ENGINE_DATA_FILES.nikkes);
+  const parsed = read(ENGINE_DATA_FILES.skills);
+  const skills = Object.fromEntries(Object.entries(parsed).map(([name, effects]) => [name, Array.isArray(effects) ? effects.length : 0]));
+  return { files, skills };
 }
 
 /**
