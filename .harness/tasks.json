@@ -1618,7 +1618,7 @@
       "protected": [],
       "status": "pending",
       "attempts": 0,
-      "agent_errors": 0
+      "agent_errors": 2
     },
     {
       "id": "P-028",

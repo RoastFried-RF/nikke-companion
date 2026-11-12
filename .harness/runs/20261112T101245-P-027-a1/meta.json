@@ -1,0 +1,23 @@
+{
+  "task": "P-027",
+  "attempt": 1,
+  "resumed": false,
+  "run": ".harness/runs/20261112T101245-P-027-a1",
+  "agent": {
+    "ok": false,
+    "error": "에이전트 종료 코드 1 — You're out of usage credits. Switch to another model, or manage usage credits at https://claude.ai/settings/usage?from=cc_cli_limit_message, to continue.",
+    "effort": "high",
+    "exit_code": 1,
+    "signal": null,
+    "duration_ms": 4154,
+    "result": {
+      "is_error": true,
+      "error": "You're out of usage credits. Switch to another model, or manage usage credits at https://claude.ai/settings/usage?from=cc_cli_limit_message, to continue.",
+      "num_turns": 1,
+      "total_cost_usd": 0,
+      "models": [],
+      "session_id": "52cdcf6a-1101-412a-84cb-cfc560652ebd"
+    }
+  },
+  "outcome": "agent_error"
+}
