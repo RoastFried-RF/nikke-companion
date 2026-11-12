@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::mem::size_of;
+use std::sync::Once;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -40,6 +41,7 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC;
 use windows::Win32::Graphics::Dxgi::IDXGIDevice;
 use windows::Win32::Graphics::Gdi::{ClientToScreen, MonitorFromWindow, MONITOR_DEFAULTTONEAREST};
+use windows::Win32::System::Com::CoIncrementMTAUsage;
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
@@ -366,6 +368,23 @@ fn create_d3d_device(
     }
 }
 
+/// 이 프로세스가 끝날 때까지 COM(MTA)을 살려 둔다. 첫 WinRT 호출보다 먼저 한 번 부른다.
+///
+/// `windows` 크레이트는 WinRT 활성화 팩터리(`GraphicsCaptureSession::IsSupported` 등)를 프로세스 전역에 캐시한다.
+/// 첫 캡처를 한 스레드가 COM을 쥔 유일한 스레드였다면(창을 가진 스레드는 Windows가 COM을 대신 초기화해 둔다),
+/// 그 스레드가 끝날 때 COM이 내려가면서 캡처 DLL이 언로드되고 캐시된 팩터리가 죽은 주소를 가리킨다 —
+/// 다른 스레드의 다음 캡처가 그 주소를 불러 프로세스가 죽는다(STATUS_ACCESS_VIOLATION).
+/// 실제 게임 테스트(`tests/live_game.rs`: 가리개 창을 띄운 테스트 다음의 캡처)에서 드러났다.
+/// MTA 사용 횟수를 하나 올려 두면 COM이 프로세스 수명 동안 내려가지 않는다. 일부러 되돌리지 않는다.
+fn keep_winrt_loaded() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        // 실패해도 캡처는 시도한다(이 경우 위 문제가 남을 뿐이다).
+        // 쿠키는 CoDecrementMTAUsage에 넘길 때만 쓴다 — 넘기지 않으므로 버린다.
+        let _ = unsafe { CoIncrementMTAUsage() };
+    });
+}
+
 /// Windows.Graphics.Capture로 창을 찍고 클라이언트 영역만 잘라 낸다.
 ///
 /// 합성기(DWM)가 그 창의 화면을 텍스처로 넘겨준다 — 다른 창에 가려져 있어도 게임 화면이 찍힌다.
@@ -375,6 +394,7 @@ fn capture_wgc(
     window: &GameWindowInfo,
     expected: (u32, u32),
 ) -> Result<Frame, GameError> {
+    keep_winrt_loaded();
     if !GraphicsCaptureSession::IsSupported().unwrap_or(false) {
         return Err(GameError::CaptureFailed {
             method: CaptureMethod::Wgc,

@@ -1,0 +1,117 @@
+{
+  "started_at": "2026-11-12T02:21:07.608Z",
+  "model": "claude-fable-5-2",
+  "agent_command": "claude -p --model claude-fable-5-2 --effort {effort} --permission-mode acceptEdits --allowedTools Bash(node *) Bash(npm *) Bash(python *) Bash(git status*) Bash(git diff*) Bash(git log*) Bash(rustc *) Bash(npx *) Bash(cargo *) --output-format json",
+  "limits": {
+    "max_iterations": 2,
+    "max_minutes": 240
+  },
+  "head_at_start": "a43ccba0bbafed07d4147797989d9653f171caea",
+  "git_status_at_start": [
+    "M .gitignore",
+    " M .harness/runs/log.jsonl",
+    " M .harness/tasks.json",
+    " M src/cli.mjs",
+    " M src/core/compare.mjs",
+    " M src/core/growth.mjs",
+    " M src/core/render.mjs",
+    " M src/core/runtime.mjs",
+    " M src/runtime/node.mjs",
+    " M tests/unit/core-runtime.test.mjs",
+    "?? .harness/runs/20261111T221122-P-012-a1/",
+    "?? src/core/cache.mjs",
+    "?? tests/unit/cache.test.mjs"
+  ],
+  "iterations": [
+    {
+      "task": "P-012",
+      "attempt": 1,
+      "resumed": true,
+      "run": ".harness/runs/20261112T022107-P-012-a1-resume",
+      "agent": {
+        "ok": true,
+        "effort": "high",
+        "exit_code": 0,
+        "signal": null,
+        "duration_ms": 625668,
+        "result": {
+          "is_error": false,
+          "error": null,
+          "num_turns": 83,
+          "total_cost_usd": 6.336247,
+          "models": [
+            "claude-fable-5-2"
+          ],
+          "session_id": "28614311-d857-40b5-91c0-c113a6af4068"
+        }
+      },
+      "verify": {
+        "passed": true,
+        "reason": null,
+        "tree": "b8104404ee2ed2160b9ec5c613d55d1c72ae6dd3"
+      },
+      "commit": "e34913cc8fcc30972b5406e9012a1944ab3ae36b",
+      "outcome": "verified"
+    },
+    {
+      "task": "P-013",
+      "attempt": 1,
+      "resumed": false,
+      "run": ".harness/runs/20261112T023226-P-013-a1",
+      "agent": {
+        "ok": true,
+        "effort": "high",
+        "exit_code": 0,
+        "signal": null,
+        "duration_ms": 1354160,
+        "result": {
+          "is_error": false,
+          "error": null,
+          "num_turns": 154,
+          "total_cost_usd": 12.7911544,
+          "models": [
+            "claude-fable-5-2"
+          ],
+          "session_id": "a039ac2b-0765-4a53-ad1b-b6c66d1a826c"
+        }
+      },
+      "verify": {
+        "passed": true,
+        "reason": null,
+        "tree": "30c22d810c00c10af73eb99a5773e3fccf13128a"
+      },
+      "commit": "2efbfa234235ec09656a7cf8aba6d95831a5c25e",
+      "outcome": "verified"
+    }
+  ],
+  "stop_reason": "한도 도달: 반복 2회",
+  "finished_at": "2026-11-12T02:55:56.762Z",
+  "head_at_end": "2efbfa234235ec09656a7cf8aba6d95831a5c25e",
+  "tasks": {
+    "done": [
+      "H-001",
+      "P-001",
+      "P-002",
+      "P-003",
+      "P-004",
+      "H-002",
+      "P-005",
+      "P-006",
+      "P-007",
+      "P-008",
+      "P-009",
+      "P-010",
+      "P-012",
+      "P-013"
+    ],
+    "blocked": [
+      "P-011"
+    ],
+    "pending": [
+      "P-014",
+      "P-015",
+      "P-016",
+      "P-017"
+    ]
+  }
+}
