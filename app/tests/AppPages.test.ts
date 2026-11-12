@@ -226,7 +226,10 @@ describe('요격전 화면', () => {
 
   it('다시 계산은 단추 하나와 정밀도 셋(빠르게·보통·꼼꼼히 — 대략 걸리는 시간이 보인다)이고, 파일 경로를 넣는 칸이 없다', async () => {
     const w = await withResult();
-    expect(w.find('[data-testid="page-intercept"] input').exists()).toBe(false);
+    // P-029: 요격전 화면에 기록을 적는 칸(대미지·날짜·달성 단계)이 생겼다 — 그 밖의 입력 칸(경로 등)은 여전히 없다.
+    const inputs = w.findAll('[data-testid="page-intercept"] input').filter((i) => i.element.closest('[data-testid="record-form"]') === null);
+    expect(inputs).toHaveLength(0);
+    expect(w.findAll('[data-testid="record-form"] input').map((i) => i.attributes('data-testid'))).toEqual(['record-damage', 'record-date', 'record-stage']);
     expect(w.findAll('[data-testid="page-intercept"] [data-testid^="run-"]')).toHaveLength(1);
     expect(at(w, 'run-intercept').text()).toBe('다시 계산');
     const choices = w.findAll('[data-testid^="precision-"]');

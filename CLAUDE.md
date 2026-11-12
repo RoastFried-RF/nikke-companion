@@ -66,7 +66,7 @@ npm --prefix app run fixture                              # 컴포넌트 테스�
 **창이 둘이다**(P-027 — `app/README.md` §창 둘 — 데스크톱 앱과 오버레이): **데스크톱 앱 창**(`app` — 테두리가 있는 보통 창, 1100×720,
 `app/src/App.vue`)이 전부 한다 — 왼쪽 메뉴의 홈 · 요격전 · 내 니케 · 편성 도구 · 티어 · 설정(계정 연결 · 오버레이 · 계산 도구 ·
 고급). **오버레이 창**(`main` — 게임 위의 작은 위젯, `app/src/Overlay.vue`)은 마지막 요격전 추천만 보여 준다. 권한도 창마다 따로다
-(`src-tauri/capabilities/app.json` 명령 42개 / `overlay.json` 명령 15개 — 결과·상태 읽기와 자기 창의 조작). 앱을 실행하면 앱 창이 뜨고 오버레이는
+(`src-tauri/capabilities/app.json` 명령 44개 / `overlay.json` 명령 15개 — 결과·상태 읽기와 자기 창의 조작). 앱을 실행하면 앱 창이 뜨고 오버레이는
 설정대로 뜬다(앱과 함께 — 기본 · 게임을 찾았을 때 · 직접). **앱 창을 닫으면 앱이 끝난다**(오버레이 창은 닫히지 않고 숨는다. 끝내기
 명령은 없다 — 오버레이 위젯의 `×`는 숨기기다).
 화면은 파일 경로를 묻지 않는다: 계정은 기본 계정(이름 — 경로가 아니다), 보스 값은 내장한 `data/intercept/anomaly.json`.
@@ -75,6 +75,19 @@ npm --prefix app run fixture                              # 컴포넌트 테스�
 (Rust `src-tauri/src/shared_state.rs`, 화면 `app/src/lib/shared.ts` — 앱 창이 저장하면 `shared-state` 이벤트로 오버레이가 다시 읽는다).
 화면의 글에는 개발 용어(파일·JSON·시뮬·예산·경로)를 쓰지 않고(고급 제외), 숨기면 안 되는 표시(추정·미확인 값·미지원 효과·
 검증용 데이터·임시 규칙)는 접힌 구획 밖의 배지로 둔다 — `app/tests/Wording.test.ts`가 본다.
+
+**요격전 계획**(P-029 — `app/README.md` §요격전 계획, 형식·규칙은 `docs/data-model.md` §요격전 계획): 계정의 니케별 장비 4부위와
+보스의 보상 부위를 이어 「오늘 돌 보스」를 한 문장으로 말하고(내 니케 > 장비 · 요격전 계획, 홈의 「오늘의 요격전」 카드), 손으로 적은
+요격전 기록을 추정 총딜과 견준다(요격전 화면의 「내 기록」 — 기록이 있으면 배지가 「추정 · 기록과 ○○% 차이」). 규칙은 순수 모듈
+`src/core/plan.mjs`, 화면은 `app/src/lib/plan.ts`·`app/src/views/PlanBoard.vue`·`RecordPanel.vue`·`TodayCard.vue`. 기록·즐겨찾기는
+계정 폴더의 `<계정>.plan.json`(gitignore — Rust `shared_state.rs`의 `load_plan`·`save_plan`, 앱 창만 부른다). **계정에 없는 것은
+지어내지 않는다**(장비를 적지 않은 니케는 「기록 없음」, 보상 확률·획득 수는 모른다고 적는다), **추정치를 기록에 맞춰 고치지 않는다**.
+시험 계정은 `data/samples/account.large.sample.json`에 지어낸 장비 `data/samples/gear.large.sample.json`을 얹은 것이다.
+
+```bash
+node --test tests/unit/plan.test.mjs                      # 순수 함수: 장비 상태 분류·주력 선정·보스 추천과 동률·기록 비교·커버리지 기준
+npm --prefix app test -- InterceptPlan                    # 화면(가짜 backend): 장비 칸·추천 문장·기록 입력과 복원·배지 변화·홈 카드
+```
 
 **오버레이는 작은 위젯이다**(P-028 — `app/README.md` §오버레이 위젯): 모양 셋 — 접힘(알약: 보스 얼굴·이름·총딜) · 한 줄 카드(기본:
 + 「약점 ○○」·작은 초상화 다섯) · 펼침(+ 한 줄 요약·2·3위·자리 순서). 누르거나 `Alt+Shift+M`으로 오가고, **창은 위젯만큼만 크다**

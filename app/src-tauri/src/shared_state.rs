@@ -101,6 +101,8 @@ pub enum SharedError {
     MissingField { field: &'static str },
     Write { what: &'static str, detail: String },
     UnknownLaunch { found: String },
+    /// 요격전 계획(기록·즐겨찾기) 문서의 모양이 다르다.
+    PlanInvalid { reason: String },
 }
 
 impl fmt::Display for SharedError {
@@ -129,6 +131,10 @@ impl fmt::Display for SharedError {
             ),
             Self::Write { what, detail } => write!(f, "{what}을(를) 저장하지 못했다 ({detail})"),
             Self::UnknownLaunch { found } => write!(f, "모르는 오버레이 설정이다: {found}"),
+            Self::PlanInvalid { reason } => write!(
+                f,
+                "요격전 기록이 아니다({reason}). 앞서 저장한 기록은 그대로 둔다"
+            ),
         }
     }
 }
@@ -432,6 +438,74 @@ pub fn load_intercept(dir: &Path) -> Result<Option<Value>, SharedError> {
     Ok(Some(doc))
 }
 
+// ── 요격전 계획(P-029): 계정마다 손으로 적은 요격전 기록과 즐겨찾기 ─────────────────────────────
+
+/// 요격전 계획 문서의 종류와 판(`src/core/plan.mjs`의 PLAN_KIND·PLAN_SCHEMA_VERSION과 같아야 한다).
+pub const PLAN_KIND: &str = "intercept_plan";
+pub const PLAN_SCHEMA_VERSION: u64 = 1;
+/// 계획 파일 이름의 꼬리: `<계정 이름>.plan.json`. 이름에 점이 더 있어 계정 목록에 들지 않는다.
+pub const PLAN_SUFFIX: &str = ".plan.json";
+/// 받아 주는 기록·즐겨찾기의 수(화면의 계산 코드는 기록을 500건까지만 남긴다 — 그보다 넉넉히).
+pub const PLAN_MAX_ITEMS: usize = 2000;
+
+fn plan_file(name: &str) -> String {
+    format!("{name}{PLAN_SUFFIX}")
+}
+
+/// 이름을 주지 않으면 지금 쓰는 계정이다. 그 계정이 계정 폴더에 있어야 한다(없는 계정의 기록을 만들지 않는다).
+fn plan_account(dir: &Path, name: Option<&str>) -> Result<String, SharedError> {
+    let name = match name.map(str::trim).filter(|n| !n.is_empty()) {
+        Some(name) => checked_name(name)?,
+        None => snapshot(dir).default_account.ok_or(SharedError::NoAccount)?,
+    };
+    // 계정 파일을 읽지는 않는다 — 계정 목록에 그 이름이 있는지만 본다.
+    if !list_accounts(dir).iter().any(|a| a.name == name) {
+        return Err(SharedError::AccountMissing { name });
+    }
+    Ok(name)
+}
+
+/// 요격전 계획 문서의 모양을 확인한다(종류·판·목록 둘). 기록 하나하나의 값은 화면의 계산 코드(`src/core/plan.mjs`)가 본다.
+pub fn check_plan(doc: &Value) -> Result<(), SharedError> {
+    let wrong = |reason: &str| SharedError::PlanInvalid {
+        reason: reason.to_string(),
+    };
+    let obj = doc.as_object().ok_or_else(|| wrong("객체가 아니다"))?;
+    if obj.get("kind").and_then(Value::as_str) != Some(PLAN_KIND) {
+        return Err(wrong("종류가 다르다"));
+    }
+    if obj.get("schema_version").and_then(Value::as_u64) != Some(PLAN_SCHEMA_VERSION) {
+        return Err(wrong("판이 다르다"));
+    }
+    for field in ["favorites", "records"] {
+        match obj.get(field).and_then(Value::as_array) {
+            Some(list) if list.len() <= PLAN_MAX_ITEMS => {}
+            Some(_) => return Err(wrong("항목이 너무 많다")),
+            None => return Err(wrong("목록 칸이 없다")),
+        }
+    }
+    Ok(())
+}
+
+/// 그 계정의 요격전 계획(기록·즐겨찾기). 아직 없으면 `None`. 읽을 수 없으면 한국어로 알린다(파일은 건드리지 않는다).
+pub fn load_plan(dir: &Path, name: Option<&str>) -> Result<Option<Value>, SharedError> {
+    let name = plan_account(dir, name)?;
+    let path = dir.join(plan_file(&name));
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let doc = read_json(&path, "요격전 기록")?;
+    check_plan(&doc)?;
+    Ok(Some(doc))
+}
+
+/// 그 계정의 요격전 계획을 저장한다. 모양이 맞지 않으면 쓰지 않는다 — 앞서 저장한 것이 그대로 남는다.
+pub fn save_plan(dir: &Path, name: Option<&str>, plan: &Value) -> Result<(), SharedError> {
+    check_plan(plan)?;
+    let name = plan_account(dir, name)?;
+    write_json(dir, &plan_file(&name), plan, "요격전 기록")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -687,6 +761,78 @@ mod tests {
         for other in [OverlayLaunch::WithApp, OverlayLaunch::Manual] {
             assert!(!other.reveals_on_game(false, true, false));
         }
+    }
+
+    fn plan(marker: &str) -> Value {
+        json!({
+            "schema_version": 1,
+            "kind": "intercept_plan",
+            "favorites": [marker],
+            "records": [{ "id": "r1", "boss_id": "kraken", "damage": 1000, "mode": "mock", "date": "2026-11-12" }],
+        })
+    }
+
+    #[test]
+    fn the_plan_is_kept_per_account_and_survives_a_restart() {
+        let dir = TempDir::new();
+        // 계정이 없으면 기록도 없다(없는 계정의 기록을 만들지 않는다).
+        assert_eq!(load_plan(&dir.0, None).unwrap_err(), SharedError::NoAccount);
+        assert_eq!(save_plan(&dir.0, None, &plan("x")).unwrap_err(), SharedError::NoAccount);
+        dir.account("me");
+        assert_eq!(load_plan(&dir.0, None).unwrap(), None);
+        save_plan(&dir.0, None, &plan("크라운")).unwrap();
+        assert_eq!(load_plan(&dir.0, None).unwrap(), Some(plan("크라운")));
+        assert!(dir.0.join("me.plan.json").is_file());
+        assert!(!dir.0.join("me.plan.json.tmp").exists());
+
+        // 계정마다 따로다. 기록 파일은 계정 목록에 들지 않는다.
+        dir.account("sub");
+        save_plan(&dir.0, Some("sub"), &plan("헬름")).unwrap();
+        assert_eq!(load_plan(&dir.0, Some("me")).unwrap().unwrap()["favorites"][0], "크라운");
+        assert_eq!(load_plan(&dir.0, Some(" sub ")).unwrap().unwrap()["favorites"][0], "헬름");
+        let names: Vec<String> = list_accounts(&dir.0).into_iter().map(|a| a.name).collect();
+        assert_eq!(names, ["me", "sub"]);
+    }
+
+    #[test]
+    fn a_plan_of_another_shape_is_refused_and_the_previous_one_stays() {
+        let dir = TempDir::new();
+        dir.account("me");
+        save_plan(&dir.0, Some("me"), &plan("앞의 것")).unwrap();
+
+        let mut other_kind = plan("x");
+        other_kind["kind"] = json!("intercept_report");
+        let mut newer = plan("x");
+        newer["schema_version"] = json!(2);
+        let mut no_records = plan("x");
+        no_records.as_object_mut().unwrap().remove("records");
+        let mut huge = plan("x");
+        huge["records"] = Value::Array(vec![json!({}); PLAN_MAX_ITEMS + 1]);
+        for doc in [other_kind, newer, no_records, huge, json!([1])] {
+            let err = save_plan(&dir.0, Some("me"), &doc).unwrap_err();
+            assert!(matches!(err, SharedError::PlanInvalid { .. }), "{err:?}");
+            assert!(has_korean(&err.to_string()));
+            assert!(err.to_string().contains("그대로 둔다"));
+            assert_eq!(load_plan(&dir.0, Some("me")).unwrap().unwrap()["favorites"][0], "앞의 것");
+        }
+
+        // 이름은 경로가 아니다. 없는 계정에는 쓰지 않는다.
+        for bad in ["../me", "..\\me", "me.plan", "C:\\x", "a/b"] {
+            let err = save_plan(&dir.0, Some(bad), &plan("x")).unwrap_err();
+            assert!(matches!(err, SharedError::NameInvalid { .. }), "{bad}: {err:?}");
+            assert!(matches!(load_plan(&dir.0, Some(bad)).unwrap_err(), SharedError::NameInvalid { .. }), "{bad}");
+        }
+        assert_eq!(
+            save_plan(&dir.0, Some("nobody"), &plan("x")).unwrap_err(),
+            SharedError::AccountMissing { name: "nobody".into() }
+        );
+        assert!(!dir.0.join("nobody.plan.json").exists());
+
+        // 깨진 파일은 한국어로 알리고 지우지 않는다.
+        fs::write(dir.0.join("me.plan.json"), "{ 깨진").unwrap();
+        let err = load_plan(&dir.0, Some("me")).unwrap_err();
+        assert!(has_korean(&err.to_string()));
+        assert!(dir.0.join("me.plan.json").is_file());
     }
 
     #[test]

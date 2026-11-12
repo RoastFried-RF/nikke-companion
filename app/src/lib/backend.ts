@@ -29,6 +29,7 @@ import type {
   OverlayPrefs,
   OverlayShape,
   OverlaySnapshot,
+  PlanDoc,
   SavedAccount,
   ScreenRecognition,
   ScreenTrackStatus,
@@ -374,6 +375,20 @@ export function announceActivity(activity: ComputeActivity): Promise<ComputeActi
 /** 앱 창이 마지막으로 알린 계산 진행. */
 export function computeActivity(): Promise<ComputeActivity> {
   return invoke<ComputeActivity>('compute_activity');
+}
+
+// ── 요격전 계획(P-029) ────────────────────────────────────────────────────────
+// 손으로 적은 요격전 기록과 즐겨찾기는 Rust가 계정 폴더에 계정마다 둔다(src-tauri/src/shared_state.rs).
+// 화면이 넘기는 계정 이름은 경로가 아니다. 데스크톱 앱 창만 부른다(오버레이 창에는 권한이 없다).
+
+/** 그 계정의 요격전 계획(기록·즐겨찾기). 이름을 주지 않으면 지금 쓰는 계정이다. 아직 없으면 null. */
+export function loadPlan(name: string | null = null): Promise<unknown | null> {
+  return invoke<unknown | null>('load_plan', { name });
+}
+
+/** 그 계정의 요격전 계획을 저장한다. 종류·판·모양이 맞지 않으면 거부되고 앞서 저장한 것은 그대로다. */
+export function savePlan(name: string | null, plan: PlanDoc): Promise<void> {
+  return invoke<void>('save_plan', { name, plan });
 }
 
 /** 위젯 상태가 바뀔 때마다 불린다(단축키·자동 표시·설정 변경). 돌려받은 함수로 구독을 끊는다. */

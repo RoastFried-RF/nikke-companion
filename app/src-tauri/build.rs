@@ -51,6 +51,8 @@ fn main() {
             "reset_overlay_position",
             "announce_activity",
             "compute_activity",
+            "load_plan",
+            "save_plan",
         ]),
     );
     tauri_build::try_build(attributes).expect("tauri-build 실패");

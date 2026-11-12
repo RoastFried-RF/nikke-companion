@@ -9,6 +9,7 @@ import { setFollowGame, startupReportPath } from './lib/backend';
 import { provideEngineOwner } from './lib/engineRun';
 import { provideExtensionLink } from './lib/extensionLink';
 import { pageOfRun, PAGES, provideNav } from './lib/nav';
+import { providePlan } from './lib/plan';
 import { provideScreenTrack } from './lib/screenTrack';
 import { provideShared } from './lib/shared';
 import { provideToolResults } from './lib/toolResults';
@@ -36,7 +37,9 @@ const computingRun = provideEngineOwner();
 const computingPage = computed(() => pageOfRun(computingRun.value));
 
 // 두 창이 함께 보는 것(기본 계정·마지막 요격전 결과): 디스크에서 읽고, 계산이 끝나면 저장해 오버레이 창에 알린다.
-provideShared();
+const shared = provideShared();
+// 요격전 계획(P-029): 계정마다 손으로 적어 두는 요격전 기록과 즐겨찾기. 기본 계정이 바뀌면 그 계정의 것을 읽는다.
+providePlan(shared);
 // 고급에서 낸 비교·성장·티어 결과를 편성 도구·티어 화면에 올리는 자리.
 provideToolResults();
 // 계정 화면이 저장한 계정 파일의 경로를 고급의 계정 칸에 넣는 통로(lib/accountLink.ts).

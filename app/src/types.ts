@@ -761,3 +761,105 @@ export interface NikkeInfo {
   /** 등급(SSR·SR·R). */
   rarity: string | null;
 }
+
+// ── 요격전 계획(P-029 — 루트 src/core/plan.mjs, docs/data-model.md §요격전 계획) ─────────────
+
+/** 손으로 적은 요격전 기록 하나. */
+export interface PlanRecord {
+  id: string;
+  boss_id: string;
+  boss_name: string;
+  /** 실제 대미지(정수). */
+  damage: number;
+  /** 모의전(`mock`) 또는 실전(`real`). */
+  mode: 'mock' | 'real';
+  /** 날짜(`YYYY-MM-DD`). */
+  date: string;
+  /** 달성 단계. 적지 않았으면 null. */
+  stage: number | null;
+  note: string | null;
+  created_at: string | null;
+}
+
+/** 계정마다 두는 요격전 계획: 즐겨찾기로 고른 니케와 요격전 기록(계정 폴더의 `<계정>.plan.json`). */
+export interface PlanDoc {
+  schema_version: number;
+  kind: string;
+  favorites: string[];
+  records: PlanRecord[];
+}
+
+/** 장비 한 칸의 상태. */
+export type GearState = 'empty' | 'normal' | 'corp' | 'overload' | 'unrecorded' | 'unknown';
+
+export interface GearSlot {
+  part: string;
+  state: GearState;
+  label: string;
+  tier: string | null;
+  level: number | null;
+  corp: string | null;
+}
+
+export interface GearRow {
+  name: string;
+  recorded: boolean;
+  slots: GearSlot[];
+  open: number;
+}
+
+export interface GearSummary {
+  nikkes: number;
+  recorded: number;
+  unrecorded: number;
+  open: number;
+  by_part: Array<{ part: string; open: number; empty: number; normal: number; corp: number; overload: number }>;
+  by_corp: Array<{ corp: string; open: number; nikkes: number }>;
+  unknowns: string[];
+}
+
+export interface CorePick {
+  basis: 'intercept' | 'favorites' | 'score' | 'none';
+  names: string[];
+  text: string;
+}
+
+export interface BossNeed {
+  id: string;
+  name: string;
+  reward: string | null;
+  part: string | null;
+  /** 필요 칸 수. 보상이 장비 부위가 아니면 null. */
+  need: number | null;
+  reasons: Array<{ nikke: string; part: string; state: GearState; label: string; tier: string | null; level: number | null }>;
+  note: string | null;
+}
+
+export interface BossPick {
+  status: 'pick' | 'tie' | 'done' | 'no_data' | 'no_core';
+  text: string;
+  top: string[];
+  max_need: number;
+  bosses: BossNeed[];
+  core: number;
+  unrecorded: string[];
+  unknowns: string[];
+}
+
+export interface RecordCheck {
+  estimate: number;
+  actual: number;
+  ratio: number;
+  diff_pct: number;
+  direction: 'over' | 'under' | 'same';
+  text: string;
+  detail: string;
+}
+
+export interface Coverage {
+  rule_text: string;
+  elements: Array<{ element: string; count: number; names: string[]; bosses: Array<{ id: string; name: string }> }>;
+  max: number;
+  weakest: string[];
+  unsure: string[];
+}

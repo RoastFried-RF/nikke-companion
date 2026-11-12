@@ -8,6 +8,7 @@
 import { summarizeInterceptBoss } from '@core/summary.mjs';
 import { computed, onActivated, ref, watch } from 'vue';
 import { engineLabel, localTime } from '../lib/format';
+import { recordCheck, usePlan } from '../lib/plan';
 import { recall, remember } from '../lib/remember';
 import { findBoss, LAST_BOSS, useScreenTrack } from '../lib/screenTrack';
 import { useNikkeCatalog } from '../lib/useNikkeCatalog';
@@ -16,6 +17,7 @@ import BossCard from '../ui/BossCard.vue';
 import DetailsFold from '../ui/DetailsFold.vue';
 import ElementChip from '../ui/ElementChip.vue';
 import StatusPill from '../ui/StatusPill.vue';
+import RecordPanel from './RecordPanel.vue';
 import SquadPanel from './SquadPanel.vue';
 
 const props = withDefaults(
@@ -38,6 +40,10 @@ function pick(id: string): void {
   picked.value = id;
   remember(LAST_BOSS, id);
 }
+
+// 요격전 기록(P-029): 고른 보스의 가장 최근 기록과 추정 총딜의 차이. 기록이 없으면(또는 이 창에 기록이 없으면) null.
+const planStore = usePlan();
+const check = computed(() => recordCheck(boss.value, planStore?.plan.value));
 
 // 다른 화면(홈의 보스 카드)에서 보스를 고르고 돌아왔으면 그 보스를 보인다.
 onActivated(() => {
@@ -140,7 +146,14 @@ const conditionCount = computed(() => {
   <div class="result" :class="{ 'result--compact': compact }" data-testid="intercept-result">
     <div class="result__meta">
       <!-- 「추정 · 실전 미대조」는 언제나 보인다(접지 않는다). -->
-      <StatusPill label="추정 · 실전 미대조" tone="estimate" detail="수치는 계산으로 어림한 값이다. 실제 전투 기록과 맞춰 본 적이 없다." data-testid="estimate-pill" />
+      <!-- 고른 보스에 손으로 적은 기록이 있으면 「기록과 ○○% 차이」로 바뀐다(추정이라는 사실은 그대로 적는다 — 추정치를 고치지 않는다). -->
+      <StatusPill
+        :label="check ? `추정 · ${check.text}` : '추정 · 실전 미대조'"
+        tone="estimate"
+        :detail="check ? check.detail : '수치는 계산으로 어림한 값이다. 실제 전투 기록과 맞춰 본 적이 없다.'"
+        :data-checked="check ? 'yes' : 'no'"
+        data-testid="estimate-pill"
+      />
       <StatusPill v-if="dataKind" :label="dataKind.label" :tone="dataKind.tone" solid data-testid="data-kind" />
       <StatusPill v-if="report.bundle?.is_test_data" label="검증용 보스 정보" tone="test" solid data-testid="bundle-kind" />
       <span class="result__account" data-testid="account-name">{{ report.account?.name ?? '(이름 없음)' }}</span>
@@ -191,6 +204,9 @@ const conditionCount = computed(() => {
           </span>
         </template>
       </p>
+
+      <!-- 손으로 적는 기록(데스크톱 앱 창에서만 — 오버레이에는 없다). -->
+      <RecordPanel :boss="boss" :estimate="bestTotal(boss)" />
 
       <DetailsFold summary="계산 조건" :count="conditionCount" :tone="unconfirmedOf(boss).length || (boss.flags ?? []).length ? 'unknown' : 'neutral'" data-testid="calc-conditions">
         <p class="nk-list__head">보스</p>

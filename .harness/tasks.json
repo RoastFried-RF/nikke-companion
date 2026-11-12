@@ -1751,9 +1751,19 @@
         "모의전 대미지를 기록하고 추정치와의 차이를 본다 — 차이가 크면 보스 값 보정 작업의 근거가 된다"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261112T121310-P-029-a1",
+        "verified_tree": "7207ffec9caf6ce4625c24a29af6282cf4218d05",
+        "verified_at": "2026-11-12T12:34:42.519Z",
+        "commit": null
+      }
     },
     {
       "id": "P-030",

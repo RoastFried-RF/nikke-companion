@@ -2,17 +2,20 @@
 // 홈(데스크톱 앱): 지금 상태를 한눈에 — 계정 연결·게임 창·오버레이·자동 추적의 체크리스트와 다음에 할 일 단추 하나.
 // 처음 쓰는 사람에게는 세 단계 안내(계정 연결 → 게임 켜기 → 요격전 화면 열기)가 보인다.
 // 추천이 있으면 보스 5종의 1위 요약을 보인다(누르면 요격전 화면으로 간다).
+// 계정이 있으면 「오늘의 요격전」 카드(P-029 — views/TodayCard.vue)가 보인다: 오늘 돌 보스 한 줄·그 보스의 1위 편성·지난 기록.
 // 여기서는 아무것도 계산하지 않는다 — 다른 곳이 알려 준 상태를 보여 주고 그 화면으로 보낼 뿐이다.
-import { computed } from 'vue';
+import { computed, onActivated, ref, watch } from 'vue';
 import { localTime } from '../lib/format';
 import { useNav } from '../lib/nav';
+import { usePlan } from '../lib/plan';
 import { remember } from '../lib/remember';
 import { LAST_BOSS, useScreenTrack } from '../lib/screenTrack';
 import { useShared } from '../lib/shared';
 import { useGameState, useOverlayState } from '../lib/status';
-import type { InterceptBoss } from '../types';
+import type { AccountDoc, InterceptBoss } from '../types';
 import BossCard from '../ui/BossCard.vue';
 import StatusPill from '../ui/StatusPill.vue';
+import TodayCard from '../views/TodayCard.vue';
 
 const shared = useShared();
 const nav = useNav();
@@ -99,6 +102,36 @@ function openBoss(id: string): void {
   remember(LAST_BOSS, id);
   nav?.go('intercept');
 }
+
+// ── 오늘의 요격전(P-029): 주력 니케의 장비와 보스의 보상 부위를 이은 한 줄 + 그 보스의 1위 편성 + 지난 기록 ──
+const plan = usePlan();
+const account = ref<AccountDoc | null>(null);
+/** 늦게 끝난 읽기가 나중 읽기를 덮지 않게 한다. */
+let accountSeq = 0;
+async function loadAccount(): Promise<void> {
+  const mine = ++accountSeq;
+  if (!shared || !accountName.value) {
+    account.value = null;
+    return;
+  }
+  try {
+    const read = await shared.loadAccount();
+    if (mine === accountSeq) account.value = read.account;
+  } catch {
+    // 계정을 읽지 못하면 카드를 그리지 않는다(이유는 내 니케 화면이 알린다).
+    if (mine === accountSeq) account.value = null;
+  }
+}
+if (shared) watch([shared.accountName, shared.accountSavedAt], loadAccount, { immediate: true });
+onActivated(() => {
+  if (!account.value && accountName.value) void loadAccount();
+});
+
+/** 오늘의 요격전 카드를 누르면: 급한 보스가 있으면 그 보스를 고른 채, 없으면 그냥 요격전 화면을 연다. */
+function openToday(id: string | null): void {
+  if (id) remember(LAST_BOSS, id);
+  nav?.go('intercept');
+}
 </script>
 
 <template>
@@ -138,6 +171,8 @@ function openBoss(id: string): void {
         <span class="nk-muted" data-testid="next-why">{{ next.why }}</span>
       </div>
     </section>
+
+    <TodayCard v-if="account && plan" :account="account" :report="report" :plan="plan.plan.value" @open="openToday" />
 
     <section v-if="report" class="nk-card" aria-label="요격전 추천" data-testid="home-bosses">
       <div class="nk-row">

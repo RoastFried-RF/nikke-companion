@@ -1,15 +1,20 @@
 <script setup lang="ts">
 // 내 니케(데스크톱 앱): 기본 계정의 보유 니케를 초상화 격자로 — 이름·속성·버스트 단계와 육성 요약(돌파·스킬·오버로드 줄 수).
+// 구획이 둘이다(P-029): 「니케」(격자 — 별을 눌러 즐겨찾기) · 「장비 · 요격전 계획」(views/PlanBoard.vue — 오늘 돌 보스·장비 현황·속성 커버리지).
 // 속성·버스트 단계·「육성한 것만」으로 거르고 이름으로 찾는다. 계정을 고치지 않는다 — 계정에 적힌 값을 보여 줄 뿐이다.
 // 초상화는 한꺼번에 묻지 않는다: 처음에는 한 판만 그리고, 아래로 내리거나 「더 보기」를 누르면 다음 판을 그린다.
 import { computed, onActivated, ref, watch } from 'vue';
 import { errorMessage } from '../lib/backend';
 import { localTime } from '../lib/format';
 import { useNav } from '../lib/nav';
+import { usePlan } from '../lib/plan';
+import { recall, remember } from '../lib/remember';
 import { breakthroughLabel, filterRoster, overloadLabel, rosterRows, skillsLabel, type RosterFilter } from '../lib/roster';
+import { LAST_BOSS } from '../lib/screenTrack';
 import { useShared } from '../lib/shared';
 import { useNikkeCatalog } from '../lib/useNikkeCatalog';
-import type { AccountRead } from '../types';
+import type { AccountRead, PlanDoc } from '../types';
+import PlanBoard from '../views/PlanBoard.vue';
 import EmptyState from '../ui/EmptyState.vue';
 import NikkeTile from '../ui/NikkeTile.vue';
 import SkeletonBlock from '../ui/SkeletonBlock.vue';
@@ -22,7 +27,7 @@ const BURSTS = ['1', '2', '3'];
 
 const shared = useShared();
 const nav = useNav();
-const { catalog } = useNikkeCatalog();
+const { catalog, info } = useNikkeCatalog();
 
 const read = ref<AccountRead | null>(null);
 const loading = ref(false);
@@ -75,6 +80,29 @@ function more(): void {
 function onScroll(event: Event): void {
   const box = event.target as HTMLElement;
   if (rest.value > 0 && box.scrollTop + box.clientHeight >= box.scrollHeight - box.clientHeight / 2) more();
+}
+
+// ── 요격전 계획(P-029): 장비 현황 · 오늘 돌 보스 · 속성 커버리지, 그리고 즐겨찾기 ──────────────
+/** 고른 구획을 기억하는 이름. */
+const VIEW_KEY = 'roster.view';
+const plan = usePlan();
+const view = ref<'list' | 'plan'>(recall(VIEW_KEY) === 'plan' ? 'plan' : 'list');
+function show(next: 'list' | 'plan'): void {
+  view.value = next;
+  remember(VIEW_KEY, next);
+}
+const report = computed(() => shared?.intercept.value ?? null);
+const blankPlan: PlanDoc = { schema_version: 1, kind: 'intercept_plan', favorites: [], records: [] };
+const planDoc = computed(() => plan?.plan.value ?? blankPlan);
+const isFavorite = (name: string) => planDoc.value.favorites.includes(name);
+/** 즐겨찾기를 켜거나 끈다. 저장하지 못하면 계획 쪽에 이유가 남는다. */
+function toggleFavorite(name: string): void {
+  plan?.toggleFavorite(name).catch(() => {});
+}
+/** 계획판에서 보스를 누르면 그 보스를 고른 채 요격전 화면을 연다. */
+function openBoss(id: string): void {
+  remember(LAST_BOSS, id);
+  nav?.go('intercept');
 }
 
 const synchro = computed(() => read.value?.account?.account?.synchro_level ?? null);
@@ -133,6 +161,22 @@ function toggle(key: 'element' | 'burst', value: string): void {
         </div>
       </section>
 
+      <div class="nk-seg" role="tablist" aria-label="보기" data-testid="roster-views">
+        <button type="button" role="tab" class="nk-seg__item" :class="{ 'nk-seg__item--on': view === 'list' }" :aria-selected="view === 'list'" data-testid="roster-view-list" @click="show('list')">
+          니케
+        </button>
+        <button type="button" role="tab" class="nk-seg__item" :class="{ 'nk-seg__item--on': view === 'plan' }" :aria-selected="view === 'plan'" data-testid="roster-view-plan" @click="show('plan')">
+          장비 · 요격전 계획
+        </button>
+      </div>
+
+      <p v-if="plan?.problem.value" class="nk-note" role="status" data-testid="plan-problem">{{ plan.problem.value }}</p>
+
+      <div v-if="view === 'plan'" class="roster__scroll" data-testid="roster-plan">
+        <PlanBoard :account="read.account" :report="report" :plan="planDoc" :info="info" @open-boss="openBoss" />
+      </div>
+
+      <template v-else>
       <section class="nk-row" aria-label="거르기" data-testid="roster-filters">
         <input
           v-model="filter.query"
@@ -193,10 +237,23 @@ function toggle(key: 'element' | 'burst', value: string): void {
               <span title="오버로드 옵션 줄 수" data-testid="roster-overload">{{ overloadLabel(row) }}</span>
             </span>
             <StatusPill v-if="row.unknown.length" label="미확인" tone="unknown" :detail="`받아 오지 못한 칸: ${row.unknown.join(', ')}`" data-testid="roster-item-unknown" />
+            <!-- 즐겨찾기: 요격전 추천이 아직 없을 때 장비 현황이 이 니케들을 주력으로 본다. -->
+            <button
+              v-if="plan"
+              type="button"
+              class="roster__fav"
+              :aria-pressed="isFavorite(row.name)"
+              :title="isFavorite(row.name) ? `${row.name} — 즐겨찾기에서 빼기` : `${row.name} — 즐겨찾기에 넣기`"
+              data-testid="roster-fav"
+              @click="toggleFavorite(row.name)"
+            >
+              {{ isFavorite(row.name) ? '★' : '☆' }}
+            </button>
           </li>
         </ul>
         <button v-if="rest > 0" type="button" class="nk-btn" data-testid="roster-more" @click="more">더 보기 (남은 {{ rest }}명)</button>
       </div>
+      </template>
     </template>
   </div>
 </template>
@@ -245,6 +302,20 @@ function toggle(key: 'element' | 'burst', value: string): void {
 
 .roster__item[data-grown='no'] {
   opacity: 0.6;
+}
+
+.roster__fav {
+  padding: 0 var(--nk-space-2);
+  border: 0;
+  background: transparent;
+  color: var(--nk-text-faint);
+  font: inherit;
+  font-size: var(--nk-font-lg);
+  cursor: pointer;
+}
+
+.roster__fav[aria-pressed='true'] {
+  color: var(--nk-estimate);
 }
 
 .roster__growth {

@@ -43,6 +43,9 @@ export function shellMocks(): Record<string, ReturnType<typeof vi.fn>> {
     'announceActivity',
     'computeActivity',
     'onComputeActivity',
+    // 요격전 계획(P-029): 계정마다 두는 요격전 기록·즐겨찾기.
+    'loadPlan',
+    'savePlan',
   ];
   return Object.fromEntries(names.map((name) => [name, vi.fn()]));
 }
@@ -104,6 +107,8 @@ export class FakeDisk {
   intercept: unknown | null = null;
   interceptSavedAt: string | null = null;
   problems: string[] = [];
+  /** 계정마다 둔 요격전 계획(`<계정>.plan.json` — 기록·즐겨찾기). */
+  plans = new Map<string, unknown>();
   /** `shared-state` 이벤트를 듣는 창들. */
   listeners = new Set<(snapshot: SharedSnapshot) => void>();
   private clock = 0;
@@ -201,6 +206,24 @@ export function installShell(api: Api, disk: FakeDisk = new FakeDisk()): FakeDis
     return disk.emit();
   });
   api.loadInterceptResult.mockImplementation(async () => (disk.intercept === null ? null : structuredClone(disk.intercept)));
+  // 요격전 계획: Rust의 규칙(shared_state.rs의 load_plan·save_plan) — 계정이 있어야 하고, 종류·판·목록 둘을 확인한 뒤에만 쓴다.
+  const planAccount = (name: string | null): string => {
+    const target = name ?? disk.effective().name;
+    if (!target) throw '연결된 계정이 없다. 설정의 계정 연결에서 계정을 받아라';
+    if (!disk.accounts.has(target)) throw `'${target}' 계정을 찾을 수 없다. 설정의 계정 연결에서 계정을 새로 받아라`;
+    return target;
+  };
+  api.loadPlan.mockImplementation(async (name: string | null = null) => {
+    const found = disk.plans.get(planAccount(name));
+    return found === undefined ? null : structuredClone(found);
+  });
+  api.savePlan.mockImplementation(async (name: string | null, plan) => {
+    const doc = plan as unknown as { kind?: unknown; schema_version?: unknown; favorites?: unknown; records?: unknown };
+    if (doc.kind !== 'intercept_plan' || doc.schema_version !== 1 || !Array.isArray(doc.favorites) || !Array.isArray(doc.records)) {
+      throw '요격전 기록이 아니다(종류가 다르다). 앞서 저장한 기록은 그대로 둔다';
+    }
+    disk.plans.set(planAccount(name), structuredClone(plan));
+  });
 
   // 오버레이 위젯: Rust가 쥔 상태를 흉내 낸다. 창 크기 맞춤·끌기·숨기기는 불린 것만 적는다.
   const widget = new FakeWidget();

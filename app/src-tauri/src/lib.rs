@@ -1483,6 +1483,25 @@ async fn load_intercept_result() -> Result<Option<Value>, String> {
     blocking(|| shared_state::load_intercept(&shared_dir()?).map_err(|e| e.to_string())).await
 }
 
+/// 요격전 계획(P-029 — 손으로 적은 요격전 기록과 즐겨찾기)을 읽는다. 이름을 주지 않으면 지금 쓰는 계정이다. 없으면 null.
+/// 화면이 넘기는 이름은 경로가 아니다 — 계정 폴더의 `<이름>.plan.json`만 읽는다.
+#[tauri::command]
+async fn load_plan(name: Option<String>) -> Result<Option<Value>, String> {
+    blocking(move || {
+        shared_state::load_plan(&shared_dir()?, name.as_deref()).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// 요격전 계획을 계정 폴더에 저장한다. 종류·판·모양이 맞지 않으면 쓰지 않고 한국어로 거부한다 — 앞서 저장한 것은 그대로다.
+#[tauri::command]
+async fn save_plan(name: Option<String>, plan: Value) -> Result<(), String> {
+    blocking(move || {
+        shared_state::save_plan(&shared_dir()?, name.as_deref(), &plan).map_err(|e| e.to_string())
+    })
+    .await
+}
+
 /// 데스크톱 앱 창을 앞으로 가져온다(최소화돼 있으면 되돌린다). 오버레이의 「앱 열기」와 두 번째 실행이 부른다 —
 /// 둘 다 사용자가 방금 한 일이라 이 창이 활성화돼도 된다. 게임 창은 건드리지 않는다.
 fn focus_app_window(app: &AppHandle) -> Result<(), String> {
@@ -2027,7 +2046,9 @@ pub fn run() {
             set_overlay_prefs,
             reset_overlay_position,
             announce_activity,
-            compute_activity
+            compute_activity,
+            load_plan,
+            save_plan
         ])
         .setup(|app| {
             let window = app

@@ -15,6 +15,8 @@ import {
   captureGame,
   COMPUTE_ACTIVITY_EVENT,
   computeActivity,
+  loadPlan,
+  savePlan,
   ENGINE_PROGRESS_EVENT,
   engineCancel,
   engineCatalog,
@@ -160,6 +162,9 @@ const COMMANDS = [
   'reset_overlay_position',
   'announce_activity',
   'compute_activity',
+  // P-029: 요격전 계획(손으로 적은 요격전 기록·즐겨찾기)을 계정 폴더에 두고 읽는 명령 둘 — 데스크톱 앱 창의 것이다.
+  'load_plan',
+  'save_plan',
 ];
 
 /**
@@ -198,7 +203,9 @@ const IMAGE_COMMANDS = COMMANDS.slice(29, 32);
 /** 두 창이 함께 보는 것·창 열기와 보이기(P-027)에서 더한 명령 여덟 개. */
 const SHARED_COMMANDS = COMMANDS.slice(32, 40);
 /** 오버레이 위젯(P-028)에서 더한 명령 아홉 개. */
-const WIDGET_COMMANDS = [COMMANDS[3], ...COMMANDS.slice(40)];
+const WIDGET_COMMANDS = [COMMANDS[3], ...COMMANDS.slice(40, 48)];
+/** 요격전 계획(P-029)에서 더한 명령 두 개. */
+const PLAN_COMMANDS = COMMANDS.slice(48);
 /** 위젯 상태·계산 진행(지어낸 값). */
 const widgetSnapshot = {
   shape: 'card',
@@ -208,6 +215,13 @@ const widgetSnapshot = {
   problem: null,
 };
 const activity = { running: true, label: '크라켄 추천 편성을 찾는 중', done: 12, total: 60, elapsed_ms: 15000 };
+/** 요격전 계획(P-029) — 지어낸 기록 한 건. */
+const planDoc = {
+  schema_version: 1,
+  kind: 'intercept_plan',
+  favorites: ['크라운'],
+  records: [{ id: 'r1', boss_id: 'kraken', boss_name: '크라켄', damage: 900000000, mode: 'mock' as const, date: '2026-11-12', stage: 4, note: null, created_at: null }],
+};
 /** 공유 상태(지어낸 값). 계정의 내용과 결과 문서는 싣지 않는다. */
 const sharedSnapshot = {
   default_account: 'me',
@@ -325,6 +339,7 @@ describe('Rust 명령 호출', () => {
       if (cmd === 'set_overlay_visible' || cmd === 'overlay_hide') return { visible: false, click_through: false, shortcut_problems: [] };
       if (['overlay_widget', 'overlay_shape', 'overlay_pin', 'set_overlay_prefs', 'reset_overlay_position'].includes(cmd)) return widgetSnapshot;
       if (cmd === 'announce_activity' || cmd === 'compute_activity') return activity;
+      if (cmd === 'load_plan') return planDoc;
       return null;
     });
     await expect(loadReport('D:\\r.json')).resolves.toEqual({ schema_version: 1 });
@@ -375,6 +390,11 @@ describe('Rust 명령 호출', () => {
     await expect(resetOverlayPosition()).resolves.toEqual(widgetSnapshot);
     await expect(announceActivity(activity)).resolves.toEqual(activity);
     await expect(computeActivity()).resolves.toEqual(activity);
+    await expect(loadPlan()).resolves.toEqual(planDoc);
+    await expect(savePlan(null, planDoc)).resolves.toBeNull();
+    // 요격전 계획: 화면이 넘기는 것은 계정 이름(경로가 아니다 — 주지 않으면 지금 쓰는 계정)과 계획 문서뿐이다.
+    expect(calls[48].args).toEqual({ name: null });
+    expect(calls[49].args).toEqual({ name: null, plan: planDoc });
     expect(calls.map((c) => c.cmd)).toEqual(COMMANDS);
     expect(WIDGET_COMMANDS).toHaveLength(9);
     expect(calls[0].args).toEqual({ path: 'D:\\r.json' });
@@ -1268,6 +1288,11 @@ describe('권한(capability)', () => {
       expect(appCapability.permissions, cmd).toContain(allow([cmd])[0]);
     }
     expect(OVERLAY_COMMANDS).toHaveLength(15);
+    // P-029: 요격전 기록·즐겨찾기를 읽고 쓰는 것은 데스크톱 앱 창의 일이다 — 오버레이 창에는 읽기 권한도 없다.
+    for (const cmd of PLAN_COMMANDS) {
+      expect(capability.permissions, cmd).not.toContain(allow([cmd])[0]);
+      expect(appCapability.permissions, cmd).toContain(allow([cmd])[0]);
+    }
   });
 
   it('데스크톱 앱 창은 쓰는 것만 허용한다 — 창 끌기와 끝내기 명령은 없다', () => {
@@ -1275,7 +1300,8 @@ describe('권한(capability)', () => {
     expect([...appCapability.permissions].sort()).toEqual(['core:event:allow-listen', 'core:event:allow-unlisten', ...allow(forApp)].sort());
     expect(appCapability.windows).toEqual(['app']);
     // P-028: 38 → 42(위젯 상태 읽기·오버레이 설정 바꾸기·자리 초기화·계산 진행 알리기).
-    expect(forApp).toHaveLength(42);
+    // P-029: 42 → 44(요격전 계획 읽기·저장 — 손으로 적은 기록과 즐겨찾기를 계정 폴더에 둔다).
+    expect(forApp).toHaveLength(44);
     // 끝내기 명령은 어느 창에도 없다 — 앱에 그런 명령이 없다.
     for (const p of [...capability.permissions, ...appCapability.permissions]) expect(p).not.toMatch(/quit|exit/);
     expect(COMMANDS).not.toContain('quit_app');
@@ -1358,7 +1384,11 @@ describe('엔진 호출(Rust)', () => {
     // 앱 창을 앞으로 가져오기·오버레이 보이기/숨기기(32 → 40). 화면은 여전히 폴더·파일 이름을 넘기지 않는다.
     // 오버레이 위젯(P-028)의 아홉에서 끝내기 하나를 뺐다(40 − 1 + 9 = 48): 위젯 상태 읽기, 자기 창의 조작 넷(모양·핀·창 크기 맞춤·숨기기),
     // 앱 창의 것 셋(설정 바꾸기·자리 초기화·계산 진행 알리기), 계산 진행 읽기. 화면은 여전히 폴더·파일 이름도 창의 자리도 넘기지 않는다.
-    expect(COMMANDS).toHaveLength(48);
+    // 요격전 계획(P-029)의 둘: 손으로 적은 요격전 기록·즐겨찾기를 계정 폴더에 계정마다 두고 읽는다(48 → 50). 화면이 넘기는 계정 이름은 경로가 아니다.
+    expect(COMMANDS).toHaveLength(50);
+    expect(PLAN_COMMANDS).toEqual(['load_plan', 'save_plan']);
+    expect(libRs).toContain('async fn load_plan(name: Option<String>) -> Result<Option<Value>, String>');
+    expect(libRs).toContain('async fn save_plan(name: Option<String>, plan: Value) -> Result<(), String>');
     expect(WIDGET_COMMANDS).toEqual([
       'overlay_widget',
       'overlay_shape',

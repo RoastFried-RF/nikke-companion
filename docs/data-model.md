@@ -552,6 +552,102 @@ node src/cli.mjs intercept --account <계정.json> [--bosses <보스 묶음, 기
 - 입력 오류(종료 코드 2): 잘못된 보스 묶음·계정, 없는 보스 이름, 후보 편성을 만들 수 없는 계정.
 - 표 출력은 `renderInterceptReport`(`src/core/render.mjs`). 오버레이 화면은 아직 없다(P-017).
 
+## 요격전 계획 — `src/core/plan.mjs`
+
+P-029. 계정 상태·요격전 추천 결과·보스 묶음을 이어 「오늘 어느 보스를 돌아야 하는가」에 답하고, 손으로 적은 요격전 기록을
+추정 총딜과 견준다. 순수 모듈이다(파일·프로세스·네트워크·시계에 닿지 않는다 — 웹뷰와 Node가 함께 쓴다). 화면은
+`app/README.md` §요격전 계획. **계정에 없는 것은 지어내지 않는다** — 모르는 것은 `unknowns`의 문장으로 함께 돌려준다.
+
+### 장비 현황
+
+계정 상태의 `nikkes.<이름>.equipment`(부위 `머리`·`몸통`·`팔`·`다리` → `{tier, corp, level, skills}` — 엔진 표기)를 그대로 읽는다.
+
+| 칸의 값 | 상태(`gearState`) | 화면의 말 |
+|---|---|---|
+| `tier: "없음"` | `empty` | 미장착 |
+| `tier: "T1"`~`"T9"`만 | `normal` | 일반 등급(강화 없음) |
+| `tier: "T1"`~`"T9"` + `corp` | `corp` | 기업 장비(강화 0~5) |
+| `tier` 생략(또는 `"기업"` — 엔진의 오버로드 표 이름) | `overload` | 오버로드(강화 0~5) |
+| 칸이 없다 / `equipment`를 적지 않았다 | `unrecorded` | 기록 없음 |
+| `unknown`에 `equipment`가 있다 / 읽을 수 없는 값 | `unknown` | 미확인 |
+
+- 「오버로드가 아닌 칸」은 `empty`·`normal`·`corp`다. **기록 없음·미확인은 세지 않는다**(끼지 않은 것으로 치지 않는다) — 그런
+  니케의 수는 `gearSummary().unrecorded`로 따로 알린다. 계산 쪽(`toEngineEntry`)은 장비를 적지 않은 니케를 미장착이나 엔진 기본
+  오버로드 장비로 **계산**하지만(§계정 상태), 그것은 계산의 가정이지 계정에 적힌 사실이 아니라 장비 현황에는 쓰지 않는다.
+- `gearSummary(rows, {infoOf})` → `{nikkes, recorded, unrecorded, open, by_part[{part, open, empty, normal, corp, overload}],
+  by_corp[{corp, open, nikkes}], unknowns}`. 기업은 **니케의 기업**(카탈로그의 `manufacturer`)이고 모르면 「모름」으로 묶는다.
+- 가지고 있지만 끼지 않은 장비의 수는 계정 상태에 없다 — `unknowns`가 그렇게 말한다.
+- 손으로 만든 검증용 계정에는 `equipment`가 없다. 테스트는 `data/samples/account.large.sample.json`에
+  `data/samples/gear.large.sample.json`(지어낸 장비 — 니케 이름 → `equipment`, `is_test_data: true`)을 얹어 쓴다. 큰 샘플 계정
+  자체에 장비를 넣지 않은 것은 그 계정으로 잰 계산 결과(§후보 생성 §우선 속성)를 바꾸지 않기 위해서다.
+
+### 주력 니케 — `pickCore({report, favorites, account, limit})`
+
+어느 니케의 장비가 중요한가. 위에서부터 처음 맞는 것 하나다(결과의 `basis`·`text`가 어느 기준이었는지 말한다):
+
+1. `intercept` — 요격전 추천 결과에서 보스마다 1위 편성에 든 니케(겹치는 이름은 한 번).
+2. `favorites` — 추천이 없으면 사용자가 즐겨찾기로 고른 니케.
+3. `score` — 그것도 없으면 투자 점수(`investmentScore` — 성능 추정이 아니다) 상위 `limit`명(기본 10, 동점은 이름순).
+
+계정을 주면 그 계정이 가진 니케만 남긴다(다른 계정으로 계산한 옛 결과의 이름을 걸러 낸다).
+
+### 오늘 돌 보스 — `recommendBoss({bosses, rows, core})`
+
+보스의 보상 문구에서 부위를 읽고(`rewardPart`: 「머리 장비」 → `머리`. 「커스텀 모듈」처럼 장비가 아니면 `null` — 세지 않고
+`note`에 그렇게 적는다), 주력 니케의 그 부위 가운데 오버로드가 아닌 칸을 센다.
+
+- 급한 순서: 칸 수가 많은 보스 → 같으면 더 비어 있는 쪽(미장착 3 · 일반 등급 2 · 기업 장비 1의 합) → 그래도 같으면 **함께 적는다**(동률).
+- 결과: `{status, text, top[], max_need, bosses[{id, name, reward, part, need, reasons[{nikke, part, state, label, tier, level}], note}],
+  core, unrecorded[], unknowns[]}`. `status`는 `pick`(「머리 장비가 가장 급하다 → 울트라」) · `tie`(「머리·팔 장비가 똑같이 급하다 →
+  울트라 또는 미러 컨테이너」) · `done`(적힌 칸이 모두 오버로드) · `no_data`(주력의 장비가 계정에 적혀 있지 않다) · `no_core`.
+- **보상이 나올 확률과 한 번에 얻는 수는 모른다** — 「언제 다 모이는지」는 어림하지 않고 `unknowns`가 그 사실을 말한다.
+  무게(3·2·1)는 순서를 가릴 때만 쓰는 어림이다.
+
+### 속성 커버리지 — `elementCoverage(account, {infoOf, bosses})`
+
+속성 다섯마다 「키운 딜러」가 몇 명인가. **기준(`COVERAGE_RULE`): 클래스가 화력형이고 돌파 3 이상, 스킬 셋이 모두 7 이상.**
+어림 기준이다(성능을 잰 값이 아니다). 미확인 칸(`unknown`의 `breakthrough`·`skill_levels`)은 채우지 못한 것으로 본다.
+결과: `{rule, rule_text, elements[{element, count, names, bosses[{id, name}]}], max, weakest[], unsure[]}` — `bosses`는 그 속성이
+약점인 보스, `weakest`는 키운 딜러가 가장 적은 속성(다섯이 모두 같으면 빈 배열), `unsure`는 육성 기준은 채웠지만 속성·클래스를
+몰라 세지 못한 니케다.
+
+### 요격전 기록 — 계획 문서
+
+사용자가 보스별로 실제 대미지(모의전 또는 실전)·날짜·달성 단계를 손으로 적어 둔다. 즐겨찾기와 함께 계정마다 한 파일이다:
+**계정 폴더의 `<계정 이름>.plan.json`**(`data/accounts/` — gitignore. 이름에 점이 더 있어 계정 목록에 들지 않는다).
+읽고 쓰는 것은 Rust(`app/src-tauri/src/shared_state.rs`의 `load_plan`·`save_plan` — 종류·판·목록 둘과 항목 수 2,000건까지만 확인),
+값의 검사는 이 모듈이 한다.
+
+```jsonc
+{
+  "schema_version": 1,
+  "kind": "intercept_plan",
+  "favorites": ["크라운", "헬름"],          // 즐겨찾기로 고른 니케(엔진 정식 명칭)
+  "records": [
+    {
+      "id": "r1",                          // 이 문서 안에서 겹치지 않는 번호
+      "boss_id": "kraken",                 // 보스 묶음의 id
+      "boss_name": "크라켄",
+      "damage": 940000000,                 // 실제 대미지(양의 정수)
+      "mode": "mock",                      // mock = 모의전, real = 실전
+      "date": "2026-11-12",                // YYYY-MM-DD(달력에 있는 날)
+      "stage": 4,                          // 달성 단계(1~99) 또는 null
+      "note": null,
+      "created_at": "2026-11-12T12:00:00.000Z"   // 적은 시각(부르는 쪽이 준다) 또는 null
+    }
+  ]
+}
+```
+
+- `parseDamage(글자)`: 게임에 보이는 숫자 그대로(`1,234,567,890`)나 단위 표기(`12.3억`·`1조 2000억`·`3500만`)를 정수로. 못 읽으면 `null`.
+- `addRecord`·`removeRecord`·`toggleFavorite`는 새 문서를 돌려준다(받은 문서를 바꾸지 않는다). 기록은 500건까지 남기고 넘으면
+  오래된 것부터 뺀다. `readPlan(문서)`는 종류·판이 다르면 한국어 문장으로 던지고, 모양이 맞지 않는 항목은 버리며 그 수를 알린다.
+- 달성 단계의 실제 범위는 모른다(게임 화면에서 본 것은 「달성 단계 4」 하나 — `docs/intercept.md`). 1~99로 넉넉히 받는다.
+- **기록과 추정의 비교** — `compareRecord(추정 총딜, 기록)` → `{estimate, actual, ratio, diff_pct, direction, text, detail}`.
+  `diff_pct` = (추정 − 기록) ÷ 기록 × 100(양수면 추정이 크다), `text`는 배지의 말(「기록과 12% 차이」 · 「기록과 1% 미만 차이」 ·
+  「기록과 같다」). 보스의 **가장 최근 기록**(날짜가 늦은 것, 같은 날이면 나중에 적은 것)과 1위 편성의 총딜을 견준다(`recordCheck`).
+  **추정치를 기록에 맞춰 고쳐 쓰지 않는다** — 차이를 알릴 뿐이다(보스 값 보정은 별도 작업이다. 차이가 크면 그 근거가 된다).
+
 ## 시뮬 결과 캐시 — `src/core/cache.mjs`
 
 엔진 시뮬 1회가 4~5초라서, 같은 엔진 판·같은 요청의 결과는 다시 계산하지 않는다. `withCache(runtime, store)`가
