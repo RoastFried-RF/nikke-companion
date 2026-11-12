@@ -86,7 +86,8 @@ test('CLI: 표를 출력하고 결과 JSON을 쓴다. 입력 오류는 종료 �
   const out = path.join(os.tmpdir(), `nikke-report-${process.pid}.json`);
   const args = (extra = {}) => {
     const o = { account: 'data/samples/account.sample.json', condition: 'data/samples/condition.solo-raid.json', squads: 'data/samples/squads.sample.json', json: out, ...extra };
-    return ['src/cli.mjs', 'compare', ...Object.entries(o).flatMap(([k, v]) => [`--${k}`, v])];
+    // --no-cache: 이 테스트는 실제 엔진을 불러야 한다(캐시는 cache.engine.test.mjs가 임시 폴더로 확인한다).
+    return ['src/cli.mjs', 'compare', '--no-cache', ...Object.entries(o).flatMap(([k, v]) => [`--${k}`, v])];
   };
   try {
     const ok = spawnSync(process.execPath, args(), { cwd: ROOT, encoding: 'utf8' });
@@ -94,9 +95,11 @@ test('CLI: 표를 출력하고 결과 JSON을 쓴다. 입력 오류는 종료 �
     assert.match(ok.stdout, /1위/);
     assert.match(ok.stdout, /\[검증용 데이터\]/);
     assert.match(ok.stdout, /보유하지 않은 니케: 홍련/);
+    assert.match(ok.stdout, /^캐시: 쓰지 않음$/m);
     const report = JSON.parse(fs.readFileSync(out, 'utf8'));
     assert.equal(report.schema_version, 1);
     assert.equal(report.ranking[0].rank, 1);
+    assert.equal(report.cache, null);
 
     const bad = spawnSync(process.execPath, args({ account: 'data/samples/없는파일.json' }), { cwd: ROOT, encoding: 'utf8' });
     assert.equal(bad.status, 2);

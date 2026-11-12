@@ -58,6 +58,11 @@ node src/cli.mjs compare --account data/samples/account.sample.json --condition 
 - 입력이 잘못되면 `입력 오류 — …`, 엔진을 띄우지 못하거나 시간이 넘으면 `실행 오류 — …`로 보인다.
   엔진이 일부 편성에서만 오류를 내면 그 편성은 "실패한 편성"으로 보이고 나머지는 순위에 남는다.
 - 계산 중에는 다시 실행하거나 결과 파일을 불러올 수 없다. 계산을 중간에 멈추는 단추는 없다.
+- 같은 엔진 판·같은 요청은 다시 계산하지 않는다(시뮬 결과 캐시, `docs/data-model.md` §시뮬 결과 캐시). 이 앱은
+  **메모리 저장소만** 쓴다 — 앱이 켜져 있는 동안만 남고 파일에 쓰지 않으며, CLI의 `data/cache/sim/`과 나눠 쓰지 않는다.
+  결과 화면의 `캐시: 적중 N건 · 엔진 계산 N건 · 새로 저장 N건` 줄로 보인다. 진행 건수는 엔진에 보낸 요청만 센다
+  (모두 적중하면 엔진을 부르지 않고 곧바로 끝난다). 엔진 커밋을 모르거나 엔진 폴더에 커밋하지 않은 변경이 있으면
+  캐시를 쓰지 않고 그 이유가 같은 자리에 보인다.
 
 ### 엔진 설정
 
@@ -294,8 +299,8 @@ npm --prefix app run fixture
 | `src/components/GamePanel.vue` | 게임 창 칸: 상태·크기, 화면 저장 단추와 결과, 붙이기 |
 | `src/lib/format.ts` | 서식. 대미지 단위 표기는 루트의 `src/core/format.mjs`를 그대로 쓴다(복제하지 않는다) |
 | `src/lib/backend.ts` | Rust 명령·이벤트를 부르는 유일한 곳 |
-| `src/lib/runtime.ts` | 계산 코드에 넘기는 엔진 런타임(Rust 명령 `engine_*`을 부른다) |
-| `src/lib/compute.ts` | 파일 읽기 → 루트의 `suggestSquads`·`compareSquads` 호출 → 비교 결과. 계산 규칙은 없다 |
+| `src/lib/runtime.ts` | 계산 코드에 넘기는 엔진 런타임(Rust 명령 `engine_*`을 부른다)과 시뮬 결과 캐시의 메모리 저장소(`simCache`) |
+| `src/lib/compute.ts` | 파일 읽기 → 런타임을 캐시로 감싸 루트의 `suggestSquads`·`compareSquads` 호출 → 비교 결과. 계산 규칙은 없다 |
 | `src-tauri/src/overlay_state.rs` | 보임/숨김·클릭 통과의 전환 규칙과 시작 위치 계산. 창 API를 모른다 |
 | `src-tauri/src/report.rs` | 비교 결과 JSON 읽기와 형식 확인(한국어 오류), 입력 JSON 파일 읽기 |
 | `src-tauri/src/engine.rs` | 엔진 설정, 카탈로그·버전 읽기, `python -m runner.sim --batch` 병렬 실행(최대 4개, 순서 보존, 시간 제한). 계산 로직 없음 |

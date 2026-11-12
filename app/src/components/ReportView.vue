@@ -29,6 +29,15 @@ const engineLabel = computed(() => {
   return `${repo} @ ${commit}${engine?.dirty ? ' (수정된 작업 폴더)' : ''}`;
 });
 
+/** 시뮬 결과 캐시 한 줄 — CLI 표(src/core/render.mjs의 cacheLines)와 같은 문장. 결과에 칸이 없으면 그리지 않는다. */
+const cacheLabel = computed(() => {
+  const cache = props.report.cache;
+  if (cache === undefined) return '';
+  if (cache === null) return '쓰지 않음';
+  return `적중 ${cache.hits}건 · 엔진 계산 ${cache.misses}건 · 새로 저장 ${cache.stored}건`;
+});
+const cacheWarnings = computed(() => props.report.cache?.warnings ?? []);
+
 const conditionLabel = computed(() => {
   const c = props.report.condition ?? {};
   const parts: string[] = [];
@@ -62,6 +71,10 @@ function barWidth(relative: unknown): string {
       </div>
       <div v-if="conditionLabel" class="meta__line" data-testid="condition">조건: {{ conditionLabel }}</div>
       <div class="meta__line" data-testid="engine-version">엔진: {{ engineLabel }}</div>
+      <div v-if="cacheLabel" class="meta__line" data-testid="cache">캐시: {{ cacheLabel }}</div>
+      <div v-for="(w, i) in cacheWarnings" :key="`cache-warning-${i}`" class="meta__line meta__line--warn" data-testid="cache-warning">
+        ! {{ w }}
+      </div>
       <div v-if="generatedAt" class="meta__line" data-testid="generated-at">계산 시각: {{ generatedAt }}</div>
       <div v-if="report.suggestion" class="meta__line" data-testid="suggestion">
         후보: 조합 {{ report.suggestion.considered }}개 중 {{ report.suggestion.generated }}개 생성 →
@@ -191,6 +204,10 @@ function barWidth(relative: unknown): string {
   color: var(--muted);
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.meta__line--warn {
+  color: var(--warn);
 }
 
 .badge {

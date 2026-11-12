@@ -249,7 +249,7 @@ export async function compareGrowth({ account, condition, squad, upgrades }, dep
     { ...base, squad: members, profile: baseProfile },
     ...accepted.map((u) => ({ ...base, squad: members, profile: u.profile })),
   ];
-  const results = await engine.runBatch(requests, { concurrency: deps.concurrency });
+  const { results, cache } = await engine.runBatchWithStats(requests, { concurrency: deps.concurrency });
 
   const before = results[0];
   if (before.error) {
@@ -291,6 +291,8 @@ export async function compareGrowth({ account, condition, squad, upgrades }, dep
     condition,
     assumptions: assumptionsOf(condition),
     engine: before.evaluator ?? (await engine.version()),
+    // 시뮬 결과 캐시 통계(src/core/cache.mjs). 캐시를 쓰지 않는 런타임이면 null이다.
+    cache,
     baseline: {
       name: squad.name ?? '기준 편성',
       members: memberRows(before.members),

@@ -3,7 +3,7 @@
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ComputeError, defaultDeps, runCompare, runSuggest, type ComputeDeps } from '../src/lib/compute';
-import { tauriRuntime } from '../src/lib/runtime';
+import { simCache, tauriRuntime } from '../src/lib/runtime';
 import type { EngineRequest } from '../src/types';
 import {
   ACCOUNT_PATH,
@@ -19,7 +19,11 @@ import {
   SQUADS_PATH,
 } from './helpers/fakeEngine';
 
-afterEach(() => clearMocks());
+afterEach(() => {
+  clearMocks();
+  // 기본 설정의 캐시(메모리 저장소)는 앱이 켜져 있는 동안 남는다 — 테스트끼리 섞이지 않게 비운다.
+  simCache.clear();
+});
 
 const suggestInput = { accountPath: ACCOUNT_PATH, conditionPath: CONDITION_PATH, limit: 6, top: 3 };
 const compareInput = { accountPath: ACCOUNT_PATH, conditionPath: CONDITION_PATH, squadsPath: SQUADS_PATH };
@@ -139,18 +143,24 @@ describe('Tauri 런타임으로 실행 (Rust 명령은 가짜 IPC)', () => {
       throw `모르는 명령: ${cmd}`;
     });
     expect(defaultDeps.runtime).toBe(tauriRuntime);
+    expect(defaultDeps.cache).toBe(simCache);
 
     const viaTauri = await runSuggest(suggestInput, { ...defaultDeps, now });
-    expect(calls.map((c) => c.cmd)).toEqual(['read_json_file', 'read_json_file', 'engine_catalog', 'engine_run_batch']);
+    // 캐시가 엔진 판을 먼저 묻는다(커밋을 알고 작업 폴더가 깨끗해야 저장소를 쓴다).
+    expect(calls.map((c) => c.cmd)).toEqual(['read_json_file', 'read_json_file', 'engine_catalog', 'engine_version', 'engine_run_batch']);
     expect(calls[0].args).toEqual({ path: ACCOUNT_PATH });
     expect(calls[1].args).toEqual({ path: CONDITION_PATH });
     // 화면은 요청만 넘긴다. 엔진 폴더·python·동시 실행 수는 Rust 쪽 설정이다.
-    expect(Object.keys(calls[3].args)).toEqual(['requests']);
-    expect(calls[3].args.requests).toHaveLength(6);
+    expect(Object.keys(calls[4].args)).toEqual(['requests']);
+    expect(calls[4].args.requests).toHaveLength(6);
+    expect(viaTauri.cache).toEqual({ hits: 0, misses: 6, stored: 6, warnings: [] });
 
+    // 캐시 통계 말고는 주입한 가짜 런타임(캐시 없음)과 같은 문서다.
     const viaFake = await runSuggest(suggestInput, { runtime: fakeRuntime(), readJson, now });
-    expect(viaTauri).toEqual(viaFake);
+    expect(viaFake.cache).toBeNull();
+    expect({ ...viaTauri, cache: null }).toEqual(viaFake);
 
+    simCache.clear();
     calls.length = 0;
     const compared = await runCompare(compareInput, { ...defaultDeps, now });
     expect(calls.map((c) => c.cmd)).toEqual([
@@ -158,9 +168,10 @@ describe('Tauri 런타임으로 실행 (Rust 명령은 가짜 IPC)', () => {
       'read_json_file',
       'read_json_file',
       'engine_catalog',
+      'engine_version',
       'engine_run_batch',
     ]);
-    expect(compared).toEqual(await runCompare(compareInput, { runtime: fakeRuntime(), readJson, now }));
+    expect({ ...compared, cache: null }).toEqual(await runCompare(compareInput, { runtime: fakeRuntime(), readJson, now }));
   });
 
   it('런타임의 세 함수가 각각의 Rust 명령을 부른다', async () => {
@@ -174,6 +185,81 @@ describe('Tauri 런타임으로 실행 (Rust 명령은 가짜 IPC)', () => {
     await expect(tauriRuntime.engineVersion()).resolves.toEqual({ repo: 'r', commit: null });
     await expect(tauriRuntime.runBatch([{ squad: ['가'] }, { squad: ['나'] }], { concurrency: 2 })).resolves.toEqual([{ id: 0 }, { id: 1 }]);
     expect(seen).toEqual(['engine_catalog', 'engine_version', 'engine_run_batch']);
+  });
+});
+
+describe('시뮬 결과 캐시 (메모리 저장소)', () => {
+  /** Rust 명령을 흉내 내고 엔진에 간 요청을 적어 둔다. */
+  function mockEngine(version: unknown = FAKE_EVALUATOR): { cmds: string[]; batches: EngineRequest[][] } {
+    const seen = { cmds: [] as string[], batches: [] as EngineRequest[][] };
+    mockIPC((cmd, args) => {
+      const payload = (args ?? {}) as Record<string, unknown>;
+      seen.cmds.push(cmd);
+      if (cmd === 'read_json_file') return documents[payload.path as string];
+      if (cmd === 'engine_catalog') return catalog;
+      if (cmd === 'engine_version') return version;
+      if (cmd === 'engine_run_batch') {
+        seen.batches.push(payload.requests as EngineRequest[]);
+        return (payload.requests as EngineRequest[]).map((r) => fakeRow(r));
+      }
+      throw `모르는 명령: ${cmd}`;
+    });
+    return seen;
+  }
+
+  it('같은 추천을 다시 실행하면 엔진을 부르지 않고 수치가 같다', async () => {
+    const seen = mockEngine();
+    const first = await runSuggest(suggestInput, { ...defaultDeps, now });
+    expect(first.cache).toEqual({ hits: 0, misses: 6, stored: 6, warnings: [] });
+    expect(simCache.size).toBe(6);
+
+    const second = await runSuggest(suggestInput, { ...defaultDeps, now });
+    expect(second.cache).toEqual({ hits: 6, misses: 0, stored: 0, warnings: [] });
+    expect(seen.batches).toHaveLength(1);
+    expect(seen.cmds.filter((c) => c === 'engine_run_batch')).toHaveLength(1);
+    expect({ ...second, cache: null }).toEqual({ ...first, cache: null });
+  });
+
+  it('후보를 늘리면 새 후보만 엔진에 보낸다', async () => {
+    const seen = mockEngine();
+    await runSuggest(suggestInput, { ...defaultDeps, now });
+    const more = await runSuggest({ ...suggestInput, limit: 8 }, { ...defaultDeps, now });
+    expect(more.cache).toMatchObject({ hits: 6, misses: 2, stored: 2 });
+    expect(seen.batches.map((b) => b.length)).toEqual([6, 2]);
+    // 캐시에서 채운 것과 새로 계산한 것이 섞여도 캐시 없이 계산한 결과와 같다.
+    const fresh = await runSuggest({ ...suggestInput, limit: 8 }, { runtime: fakeRuntime(), readJson, now });
+    expect({ ...more, cache: null }).toEqual(fresh);
+  });
+
+  it('엔진 커밋을 모르거나 작업 폴더가 수정돼 있으면 캐시를 쓰지 않고 이유를 남긴다', async () => {
+    for (const [version, warning] of [
+      [{ repo: 'fake/engine', commit: null, dirty: null }, /엔진 커밋을 알 수 없어/],
+      [{ ...FAKE_EVALUATOR, dirty: true }, /커밋하지 않은 변경/],
+      [{ repo: 'fake/engine', commit: 'f'.repeat(40) }, /깨끗한지 확인할 수 없어/],
+    ] as const) {
+      const seen = mockEngine(version);
+      for (let round = 0; round < 2; round += 1) {
+        const report = await runSuggest(suggestInput, { ...defaultDeps, now });
+        expect(report.cache).toMatchObject({ hits: 0, misses: 6, stored: 0 });
+        expect(report.cache?.warnings).toHaveLength(1);
+        expect(report.cache?.warnings?.[0]).toMatch(warning);
+        expect(report.ranking).toHaveLength(3);
+      }
+      expect(seen.batches).toHaveLength(2);
+      expect(simCache.size).toBe(0);
+      clearMocks();
+    }
+  });
+
+  it('저장소를 주지 않으면 캐시 없이 계산한다', async () => {
+    const seen = mockEngine();
+    for (let round = 0; round < 2; round += 1) {
+      const report = await runSuggest(suggestInput, { ...defaultDeps, cache: null, now });
+      expect(report.cache).toBeNull();
+    }
+    expect(seen.batches).toHaveLength(2);
+    expect(seen.cmds).not.toContain('engine_version');
+    expect(simCache.size).toBe(0);
   });
 });
 

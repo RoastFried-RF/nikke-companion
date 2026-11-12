@@ -51,6 +51,7 @@ export function squadNotes(squad, account, catalog) {
  * @param {object} input.condition 전투 조건 문서
  * @param {{name?: string, members: string[]}[]} input.squads 후보 편성
  * @param {object} [deps] `runtime`(src/core/runtime.mjs의 계약 — 엔진 실행·카탈로그·버전), `concurrency`, `now`.
+ *   런타임을 `withCache`(src/core/cache.mjs)로 감싸 주면 같은 요청을 다시 계산하지 않고 결과에 `cache` 통계가 실린다.
  *   `catalog`·`runBatch`를 직접 주면 런타임보다 먼저다(테스트에서 엔진을 바꿔 끼울 때 쓴다)
  */
 export async function compareSquads({ account, condition, squads }, deps = {}) {
@@ -76,7 +77,7 @@ export async function compareSquads({ account, condition, squads }, deps = {}) {
 
   const base = toEngineBase(condition);
   const requests = accepted.map((s) => ({ ...base, squad: s.members, profile: toEngineProfile(account, s.members) }));
-  const results = await engine.runBatch(requests, { concurrency: deps.concurrency });
+  const { results, cache } = await engine.runBatchWithStats(requests, { concurrency: deps.concurrency });
 
   const ranking = [];
   const failed = [];
@@ -112,6 +113,8 @@ export async function compareSquads({ account, condition, squads }, deps = {}) {
     condition,
     assumptions: assumptionsOf(condition),
     engine: evaluator ?? (await engine.version()),
+    // 시뮬 결과 캐시 통계(src/core/cache.mjs). 캐시를 쓰지 않는 런타임이면 null이다.
+    cache,
     ranking,
     rejected,
     failed,

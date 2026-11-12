@@ -664,9 +664,19 @@
       ],
       "manual_checks": [],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": null,
+      "evidence": {
+        "run": ".harness/runs/20261112T022107-P-012-a1-resume",
+        "verified_tree": "b8104404ee2ed2160b9ec5c613d55d1c72ae6dd3",
+        "verified_at": "2026-11-12T02:32:26.708Z",
+        "commit": null
+      }
     },
     {
       "id": "P-013",

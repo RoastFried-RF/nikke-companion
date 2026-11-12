@@ -19,10 +19,70 @@ export function loadCatalog(engineDir = DEFAULT_ENGINE_DIR) {
   return { nikkes, bosses };
 }
 
-/** 엔진 버전. 결과에 함께 남겨 어떤 엔진으로 계산했는지 추적한다. */
+/**
+ * 엔진 버전 `{repo, commit, dirty}`. 결과에 함께 남겨 어떤 엔진으로 계산했는지 추적하고, 시뮬 결과 캐시가
+ * 이 값으로 쓸지 말지를 정한다(src/core/cache.mjs). `dirty`는 엔진이 결과에 싣는 `evaluator.dirty`와 같은 기준이다:
+ * 추적 중인 파일에 커밋하지 않은 변경이 있나(`git status --porcelain -uno`). git을 못 부르면 commit·dirty가 null.
+ * `--no-optional-locks`: 엔진 프로세스와 동시에 불려도 `.git/index`를 건드리지 않는다.
+ */
 export function engineVersion(engineDir = DEFAULT_ENGINE_DIR) {
-  const r = spawnSync('git', ['-C', engineDir, 'rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true });
-  return { repo: ENGINE_REPO, commit: r.status === 0 ? r.stdout.trim() : null };
+  const git = (...args) => {
+    const r = spawnSync('git', ['--no-optional-locks', '-C', engineDir, ...args], { encoding: 'utf8', windowsHide: true });
+    return r.status === 0 ? r.stdout.trim() : null;
+  };
+  const commit = git('rev-parse', 'HEAD') || null;
+  const status = commit === null ? null : git('status', '--porcelain', '-uno');
+  return { repo: ENGINE_REPO, commit, dirty: status === null ? null : status !== '' };
+}
+
+/** 시뮬 결과 캐시 폴더(gitignore). 형식은 docs/data-model.md §시뮬 결과 캐시. */
+export const DEFAULT_CACHE_DIR = path.resolve(fileURLToPath(new URL('../../data/cache/sim', import.meta.url)));
+
+/**
+ * 파일 저장소 — `withCache`(src/core/cache.mjs)에 넘기는 저장소 계약의 Node 구현.
+ * 항목 하나가 파일 하나다: `<dir>/<키 앞 두 글자>/<키>.json`. 폴더는 처음 저장할 때 만든다.
+ * 없는 파일은 빗나감(undefined)이고, 읽을 수 없거나 JSON이 아닌 파일은 던진다 — 감싼 쪽이 경고로 바꾸고 다시 계산한다.
+ * 쓰기는 임시 파일에 쓴 뒤 이름을 바꾼다(여러 프로세스가 같이 써도 반쯤 쓴 파일이 읽히지 않게).
+ */
+export function createFileCacheStore(dir = DEFAULT_CACHE_DIR) {
+  const fileOf = (key) => {
+    if (typeof key !== 'string' || !/^[0-9a-f]{16,128}$/.test(key)) throw new Error(`캐시 키가 16진수 해시가 아니다: ${String(key).slice(0, 80)}`);
+    return path.join(dir, key.slice(0, 2), `${key}.json`);
+  };
+  return {
+    dir,
+    get(key) {
+      const file = fileOf(key);
+      let text;
+      try {
+        text = fs.readFileSync(file, 'utf8');
+      } catch (e) {
+        if (e.code === 'ENOENT') return undefined;
+        throw new Error(`캐시 파일을 읽을 수 없다 (${file}): ${e.message}`);
+      }
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        throw new Error(`캐시 파일이 JSON이 아니다 (${file}): ${e.message}`);
+      }
+    },
+    set(key, entry) {
+      const file = fileOf(key);
+      const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+      try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(tmp, JSON.stringify(entry) + '\n', 'utf8');
+        fs.renameSync(tmp, file);
+      } catch (e) {
+        try {
+          fs.rmSync(tmp, { force: true });
+        } catch {
+          // 임시 파일을 만들지도 못했다 — 지울 것이 없다.
+        }
+        throw new Error(`캐시 파일을 쓸 수 없다 (${file}): ${e.message}`);
+      }
+    },
+  };
 }
 
 function runWorker(lines, { engineDir, python, timeoutMs }) {

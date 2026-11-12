@@ -1,11 +1,12 @@
 // 편성 추천·비교 실행: 파일 읽기 → 루트의 계산 코드(src/core) → 비교 결과.
 // 계산 규칙은 여기에 없다. suggestSquads·compareSquads에 런타임을 넘겨 부를 뿐이다(CLI의 suggest·compare와 같은 길).
 
+import { withCache } from '@core/cache.mjs';
 import { DEFAULT_LIMIT, DEFAULT_TOP, suggestSquads } from '@core/candidates.mjs';
 import { compareSquads, InputError } from '@core/compare.mjs';
-import type { CompareReport, EngineRuntime } from '../types';
+import type { CompareReport, EngineRuntime, SimCacheStore } from '../types';
 import { errorMessage, readJsonFile } from './backend';
-import { tauriRuntime } from './runtime';
+import { simCache, tauriRuntime } from './runtime';
 
 export { DEFAULT_LIMIT, DEFAULT_TOP };
 
@@ -15,10 +16,15 @@ export interface ComputeDeps {
   runtime: EngineRuntime;
   /** JSON 파일 읽기. 기본은 Rust 명령 read_json_file. */
   readJson: (path: string) => Promise<unknown>;
+  /**
+   * 시뮬 결과 캐시의 저장소. 주면 런타임을 캐시로 감싸(같은 엔진 판·같은 요청은 엔진에 보내지 않는다) 결과에
+   * `cache` 통계가 실린다. 주지 않으면 캐시 없이 계산한다(결과의 `cache`는 null). 기본은 메모리 저장소다.
+   */
+  cache?: SimCacheStore | null;
   now?: () => Date;
 }
 
-export const defaultDeps: ComputeDeps = { runtime: tauriRuntime, readJson: readJsonFile };
+export const defaultDeps: ComputeDeps = { runtime: tauriRuntime, readJson: readJsonFile, cache: simCache };
 
 export interface SuggestInput {
   accountPath: string;
@@ -56,7 +62,9 @@ function asComputeError(e: unknown): ComputeError {
 }
 
 function coreDeps(deps: ComputeDeps): object {
-  return deps.now ? { runtime: deps.runtime, now: deps.now } : { runtime: deps.runtime };
+  // 캐시는 주어진 런타임의 바깥을 감싼다 — 런타임의 runBatch는 저장소에 없던 요청만 받는다(진행 건수도 그 수다).
+  const runtime = deps.cache ? withCache(deps.runtime, deps.cache) : deps.runtime;
+  return deps.now ? { runtime, now: deps.now } : { runtime };
 }
 
 /** 계정 + 전투 조건 → 후보 편성 생성 → 엔진 비교 → 상위 편성. */

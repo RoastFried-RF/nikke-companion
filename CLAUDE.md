@@ -22,6 +22,9 @@ node scripts/harness-selftest.mjs        # 하네스 자체 검증 (모델 호�
 node src/cli.mjs compare --account data/samples/account.sample.json --condition data/samples/condition.solo-raid.json --squads data/samples/squads.sample.json
 ```
 
+`compare`·`suggest`·`growth`는 시뮬 결과를 `data/cache/sim/`(gitignore)에 캐시한다. `--no-cache`로 끄고, 폴더를 지우면
+비워진다(`docs/data-model.md` §시뮬 결과 캐시).
+
 데스크톱 앱(`app/`, Tauri v2 + Vue 3 — 자체 package.json. 자세한 것은 `app/README.md`):
 
 ```bash

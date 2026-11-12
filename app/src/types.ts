@@ -37,7 +37,25 @@ export interface FailedSquad {
 export interface EngineVersion {
   repo?: string | null;
   commit?: string | null;
-  dirty?: boolean;
+  /** 추적 중인 엔진 파일에 커밋하지 않은 변경이 있나. 확인하지 못했으면 null. */
+  dirty?: boolean | null;
+}
+
+/**
+ * 시뮬 결과 캐시 통계(루트 src/core/cache.mjs). hits = 엔진에 보내지 않고 채운 요청, misses = 엔진에 보낸 요청,
+ * stored = 새로 저장한 수, warnings = 캐시를 못 쓴 이유·저장소 문제.
+ */
+export interface CacheStats {
+  hits: number;
+  misses: number;
+  stored: number;
+  warnings?: string[];
+}
+
+/** 시뮬 결과 캐시의 저장소 계약(루트 src/core/cache.mjs). */
+export interface SimCacheStore {
+  get(key: string): unknown;
+  set(key: string, entry: object): unknown;
 }
 
 /** suggest 결과에만 붙는 후보 생성 요약. */
@@ -55,6 +73,8 @@ export interface CompareReport {
   condition?: Record<string, unknown>;
   assumptions?: string[];
   engine?: EngineVersion | null;
+  /** 캐시를 쓰지 않은 계산이면 null, 캐시가 생기기 전의 결과 파일에는 없다. */
+  cache?: CacheStats | null;
   ranking: RankingEntry[];
   rejected: RejectedSquad[];
   failed: FailedSquad[];

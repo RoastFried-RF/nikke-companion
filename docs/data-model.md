@@ -139,6 +139,7 @@ node src/cli.mjs import-profile <프로필.json> [--name <계정 이름>] [--out
   "condition": { },
   "assumptions": ["전투 180초, …"],
   "engine": { "repo": "Jgaram/nikke-calc", "commit": "67835ca…", "dirty": false },
+  "cache": { "hits": 2, "misses": 1, "stored": 1, "warnings": [] },   // §시뮬 결과 캐시. 캐시 없이 계산했으면 null
   "ranking": [ { "rank": 1, "name": "A", "total_damage": 0, "relative_to_best": 1,
                  "members": [ { "name": "…", "damage": 0, "share": 0.2 } ],
                  "notes": [], "engine_warnings": [], "ungrown_members": [] } ],
@@ -151,6 +152,8 @@ node src/cli.mjs import-profile <프로필.json> [--name <계정 이름>] [--out
 - `rejected`: 시뮬 전에 걸러진 편성(미보유·중복·인원 수·모르는 이름). 엔진에 보내지 않는다.
 - `failed`: 엔진이 오류를 낸 편성. 순위에 넣지 않는다.
 - 총딜은 정수 원값을 그대로 둔다. 단위 표기는 표시 단계의 일이다.
+- `cache`: 이 계산에서 캐시가 한 일(§시뮬 결과 캐시). 수치에는 영향이 없다 — 같은 입력이면 `cache`와 `generated_at`
+  말고는 같은 문서가 나온다.
 
 ## 성장 투자 비교 — `src/core/growth.mjs`
 
@@ -180,7 +183,7 @@ node src/cli.mjs import-profile <프로필.json> [--name <계정 이름>] [--out
 ```jsonc
 {
   "schema_version": 1, "kind": "growth",
-  "generated_at": "…", "account": { }, "condition": { }, "assumptions": [], "engine": { },   // 비교 결과와 같다
+  "generated_at": "…", "account": { }, "condition": { }, "assumptions": [], "engine": { }, "cache": { },   // 비교 결과와 같다
   "baseline": { "name": "A", "total_damage": 0, "members": [ { "name": "…", "damage": 0, "share": 0.2 } ],
                 "notes": [], "engine_warnings": [], "ungrown_members": [] },
   "ranking": [ { "rank": 1, "name": "헬름 스킬 10/10/10",
@@ -199,7 +202,93 @@ node src/cli.mjs import-profile <프로필.json> [--name <계정 이름>] [--out
 - `rejected`: 엔진에 보내지 않은 후보 — 잘못 적은 후보, 미보유 니케, 적용 후 값이 범위 밖, 기준 편성에 없는 니케만
   바꾸는 후보, 현재 상태와 같은 후보.
 - 기준 편성 자체에 문제가 있거나 엔진이 기준 편성을 계산하지 못하면 결과 없이 입력 오류다.
-- 엔진 호출은 기준 1건 + 계산한 후보 수다.
+- 엔진 요청은 기준 1건 + 계산한 후보 수다. 캐시에 있는 것은 엔진에 보내지 않는다(기준 편성은 `compare`가 이미
+  계산했으면 적중한다).
+
+## 시뮬 결과 캐시 — `src/core/cache.mjs`
+
+엔진 시뮬 1회가 4~5초라서, 같은 엔진 판·같은 요청의 결과는 다시 계산하지 않는다. `withCache(runtime, store)`가
+런타임(`src/core/runtime.mjs`의 계약)을 감싼다. **캐시는 속도만 바꾼다** — 틀릴 수 있으면 쓰지 않고, 저장소가 고장 나도
+계산은 끝까지 한다.
+
+| 쓰는 곳 | 저장소 | 남는 기간 |
+|---|---|---|
+| CLI `compare`·`suggest`·`growth` | 파일 — `createFileCacheStore(dir)`(`src/runtime/node.mjs`), 기본 `data/cache/sim/`(gitignore) | 지울 때까지 |
+| 오버레이(`app/`) | 메모리 — `createMemoryStore()`(최근 500건) | 앱을 끌 때까지 |
+
+CLI는 `--no-cache`로 끄고(읽지도 쓰지도 않는다) `--cache-dir <폴더>`로 폴더를 바꾼다.
+
+### 키
+
+`키 = SHA-256(엔진 커밋 + 줄바꿈 + 요청의 정규화된 JSON)` — 소문자 16진수 64자. 해시는 Web Crypto(`crypto.subtle`)로 만든다.
+
+- 엔진 커밋: 런타임의 `engineVersion().commit`(엔진 저장소의 HEAD 해시 40자). **커밋이 다르면 다른 키다.**
+- 정규화된 JSON(`canonicalJson`): 객체의 키를 코드 단위 순으로 정렬하고 공백 없이 적는다. 그래서 키 순서와 무관하다.
+  배열 순서는 지킨다(편성의 배치 순서가 결과를 바꾼다). 값이 `undefined`인 키는 없는 것으로 본다. `null`은 그대로 둔다.
+- 호출용 칸은 뺀다: 요청 맨 위의 `id`(배치 결과 줄에 되돌려 받는 표시)뿐이다(`CALL_ONLY_FIELDS`). 안쪽의 `id`는 내용이다.
+
+### 저장하고 읽는 조건
+
+아래를 **모두** 만족하는 요청만 저장소에서 찾고, 계산한 뒤 저장한다. 하나라도 어긋나면 그 요청은 매번 엔진에 간다.
+
+1. 결정론이 보장된다 — `sim.expected === true`이거나 `sim.seed`가 정수다(엔진 `docs/SIM-JSON.md` §보장). 계산 모듈이
+   만드는 요청은 항상 기대값 모드다(§전투 조건).
+2. 요청 밖의 파일을 가리키지 않는다 — `profile`이 이름(문자열, 엔진의 `profiles/` 파일)이거나 `boss`가 `.json`
+   경로면 엔진 커밋이 같아도 내용이 바뀔 수 있어 저장하지 않는다. 계산 모듈은 프로필을 요청 안에 객체로 싣는다.
+3. 엔진 판을 안다 — `engineVersion()`이 `commit`(빈 문자열 아님)과 `dirty: false`를 돌려줬다. 커밋을 모르거나, 엔진
+   작업 폴더에 커밋하지 않은 변경이 있거나(`dirty: true`), 깨끗한지 확인할 수 없으면(`dirty`가 없거나 null) 그 배치
+   전체가 저장소를 건드리지 않는다. 엔진 판은 배치마다 다시 묻는다. `dirty`의 기준은 엔진의 `evaluator.dirty`와 같다
+   (추적 중인 파일의 변경 — `git status --porcelain -uno`).
+4. 결과가 오류가 아니다 — `{error}` 줄은 저장하지 않는다. 결과가 스스로 밝힌 `evaluator`가 3에서 확인한 커밋과 다르거나
+   dirty여도(계산 도중 엔진이 바뀜) 저장하지 않는다.
+
+### 배치 한 번의 흐름과 통계
+
+적중한 요청은 엔진에 보내지 않는다. 빗나간 요청만(같은 배치 안의 같은 요청은 한 번만) 엔진에 보내고, 입력 순서대로
+합쳐 돌려준다. 줄의 `id`는 입력 배치에서의 자리다. 계산 모듈은 `engineAccess(deps).runBatchWithStats()`로 결과와
+통계를 함께 받아 결과 문서의 `cache`에 싣는다:
+
+```jsonc
+{ "hits": 2,          // 엔진에 보내지 않고 채운 요청 수
+  "misses": 1,        // 엔진에 보낸 요청 수 (hits + misses = 요청 수)
+  "stored": 1,        // 새로 저장한 수
+  "warnings": [] }    // 캐시를 못 쓴 이유·저장소 문제 (사람이 읽는 문장)
+```
+
+캐시로 감싸지 않은 런타임이면 `cache`는 `null`이다. CLI 표에는 `캐시: 적중 2건 · 엔진 계산 1건 · 새로 저장 1건`
+(쓰지 않았으면 `캐시: 쓰지 않음`) 한 줄과 경고(`  ! …`)가 나온다. 오버레이의 결과 화면에도 같은 줄이 나온다.
+
+### 저장 항목
+
+파일 저장소는 항목 하나가 파일 하나다: `data/cache/sim/<키 앞 두 글자>/<키>.json`. 메모리 저장소도 같은 항목을 담는다.
+
+```jsonc
+{
+  "cache_schema_version": 1,
+  "key": "<64자 해시>",
+  "engine": { "repo": "Jgaram/nikke-calc", "commit": "67835ca…" },
+  "request": { },                  // 키를 만든 요청(호출용 칸 제외) — 무엇의 결과인지 사람이 볼 수 있다
+  "result": { },                   // 엔진 결과 줄 그대로(id 제외). evaluator 포함
+  "stored_at": "2026-11-12T02:30:00.000Z"
+}
+```
+
+파일은 임시 파일에 쓴 뒤 이름을 바꾼다(여러 프로세스가 함께 써도 반쯤 쓴 파일이 읽히지 않는다).
+
+### 무효화 규칙
+
+- **엔진이 바뀌면 자동으로 빗나간다.** 서브모듈 커밋이 바뀌면 키가 달라져 옛 항목은 읽히지 않는다(지워지지는 않는다).
+  원래 커밋으로 돌아가면 그 커밋의 항목을 다시 쓴다.
+- **요청이 바뀌면 다른 키다.** 계정 육성·편성·배치 순서·보스·전투 시간 등 엔진에 가는 모든 칸이 키에 들어간다.
+- **읽을 때 다시 확인한다.** 항목의 `cache_schema_version`·`key`·`engine.commit`·`request`(정규화해 비교)·`result`
+  (오류가 아니고 `total_damage`가 수, `members`가 배열, `evaluator`가 같은 커밋)가 맞지 않으면 적중으로 치지 않고
+  다시 계산해 덮어쓴다(경고 1줄).
+- **저장소 고장은 실패가 아니다.** 읽기·쓰기가 던지거나 파일이 JSON이 아니면 그 요청을 다시 계산하고 `warnings`에 적는다.
+- **만료 시간은 없다.** 결정론 요청의 결과는 엔진 커밋이 같으면 바뀌지 않는다. 항목 형식을 바꿀 때는
+  `CACHE_SCHEMA_VERSION`을 올린다(옛 항목은 다시 계산된다).
+- **손으로 비우기:** `data/cache/sim/` 폴더를 지운다. 언제 지워도 안전하다. 파일 저장소에는 크기 제한·자동 정리가 없다.
+- 캐시가 가리지 못하는 것: 엔진 커밋 밖에서 결과를 바꾸는 것(파이썬 버전, 추적되지 않는 엔진 파일). 의심되면
+  `--no-cache`로 다시 계산해 대조한다.
 
 ## 데이터 변경 감지 — `src/tier/detect.mjs`
 

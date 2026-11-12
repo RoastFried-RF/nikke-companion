@@ -10,11 +10,25 @@ const pct = (x) => `${(x * 100).toFixed(1)}%`;
 const width = (s) => [...s].reduce((w, ch) => w + (/[ᄀ-ᇿ㄰-㆏가-힣]/.test(ch) ? 2 : 1), 0);
 const padStartWide = (s, w) => ' '.repeat(Math.max(0, w - width(s))) + s;
 
+/**
+ * 시뮬 결과 캐시 한 줄(+ 경고). 결과 문서에 `cache` 칸이 없으면(캐시가 생기기 전의 문서) 아무것도 내지 않는다.
+ * 적중 = 엔진에 보내지 않고 채운 요청, 엔진 계산 = 엔진에 보낸 요청.
+ */
+export function cacheLines(cache) {
+  if (cache === undefined) return [];
+  if (cache === null) return ['캐시: 쓰지 않음'];
+  return [
+    `캐시: 적중 ${cache.hits}건 · 엔진 계산 ${cache.misses}건 · 새로 저장 ${cache.stored}건`,
+    ...(cache.warnings ?? []).map((w) => `  ! ${w}`),
+  ];
+}
+
 function headerLines(report) {
   const acct = report.account;
   return [
     `계정: ${acct.name ?? '(이름 없음)'}${acct.is_test_data ? '  [검증용 데이터]' : ''}`,
     `엔진: ${report.engine?.repo ?? '?'} @ ${report.engine?.commit?.slice(0, 8) ?? '버전 미확인'}`,
+    ...cacheLines(report.cache),
     '가정:',
     ...report.assumptions.map((a) => `  - ${a}`),
   ];

@@ -16,7 +16,8 @@ const SQUADS = 'data/samples/squads.sample.json';
 const UPGRADES = 'data/samples/upgrades.sample.json';
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
-const cli = (...args) => spawnSync(process.execPath, ['src/cli.mjs', 'growth', ...args], { cwd: ROOT, encoding: 'utf8' });
+// --no-cache: 이 테스트는 실제 엔진을 불러야 한다(캐시는 cache.engine.test.mjs가 임시 폴더로 확인한다).
+const cli = (...args) => spawnSync(process.execPath, ['src/cli.mjs', 'growth', '--no-cache', ...args], { cwd: ROOT, encoding: 'utf8' });
 
 test('CLI growth: 샘플 계정에 업그레이드 후보를 가상 적용해 실제 엔진으로 전후 총딜과 증가율을 낸다', () => {
   const out = path.join(os.tmpdir(), `nikke-growth-${process.pid}.json`);

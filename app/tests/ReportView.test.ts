@@ -179,6 +179,27 @@ describe('샘플에 없는 경우(샘플을 복사해 바꾼 결과)', () => {
     expect(w.find('[data-testid="engine-version"]').text()).toBe('엔진: Jgaram/nikke-calc @ 버전 미확인');
   });
 
+  it('시뮬 결과 캐시를 한 줄로 적는다. 칸이 없는 옛 결과 파일에는 그리지 않는다', () => {
+    const cached = render(variant((r) => void (r.cache = { hits: 2, misses: 1, stored: 1, warnings: [] })));
+    expect(cached.find('[data-testid="cache"]').text()).toBe('캐시: 적중 2건 · 엔진 계산 1건 · 새로 저장 1건');
+    expect(cached.find('[data-testid="cache-warning"]').exists()).toBe(false);
+
+    const unused = render(variant((r) => void (r.cache = null)));
+    expect(unused.find('[data-testid="cache"]').text()).toBe('캐시: 쓰지 않음');
+
+    const old = render(variant((r) => void delete r.cache));
+    expect(old.find('[data-testid="cache"]').exists()).toBe(false);
+
+    const warned = render(
+      variant((r) => void (r.cache = { hits: 0, misses: 3, stored: 0, warnings: ['엔진 커밋을 알 수 없어 캐시를 쓰지 않았다'] })),
+    );
+    expect(warned.findAll('[data-testid="cache-warning"]').map((el) => el.text())).toEqual(['! 엔진 커밋을 알 수 없어 캐시를 쓰지 않았다']);
+    // warnings 칸이 없는 통계도 그린다.
+    expect(render(variant((r) => void (r.cache = { hits: 1, misses: 0, stored: 0 }))).find('[data-testid="cache"]').text()).toBe(
+      '캐시: 적중 1건 · 엔진 계산 0건 · 새로 저장 0건',
+    );
+  });
+
   it('수정된 엔진 작업 폴더로 계산한 결과임을 적는다', () => {
     const w = render(variant((r) => void (r.engine!.dirty = true)));
     expect(w.find('[data-testid="engine-version"]').text()).toContain('(수정된 작업 폴더)');

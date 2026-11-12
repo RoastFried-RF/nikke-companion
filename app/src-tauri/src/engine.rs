@@ -250,22 +250,33 @@ pub fn catalog(engine_dir: &Path) -> Result<Value, EngineError> {
     Ok(json!({ "nikkes": nikkes, "bosses": bosses }))
 }
 
-/// 엔진 버전: `{repo, commit}`. 커밋을 알 수 없으면 null이다(값을 지어내지 않는다).
+/// 엔진 버전: `{repo, commit, dirty}`. 커밋을 알 수 없으면 commit·dirty가 null이다(값을 지어내지 않는다).
+///
+/// `dirty`는 엔진이 결과에 싣는 `evaluator.dirty`와 같은 기준이다: 추적 중인 파일에 커밋하지 않은 변경이 있나
+/// (`git status --porcelain -uno`). 시뮬 결과 캐시(루트 `src/core/cache.mjs`)가 이 값으로 캐시를 쓸지 정한다 —
+/// Node 런타임(`src/runtime/node.mjs`의 `engineVersion`)과 같은 값을 내야 한다.
 pub fn version(engine_dir: &Path) -> Value {
-    let mut cmd = Command::new("git");
-    cmd.arg("-C")
-        .arg(engine_dir)
-        .args(["rev-parse", "HEAD"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null());
-    hide_console(&mut cmd);
-    let commit = cmd
-        .output()
-        .ok()
-        .filter(|out| out.status.success())
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
-        .filter(|commit| !commit.is_empty());
-    json!({ "repo": ENGINE_REPO, "commit": commit })
+    // `--no-optional-locks`: 엔진 프로세스와 동시에 불려도 `.git/index`를 건드리지 않는다.
+    let git = |args: &[&str]| -> Option<String> {
+        let mut cmd = Command::new("git");
+        cmd.arg("--no-optional-locks")
+            .arg("-C")
+            .arg(engine_dir)
+            .args(args)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null());
+        hide_console(&mut cmd);
+        cmd.output()
+            .ok()
+            .filter(|out| out.status.success())
+            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+    let commit = git(&["rev-parse", "HEAD"]).filter(|commit| !commit.is_empty());
+    let dirty = commit
+        .as_ref()
+        .and_then(|_| git(&["status", "--porcelain", "-uno"]))
+        .map(|status| !status.is_empty());
+    json!({ "repo": ENGINE_REPO, "commit": commit, "dirty": dirty })
 }
 
 // ── 배치 실행 ─────────────────────────────────────────────────────────────────
@@ -718,6 +729,9 @@ mod tests {
         let v = version(&std::env::temp_dir().join("nikke-companion-없는-엔진"));
         assert_eq!(v["repo"], ENGINE_REPO);
         assert!(v["commit"].is_null());
+        // 커밋을 모르면 깨끗한지도 모른다 — false(깨끗함)로 지어내지 않는다(캐시가 이 값을 믿는다).
+        assert!(v.as_object().expect("객체").contains_key("dirty"));
+        assert!(v["dirty"].is_null());
     }
 
     #[test]

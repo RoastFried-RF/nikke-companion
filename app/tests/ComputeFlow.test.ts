@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../src/App.vue';
 import * as backend from '../src/lib/backend';
+import { simCache } from '../src/lib/runtime';
 import type { CompareReport, EngineProgress, EngineRequest, EngineRow } from '../src/types';
 import fixture from './fixtures/compare.sample.json';
 import { ACCOUNT_PATH, catalog, CONDITION_PATH, documents, FAKE_EVALUATOR, fakeRow, SQUADS_PATH } from './helpers/fakeEngine';
@@ -67,14 +68,35 @@ async function fillPaths(w: Wrapper): Promise<void> {
   await at(w, 'condition-path').setValue(CONDITION_PATH);
 }
 
-async function start(w: Wrapper): Promise<void> {
+/** 실행 단추만 누른다(계산이 어디까지 갔는지는 기다리지 않는다). */
+async function press(w: Wrapper): Promise<void> {
   await at(w, 'run-compute').trigger('click');
   await flushPromises();
+}
+
+/**
+ * 계산이 엔진에 닿거나(`engineCalls`보다 배치 호출이 늘었다) 끝날 때까지 기다린다.
+ * 시뮬 결과 캐시의 키는 Web Crypto로 만든다 — 진짜 비동기라 `flushPromises` 한 번으로는 끝났다고 볼 수 없다.
+ */
+async function settle(w: Wrapper, engineCalls = Number.POSITIVE_INFINITY): Promise<void> {
+  await vi.waitFor(() => {
+    const computing = at(w, 'compute-progress').exists();
+    if (computing && api.engineRunBatch.mock.calls.length <= engineCalls) throw new Error('계산이 아직 엔진에 닿지 않았다');
+  });
+  await flushPromises();
+}
+
+/** 실행 단추를 누르고, 계산이 엔진에 닿거나 끝날 때까지 기다린다. */
+async function start(w: Wrapper): Promise<void> {
+  const engineCalls = api.engineRunBatch.mock.calls.length;
+  await press(w);
+  await settle(w, engineCalls);
 }
 
 beforeEach(() => {
   vi.resetAllMocks();
   localStorage.clear();
+  simCache.clear(); // 시뮬 결과 캐시는 앱이 켜져 있는 동안 남는다 — 테스트끼리 섞이지 않게 비운다.
   batches = [];
   api.overlayStatus.mockResolvedValue({ visible: true, click_through: false, shortcut_problems: [] });
   api.startupReportPath.mockResolvedValue(null);
@@ -182,11 +204,11 @@ describe('추천 실행', () => {
     api.readJsonFile.mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
     const w = await render();
     await fillPaths(w);
-    await start(w);
+    await press(w);
     expect(at(w, 'compute-progress').text()).toContain('입력 파일과 엔진 데이터를 읽는 중');
     expect(api.engineRunBatch).not.toHaveBeenCalled();
     release(structuredClone(documents[ACCOUNT_PATH]));
-    await flushPromises();
+    await settle(w);
     expect(at(w, 'compute-progress').exists()).toBe(false);
     expect(w.findAll('[data-testid="ranking-entry"]').length).toBeGreaterThan(0);
   });
@@ -303,6 +325,39 @@ describe('오류 표시', () => {
     await fillPaths(w);
     await start(w);
     expect(at(w, 'error').exists()).toBe(false);
+    expect(w.findAll('[data-testid="ranking-entry"]').length).toBeGreaterThan(0);
+  });
+});
+
+describe('시뮬 결과 캐시', () => {
+  it('같은 계산을 다시 실행하면 엔진을 부르지 않고 같은 순위를 그린다. 캐시 줄이 그것을 알린다', async () => {
+    const w = await render();
+    await fillPaths(w);
+    await at(w, 'suggest-limit').setValue('6');
+    await at(w, 'suggest-top').setValue('3');
+    await start(w);
+    expect(api.engineRunBatch).toHaveBeenCalledTimes(1);
+    expect(at(w, 'cache').text()).toBe('캐시: 적중 0건 · 엔진 계산 6건 · 새로 저장 6건');
+    const first = { names: texts(w, 'squad-name'), totals: texts(w, 'total-raw') };
+
+    await start(w);
+    expect(api.engineRunBatch).toHaveBeenCalledTimes(1);
+    expect(at(w, 'cache').text()).toBe('캐시: 적중 6건 · 엔진 계산 0건 · 새로 저장 0건');
+    expect({ names: texts(w, 'squad-name'), totals: texts(w, 'total-raw') }).toEqual(first);
+    expect(at(w, 'cache-warning').exists()).toBe(false);
+    expect(at(w, 'error').exists()).toBe(false);
+    expect(at(w, 'compute-progress').exists()).toBe(false);
+  });
+
+  it('엔진 판을 알 수 없으면 캐시 없이 계산하고 이유를 보인다', async () => {
+    api.engineVersion.mockResolvedValue({ repo: 'fake/engine', commit: null, dirty: null });
+    const w = await render();
+    await fillPaths(w);
+    await start(w);
+    await start(w);
+    expect(api.engineRunBatch).toHaveBeenCalledTimes(2);
+    expect(at(w, 'cache').text()).toMatch(/^캐시: 적중 0건 · 엔진 계산 \d+건 · 새로 저장 0건$/);
+    expect(texts(w, 'cache-warning')).toEqual(['! 엔진 커밋을 알 수 없어 캐시를 쓰지 않았다']);
     expect(w.findAll('[data-testid="ranking-entry"]').length).toBeGreaterThan(0);
   });
 });

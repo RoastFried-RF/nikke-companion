@@ -5,14 +5,16 @@
 //   node src/cli.mjs growth  --account <계정.json> --condition <조건.json> --squads <편성.json> [--squad <편성 이름>] --upgrades <후보.json> [--json <결과.json>]
 //   node src/cli.mjs detect-changes --from <커밋> --to <커밋> [--engine <엔진 저장소 경로>] [--json <결과.json>]
 //   node src/cli.mjs import-profile <엔진 프로필.json> [--name <계정 이름>] [--out-dir <폴더>] [--force] [--json <결과.json>]
+// compare·suggest·growth는 시뮬 결과 캐시(data/cache/sim/)를 기본으로 쓴다: [--no-cache] [--cache-dir <폴더>]
 // 종료 코드: 0 성공 · 1 실행 오류 · 2 입력 오류
 import fs from 'node:fs';
+import { withCache } from './core/cache.mjs';
 import { suggestSquads } from './core/candidates.mjs';
 import { compareSquads, InputError } from './core/compare.mjs';
 import { compareGrowth } from './core/growth.mjs';
 import { importProfileFile } from './core/import-profile.mjs';
 import { renderReport, renderGrowthReport, renderImportReport } from './core/render.mjs';
-import { nodeRuntime } from './runtime/node.mjs';
+import { createFileCacheStore, nodeRuntime } from './runtime/node.mjs';
 import { detectChanges } from './tier/detect.mjs';
 
 const USAGE = [
@@ -22,10 +24,12 @@ const USAGE = [
   '  node src/cli.mjs growth  --account <계정.json> --condition <조건.json> --squads <편성.json> [--squad <기준 편성 이름, 기본 첫 편성>] --upgrades <후보.json> [--json <결과.json>]',
   '  node src/cli.mjs detect-changes --from <엔진 커밋> --to <엔진 커밋> [--engine <엔진 저장소, 기본 vendor/nikke-calc>] [--json <결과.json>]',
   '  node src/cli.mjs import-profile <엔진 프로필.json> [--name <계정 이름, 기본 프로필 이름>] [--out-dir <폴더, 기본 data/accounts>] [--force] [--json <결과.json>]',
+  'compare·suggest·growth는 같은 엔진 판·같은 요청의 시뮬 결과를 다시 계산하지 않는다(캐시):',
+  '  [--no-cache] 캐시를 읽지도 쓰지도 않는다   [--cache-dir <폴더, 기본 data/cache/sim>]',
 ].join('\n');
 
 /** 값을 받지 않는 인자. 뒤에 오는 낱말을 값으로 삼키지 않는다. */
-const FLAGS = new Set(['force']);
+const FLAGS = new Set(['force', 'no-cache']);
 
 /** `--이름 값`은 opts에, 이름 없는 낱말은 차례대로 opts._에 담는다. */
 function parseArgs(argv) {
@@ -73,12 +77,21 @@ function pickSquad(squadsDoc, name) {
 
 const [command, ...rest] = process.argv.slice(2);
 const opts = parseArgs(rest);
-// 계산 모듈은 엔진을 직접 부르지 않는다. 여기서 Node 런타임을 넘긴다.
-const deps = { runtime: nodeRuntime };
+
+/**
+ * 계산 모듈에 넘길 것. 계산 모듈은 엔진을 직접 부르지 않는다 — 여기서 Node 런타임을 넘긴다.
+ * 기본은 시뮬 결과 캐시(파일 저장소)로 감싼 런타임이고, --no-cache면 감싸지 않는다(결과의 cache가 null).
+ */
+function engineDeps() {
+  if (opts['no-cache'] === true) return { runtime: nodeRuntime };
+  if (opts['cache-dir'] === true) throw new InputError('인자가 빠졌다', [{ path: '--cache-dir', message: '캐시 폴더 경로가 필요하다' }]);
+  return { runtime: withCache(nodeRuntime, createFileCacheStore(opts['cache-dir'])) };
+}
 
 try {
   let report;
   let render = renderReport;
+  const deps = ['compare', 'suggest', 'growth'].includes(command) ? engineDeps() : {};
   if (command === 'growth') {
     const upgradesDoc = readJsonFile('upgrades', opts.upgrades);
     report = await compareGrowth({

@@ -4,8 +4,11 @@
 // 직접 하지 않는다. 엔진이 필요한 함수는 `deps.runtime`으로 아래 모양의 객체를 받는다:
 //
 //   runtime.loadCatalog()            → {nikkes, bosses}            (값 또는 Promise)
-//   runtime.engineVersion()          → {repo, commit}              (값 또는 Promise)
+//   runtime.engineVersion()          → {repo, commit, dirty}       (값 또는 Promise. 모르면 commit·dirty가 null)
 //   runtime.runBatch(requests, opts) → Promise<결과[]>  입력 순서 그대로, 줄마다 결과 또는 {error}
+//
+// 선택: runtime.runBatchWithStats(requests, opts) → Promise<{results, cache}> — 시뮬 결과 캐시로 감싼 런타임
+// (`src/core/cache.mjs`의 withCache)에만 있다. 계산 모듈은 `engineAccess().runBatchWithStats`로 부른다.
 //
 // 구현: Node는 `src/runtime/node.mjs`, 데스크톱 앱은 `app/src/lib/runtime.ts`(Rust 명령 호출).
 // 이 파일과 계산 모듈은 `node:` 모듈을 import하지 않는다(tests/unit/core-runtime.test.mjs가 확인한다).
@@ -34,6 +37,16 @@ export function engineAccess(deps = {}) {
       if (typeof deps.runBatch === 'function') return deps.runBatch(requests, options);
       if (typeof runtime?.runBatch !== 'function') throw new Error(NO_RUNTIME);
       return runtime.runBatch(requests, options);
+    },
+    /**
+     * 요청 여러 건 → `{results, cache}`. `cache`는 캐시를 쓰는 런타임(src/core/cache.mjs의 withCache)일 때만
+     * 통계 `{hits, misses, stored, warnings}`이고, 아니면 null(캐시를 쓰지 않았다)이다.
+     */
+    async runBatchWithStats(requests, options) {
+      if (typeof deps.runBatch !== 'function' && typeof runtime?.runBatchWithStats === 'function') {
+        return runtime.runBatchWithStats(requests, options);
+      }
+      return { results: await this.runBatch(requests, options), cache: null };
     },
     /** 엔진 버전. 런타임이 알려 주지 못하면 커밋은 null(버전 미확인)이다 — 값을 지어내지 않는다. */
     async version() {

@@ -1,0 +1,102 @@
+$ node --test tests/integration/
+TAP version 13
+# Subtest: 같은 compare를 두 번 돌리면 두 번째는 엔진 호출 0건이고 수치가 같다 (실제 엔진, 파일 저장소)
+ok 1 - 같은 compare를 두 번 돌리면 두 번째는 엔진 호출 0건이고 수치가 같다 (실제 엔진, 파일 저장소)
+  ---
+  duration_ms: 17527.4719
+  ...
+# Subtest: CLI: compare·suggest·growth는 기본으로 캐시를 쓰고 표에 한 줄로 보인다. --no-cache로 끈다
+ok 2 - CLI: compare·suggest·growth는 기본으로 캐시를 쓰고 표에 한 줄로 보인다. --no-cache로 끈다
+  ---
+  duration_ms: 19260.5438
+  ...
+# Subtest: data/cache/는 .gitignore에 있다
+ok 3 - data/cache/는 .gitignore에 있다
+  ---
+  duration_ms: 0.292
+  ...
+# Subtest: 엔진 카탈로그에 샘플 계정의 니케와 보스 프리셋이 있다
+ok 4 - 엔진 카탈로그에 샘플 계정의 니케와 보스 프리셋이 있다
+  ---
+  duration_ms: 80.8679
+  ...
+# Subtest: 배치는 입력 순서를 지키고, 한 건의 오류가 다른 건을 막지 않는다
+ok 5 - 배치는 입력 순서를 지키고, 한 건의 오류가 다른 건을 막지 않는다
+  ---
+  duration_ms: 899.512
+  ...
+# Subtest: 샘플 계정으로 편성 비교가 끝까지 돈다: 순위·제외·엔진 버전·결정론
+ok 6 - 샘플 계정으로 편성 비교가 끝까지 돈다: 순위·제외·엔진 버전·결정론
+  ---
+  duration_ms: 9548.0507
+  ...
+# Subtest: 육성 상태가 결과에 반영된다: 스킬 레벨을 낮추면 총딜이 내려간다
+ok 7 - 육성 상태가 결과에 반영된다: 스킬 레벨을 낮추면 총딜이 내려간다
+  ---
+  duration_ms: 3642.6421
+  ...
+# Subtest: 빈 항목으로 보유한 니케는 엔진의 미육성과 같은 값으로 계산된다 (만렙으로 계산되지 않는다)
+ok 8 - 빈 항목으로 보유한 니케는 엔진의 미육성과 같은 값으로 계산된다 (만렙으로 계산되지 않는다)
+  ---
+  duration_ms: 696.7118
+  ...
+# Subtest: CLI: 표를 출력하고 결과 JSON을 쓴다. 입력 오류는 종료 코드 2
+ok 9 - CLI: 표를 출력하고 결과 JSON을 쓴다. 입력 오류는 종료 코드 2
+  ---
+  duration_ms: 3757.2836
+  ...
+# Subtest: CLI detect-changes: 실제 엔진의 같은 커밋끼리는 변경이 없고, 니케 전원이 그대로다
+ok 10 - CLI detect-changes: 실제 엔진의 같은 커밋끼리는 변경이 없고, 니케 전원이 그대로다
+  ---
+  duration_ms: 521.9048
+  ...
+# Subtest: CLI detect-changes: 실제 엔진의 직전 커밋과 비교한 결과가 형식에 맞다
+ok 11 - CLI detect-changes: 실제 엔진의 직전 커밋과 비교한 결과가 형식에 맞다
+  ---
+  duration_ms: 510.9694
+  ...
+# Subtest: CLI growth: 샘플 계정에 업그레이드 후보를 가상 적용해 실제 엔진으로 전후 총딜과 증가율을 낸다
+ok 12 - CLI growth: 샘플 계정에 업그레이드 후보를 가상 적용해 실제 엔진으로 전후 총딜과 증가율을 낸다
+  ---
+  duration_ms: 10304.984
+  ...
+# Subtest: CLI growth: 잘못된 인자는 엔진을 부르기 전에 종료 코드 2
+ok 13 - CLI growth: 잘못된 인자는 엔진을 부르기 전에 종료 코드 2
+  ---
+  duration_ms: 163.8412
+  ...
+# Subtest: 샘플 프로필을 실제 엔진 데이터로 가져오면 모두 옮겨지고 검사를 통과한다
+ok 14 - 샘플 프로필을 실제 엔진 데이터로 가져오면 모두 옮겨지고 검사를 통과한다
+  ---
+  duration_ms: 6.9049
+  ...
+# Subtest: 가져온 계정으로 편성 비교가 끝까지 돌고, 엔진 프로필을 그대로 넘긴 계산과 총딜이 같다
+ok 15 - 가져온 계정으로 편성 비교가 끝까지 돌고, 엔진 프로필을 그대로 넘긴 계산과 총딜이 같다
+  ---
+  duration_ms: 10498.8532
+  ...
+# Subtest: 실제 카탈로그와 샘플 계정으로 만든 후보는 모두 조건을 지킨다 (엔진 호출 없음)
+ok 16 - 실제 카탈로그와 샘플 계정으로 만든 후보는 모두 조건을 지킨다 (엔진 호출 없음)
+  ---
+  duration_ms: 2.4622
+  ...
+# Subtest: CLI suggest: 샘플 계정으로 후보를 만들어 실제 엔진으로 비교하고 상위 편성을 출력한다
+ok 17 - CLI suggest: 샘플 계정으로 후보를 만들어 실제 엔진으로 비교하고 상위 편성을 출력한다
+  ---
+  duration_ms: 10076.1637
+  ...
+# Subtest: CLI suggest: 잘못된 인자는 엔진을 부르기 전에 종료 코드 2
+ok 18 - CLI suggest: 잘못된 인자는 엔진을 부르기 전에 종료 코드 2
+  ---
+  duration_ms: 110.0103
+  ...
+1..18
+# tests 18
+# suites 0
+# pass 18
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 36851.901
+

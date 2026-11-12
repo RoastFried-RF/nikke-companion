@@ -15,7 +15,8 @@ const CONDITION = 'data/samples/condition.solo-raid.json';
 const account = JSON.parse(fs.readFileSync(path.join(ROOT, ACCOUNT), 'utf8'));
 const catalog = loadCatalog();
 
-const cli = (...args) => spawnSync(process.execPath, ['src/cli.mjs', 'suggest', ...args], { cwd: ROOT, encoding: 'utf8' });
+// --no-cache: 이 테스트는 실제 엔진을 불러야 한다(캐시는 cache.engine.test.mjs가 임시 폴더로 확인한다).
+const cli = (...args) => spawnSync(process.execPath, ['src/cli.mjs', 'suggest', '--no-cache', ...args], { cwd: ROOT, encoding: 'utf8' });
 
 function assertValidMembers(members, label) {
   assert.equal(members.length, 5, label);

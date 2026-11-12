@@ -248,7 +248,7 @@ async fn engine_catalog(app: AppHandle) -> Result<Value, String> {
     blocking(move || engine::catalog(&config.engine_dir).map_err(|e| e.to_string())).await
 }
 
-/// 엔진 버전(`{repo, commit}`). 커밋을 알 수 없으면 commit은 null.
+/// 엔진 버전(`{repo, commit, dirty}`). 커밋을 알 수 없으면 commit·dirty는 null.
 #[tauri::command]
 async fn engine_version(app: AppHandle) -> Result<Value, String> {
     let config = engine_config(&app)?;
