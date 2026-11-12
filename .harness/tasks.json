@@ -991,9 +991,19 @@
         "다른 창 크기·전체 화면에서도 인식된다"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261112T040936-P-019-a1",
+        "verified_tree": "b7e0f57ce6acf2c0ce415452e97859a122d61408",
+        "verified_at": "2026-11-12T04:37:54.050Z",
+        "commit": null
+      }
     },
     {
       "id": "P-017",

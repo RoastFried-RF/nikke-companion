@@ -7,6 +7,7 @@
 //! - `game_window`: 게임 창을 고르는 규칙, 창 정보, 오버레이를 게임 창에 붙이는 위치 계산
 //! - `capture`: 캡처한 프레임의 판정(빈 화면)·파일 이름·PNG 저장
 //! - `capture_cli`: 명령줄 도구 `nikke-capture`의 동작
+//! - `recognize`: 요격전 화면 인식 — 캡처한 프레임이 이상 개체의 어느 화면·어느 보스인지(색만 본다, 창·파일을 모른다)
 //! - `game_win32`(비공개): 위 규칙에 값을 대 주는 Win32 호출 — 창 열거, 창 사각형, Windows.Graphics.Capture
 //! - `overlay_win32`: 오버레이 창(이 앱의 창)만 다루는 Win32 호출 — 활성화 없이 보이기·숨기기, 파일 고르기 창의 부모
 //! - `engine_win32`(비공개): 이 앱이 띄운 엔진 프로세스를 묶어 끝내는 Job Object
@@ -28,6 +29,7 @@ pub mod game_window;
 pub mod overlay_state;
 #[cfg(windows)]
 pub mod overlay_win32;
+pub mod recognize;
 pub mod report;
 
 use std::path::{Path, PathBuf};
@@ -46,6 +48,7 @@ use game_window::{follow_move, follow_target, GameError, GameWindowInfo, GameWin
 use overlay_state::{
     top_right_position, OverlayAction, OverlayState, Transition, VisibilityChange,
 };
+use recognize::Recognition;
 
 /// tauri.conf.json의 창 label.
 const MAIN_WINDOW: &str = "main";
@@ -368,6 +371,26 @@ async fn capture_game(app: AppHandle, label: Option<String>) -> Result<CaptureRe
     blocking(move || save_game_capture(&app, label.as_deref()).map_err(|e| e.to_string())).await
 }
 
+/// 게임 화면을 찍어 인식만 한다. 프레임은 이 함수 안에서 쓰고 버린다 — 저장하지도 화면에 넘기지도 않는다.
+/// 저장용 캡처와 겹치지 않게 같은 표시(`capturing`)를 쓴다.
+fn recognize_game(app: &AppHandle) -> Result<Recognition, GameError> {
+    let tracker = app.state::<GameTracker>();
+    if tracker.capturing.swap(true, Ordering::AcqRel) {
+        return Err(GameError::Busy);
+    }
+    let _guard = BusyGuard(&tracker.capturing);
+    let (frame, _method, _window) = capture::grab_game_frame()?;
+    Ok(recognize::recognize(&frame))
+}
+
+/// 지금 게임 화면이 이상 개체 요격전의 어느 화면인지, 어느 보스가 선택됐는지 알아낸다:
+/// `{screen, boss, confidence, evidence, width, height}`. 이미지는 저장하지도 화면에 넘기지도 않는다.
+/// 게임이 없거나 최소화돼 있으면 한국어 오류 문장.
+#[tauri::command]
+async fn recognize_game_screen(app: AppHandle) -> Result<Recognition, String> {
+    blocking(move || recognize_game(&app).map_err(|e| e.to_string())).await
+}
+
 /// 단축키로 게임 화면을 저장한다. 단축키 처리를 막지 않게 따로 돌리고, 결과는 이벤트로 알린다.
 fn capture_from_shortcut(app: &AppHandle) {
     let app = app.clone();
@@ -610,7 +633,8 @@ pub fn run() {
             pick_json_file,
             game_window_status,
             set_follow_game,
-            capture_game
+            capture_game,
+            recognize_game_screen
         ])
         .setup(|app| {
             let window = app

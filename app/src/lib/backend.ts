@@ -15,6 +15,7 @@ import type {
   GameCaptureOutcome,
   GameSnapshot,
   OverlaySnapshot,
+  ScreenRecognition,
 } from '../types';
 
 /** 오버레이 상태가 바뀔 때 Rust가 보내는 이벤트 이름(src-tauri/src/lib.rs의 OVERLAY_STATE_EVENT). */
@@ -95,6 +96,15 @@ export function setFollowGame(enabled: boolean): Promise<GameSnapshot> {
 /** 지금 게임 화면을 PNG로 저장한다. 저장할 폴더는 Rust가 정한다. 실패하면 한국어 오류 문장으로 거부된다. */
 export function captureGame(label: string | null = null): Promise<CaptureRecord> {
   return invoke<CaptureRecord>('capture_game', { label });
+}
+
+/**
+ * 지금 게임 화면이 이상 개체 요격전의 어느 화면인지, 어느 보스가 선택됐는지 알아낸다.
+ * Rust가 게임 창을 찍어 인식만 하고 결과만 돌려준다 — 이미지는 저장하지도 화면에 넘기지도 않는다.
+ * 게임이 없거나 최소화돼 있으면 한국어 오류 문장으로 거부된다.
+ */
+export function recognizeGameScreen(): Promise<ScreenRecognition> {
+  return invoke<ScreenRecognition>('recognize_game_screen');
 }
 
 /** 게임 창 상태가 바뀔 때마다 불린다. 돌려받은 함수로 구독을 끊는다. */

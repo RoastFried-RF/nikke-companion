@@ -1,4 +1,4 @@
-//! 명령줄 도구 `nikke-capture`의 동작(인자 해석 → 창 정보 출력 또는 캡처 저장 → 종료 코드).
+//! 명령줄 도구 `nikke-capture`의 동작(인자 해석 → 창 정보 출력·캡처 저장·화면 인식 → 종료 코드).
 //!
 //! 실행 파일(`src/bin/nikke-capture.rs`)은 이 모듈의 `run`에 실제 게임 접근(`LiveGame`)을 넘길 뿐이다.
 //! 게임 접근을 trait으로 받아서, 게임이 없을 때의 종료 코드와 메시지를 게임 없이 단위 테스트한다.
@@ -6,8 +6,9 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::capture::{self, CaptureRecord};
+use crate::capture::{self, CaptureRecord, Frame};
 use crate::game_window::{self, GameError, GameWindowInfo};
+use crate::recognize;
 
 /// 정상 종료.
 pub const EXIT_OK: i32 = 0;
@@ -32,7 +33,17 @@ nikke-capture — 니케 PC판 게임 창의 정보를 읽거나 화면을 PNG�
       --name    파일 이름에 붙일 라벨. 글자·숫자·-·_만 남긴다. 파일 이름은 <현지 시각>_<라벨>.png
       method는 캡처 방식이다(지금은 wgc — Windows.Graphics.Capture 하나뿐이다)
 
-종료 코드: 0 성공 · 1 인자 오류·최소화·캡처/저장 실패 · 2 게임 창 없음
+  nikke-capture --recognize <PNG 파일>
+      저장해 둔 캡처에서 화면 종류와 선택된 보스를 알아내 JSON 한 줄로 출력한다:
+      {screen, boss, confidence, evidence, width, height}
+      screen은 anomaly_select(이상 개체 보스 선택) · anomaly_squad(이상 개체 편성) · other(그 밖) · unknown(판단하지 않음)
+      boss는 이상 개체 화면일 때 {id, name}, 그 밖에는 null. evidence는 무엇을 보고 판단했는지다
+      unknown도 종료 코드는 0이다(인식은 끝났고, 답이 '모른다'이다)
+
+  nikke-capture --recognize-live
+      게임 창을 찍어 인식만 하고 같은 JSON을 출력한다. 이미지는 저장하지 않는다
+
+종료 코드: 0 성공 · 1 인자 오류·최소화·캡처/저장 실패·이미지 읽기 실패 · 2 게임 창 없음
 ";
 
 /// 해석한 명령.
@@ -44,6 +55,12 @@ pub enum Command {
         out: Option<PathBuf>,
         name: Option<String>,
     },
+    /// 저장해 둔 PNG에서 화면을 인식한다.
+    Recognize {
+        png: PathBuf,
+    },
+    /// 게임 창을 찍어 인식만 한다(저장하지 않는다).
+    RecognizeLive,
 }
 
 /// 인자(프로그램 이름 제외)를 해석한다. 잘못되면 한국어 설명.
@@ -51,6 +68,8 @@ pub fn parse_args(args: &[String]) -> Result<Command, String> {
     let mut info = false;
     let mut out: Option<PathBuf> = None;
     let mut name: Option<String> = None;
+    let mut recognize: Option<PathBuf> = None;
+    let mut recognize_live = false;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let mut value = |option: &str| {
@@ -70,14 +89,38 @@ pub fn parse_args(args: &[String]) -> Result<Command, String> {
                 out = Some(PathBuf::from(dir));
             }
             "--name" => name = Some(value("--name")?),
+            "--recognize" => {
+                let file = value("--recognize")?;
+                if file.trim().is_empty() {
+                    return Err("--recognize의 파일 경로가 비어 있다".to_string());
+                }
+                recognize = Some(PathBuf::from(file));
+            }
+            "--recognize-live" => recognize_live = true,
             other => return Err(format!("모르는 인자다: {other}")),
         }
     }
+    // 한 번에 한 가지 일만 한다: 창 정보, 캡처 저장, 파일 인식, 게임 화면 인식.
+    let saving = out.is_some() || name.is_some();
+    let modes = [info, recognize.is_some(), recognize_live];
+    let alone = |option: &str| Err(format!("{option}는 다른 옵션과 함께 쓸 수 없다"));
+    if modes.iter().filter(|on| **on).count() > 1 || (saving && modes.contains(&true)) {
+        return if info {
+            alone("--info")
+        } else if recognize.is_some() {
+            alone("--recognize")
+        } else {
+            alone("--recognize-live")
+        };
+    }
     if info {
-        if out.is_some() || name.is_some() {
-            return Err("--info는 다른 옵션과 함께 쓸 수 없다".to_string());
-        }
         return Ok(Command::Info);
+    }
+    if let Some(png) = recognize {
+        return Ok(Command::Recognize { png });
+    }
+    if recognize_live {
+        return Ok(Command::RecognizeLive);
     }
     Ok(Command::Capture { out, name })
 }
@@ -87,6 +130,8 @@ pub trait GameAccess {
     fn find(&self) -> Result<GameWindowInfo, GameError>;
     fn default_dir(&self) -> Result<PathBuf, GameError>;
     fn capture(&self, dir: &Path, label: Option<&str>) -> Result<CaptureRecord, GameError>;
+    /// 게임 화면을 찍어 프레임만 돌려준다. 저장하지 않는다.
+    fn frame(&self) -> Result<Frame, GameError>;
 }
 
 /// 실제 게임 창을 상대로 한다.
@@ -103,6 +148,10 @@ impl GameAccess for LiveGame {
 
     fn capture(&self, dir: &Path, label: Option<&str>) -> Result<CaptureRecord, GameError> {
         capture::capture_game_to_dir(dir, label)
+    }
+
+    fn frame(&self) -> Result<Frame, GameError> {
+        capture::grab_game_frame().map(|(frame, _, _)| frame)
     }
 }
 
@@ -129,6 +178,16 @@ fn execute(command: Command, game: &dyn GameAccess) -> Result<String, GameError>
                 None => game.default_dir()?,
             };
             json(serde_json::to_string(&game.capture(&dir, name.as_deref())?))
+        }
+        // 파일 인식은 게임에 닿지 않는다.
+        Command::Recognize { png } => {
+            let frame = capture::load_png(&png)?;
+            json(serde_json::to_string(&recognize::recognize(&frame)))
+        }
+        // 찍은 프레임은 인식에만 쓰고 버린다 — 저장하지 않는다.
+        Command::RecognizeLive => {
+            let frame = game.frame()?;
+            json(serde_json::to_string(&recognize::recognize(&frame)))
         }
     }
 }
@@ -164,7 +223,9 @@ mod tests {
     use super::*;
     use crate::capture::CaptureMethod;
     use crate::game_window::ScreenRect;
-    use std::cell::RefCell;
+    use crate::recognize::synth;
+    use crate::recognize::Boss;
+    use std::cell::{Cell, RefCell};
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
@@ -200,6 +261,10 @@ mod tests {
         default_dir: Result<PathBuf, GameError>,
         capture_error: Option<GameError>,
         captures: RefCell<Vec<(PathBuf, Option<String>)>>,
+        /// 지금 게임 화면(저장 없이 찍을 때 돌려주는 프레임).
+        screen: Frame,
+        /// 저장 없이 찍은 횟수.
+        frames: Cell<u32>,
     }
 
     impl FakeGame {
@@ -209,6 +274,8 @@ mod tests {
                 default_dir: Ok(PathBuf::from("R:\\repo\\data\\captures")),
                 capture_error: None,
                 captures: RefCell::new(Vec::new()),
+                screen: synth::select_screen(1280, 720, Boss::Kraken),
+                frames: Cell::new(0),
             }
         }
 
@@ -246,6 +313,14 @@ mod tests {
                 method: CaptureMethod::Wgc,
                 window: self.found.clone()?,
             })
+        }
+
+        fn frame(&self) -> Result<Frame, GameError> {
+            self.frames.set(self.frames.get() + 1);
+            match &self.capture_error {
+                Some(error) => Err(error.clone()),
+                None => Ok(self.screen.clone()),
+            }
         }
     }
 
@@ -286,6 +361,16 @@ mod tests {
                 name: Some("lobby".to_string())
             })
         );
+        assert_eq!(
+            parse_args(&args(&["--recognize", "D:\\shots\\a.png"])),
+            Ok(Command::Recognize {
+                png: PathBuf::from("D:\\shots\\a.png")
+            })
+        );
+        assert_eq!(
+            parse_args(&args(&["--recognize-live"])),
+            Ok(Command::RecognizeLive)
+        );
     }
 
     #[test]
@@ -299,6 +384,15 @@ mod tests {
             (&["--verbose"][..], "모르는 인자다: --verbose"),
             (&["shot.png"][..], "모르는 인자다: shot.png"),
             (&["--info", "--out", "x"][..], "--info는 다른 옵션과 함께 쓸 수 없다"),
+            (&["--recognize"][..], "--recognize 뒤에 값이 필요하다"),
+            (&["--recognize", "--info"][..], "--recognize 뒤에 값이 필요하다"),
+            (&["--recognize", " "][..], "--recognize의 파일 경로가 비어 있다"),
+            (&["--recognize", "a.png", "--name", "x"][..], "--recognize는 다른 옵션과 함께 쓸 수 없다"),
+            (&["--out", "x", "--recognize", "a.png"][..], "--recognize는 다른 옵션과 함께 쓸 수 없다"),
+            (&["--recognize", "a.png", "--recognize-live"][..], "--recognize는 다른 옵션과 함께 쓸 수 없다"),
+            (&["--recognize-live", "--out", "x"][..], "--recognize-live는 다른 옵션과 함께 쓸 수 없다"),
+            (&["--recognize-live", "--info"][..], "--info는 다른 옵션과 함께 쓸 수 없다"),
+            (&["--recognize-live", "a.png"][..], "모르는 인자다: a.png"),
         ] {
             let message = parse_args(&args(list)).unwrap_err();
             assert!(message.contains(expected), "{list:?}: {message}");
@@ -432,6 +526,150 @@ mod tests {
         assert!(game.captures.borrow().is_empty());
     }
 
+    /// 테스트마다 다른 임시 폴더에 프레임을 PNG로 저장하고 (폴더, 파일)을 돌려준다.
+    fn saved_png(tag: &str, frame: &Frame) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "nikke-companion-recognize-cli-{}-{tag}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = capture::save_png(&dir, "screen.png", frame).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn recognize_prints_the_result_of_a_png_as_one_json_line_without_touching_the_game() {
+        let (dir, path) = saved_png("select", &synth::select_screen(1280, 720, Boss::Ultra));
+        // 게임이 꺼져 있어도 파일 인식은 된다.
+        let game = FakeGame::failing(GameError::NotRunning);
+        let (code, out, err) = run_with(&game, &["--recognize", path.to_str().unwrap()]);
+        assert_eq!(code, EXIT_OK, "{err}");
+        assert_eq!(err, "");
+        assert_eq!(out.lines().count(), 1);
+        let json: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let keys: Vec<&str> = json.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(
+            keys,
+            ["screen", "boss", "confidence", "evidence", "width", "height"]
+        );
+        assert_eq!(json["screen"], "anomaly_select");
+        assert_eq!(
+            json["boss"],
+            serde_json::json!({ "id": "ultra", "name": "울트라" })
+        );
+        assert_eq!(json["width"], 1280);
+        assert_eq!(json["height"], 720);
+        assert!(json["evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|line| line.is_string()));
+        assert_eq!(game.frames.get(), 0);
+        assert!(game.captures.borrow().is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        let (dir, path) = saved_png("squad", &synth::squad_screen(1920, 1080, Boss::Harvester));
+        let (code, out, _) = run_with(&game, &["--recognize", path.to_str().unwrap()]);
+        assert_eq!(code, EXIT_OK);
+        let json: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(json["screen"], "anomaly_squad");
+        assert_eq!(json["boss"]["name"], "하베스터");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn recognize_reports_other_and_unknown_with_exit_code_0() {
+        let game = FakeGame::running();
+        // 이상 개체 화면이 아니다.
+        let (dir, path) = saved_png("other", &synth::canvas(1280, 720, synth::BACKGROUND));
+        let (code, out, _) = run_with(&game, &["--recognize", path.to_str().unwrap()]);
+        assert_eq!(code, EXIT_OK);
+        let json: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(json["screen"], "other");
+        assert!(json["boss"].is_null());
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        // 지원하지 않는 화면 비율: 답이 "모른다"일 뿐 실패가 아니다.
+        let (dir, path) = saved_png("unknown", &synth::select_screen(1600, 1200, Boss::Kraken));
+        let (code, out, err) = run_with(&game, &["--recognize", path.to_str().unwrap()]);
+        assert_eq!(code, EXIT_OK, "{err}");
+        let json: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(json["screen"], "unknown");
+        assert!(json["boss"].is_null());
+        assert_eq!(json["confidence"], 0.0);
+        assert!(json["evidence"][0].as_str().unwrap().contains("화면 비율"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn recognize_of_a_missing_or_broken_file_exits_with_1() {
+        let game = FakeGame::running();
+        let (code, out, err) = run_with(&game, &["--recognize", "Z:\\없는\\파일.png"]);
+        assert_eq!(code, EXIT_ERROR);
+        assert_eq!(out, "");
+        assert!(err.contains("이미지를 읽지 못했다"), "{err}");
+        assert_eq!(game.frames.get(), 0);
+
+        let dir = std::env::temp_dir().join(format!(
+            "nikke-companion-recognize-cli-{}-broken",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let text = dir.join("memo.png");
+        std::fs::write(&text, "그림이 아니다").unwrap();
+        let (code, out, err) = run_with(&game, &["--recognize", text.to_str().unwrap()]);
+        assert_eq!(code, EXIT_ERROR);
+        assert_eq!(out, "");
+        assert!(err.contains("PNG가 아니거나 깨졌다"), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn recognize_live_recognises_the_game_screen_and_saves_nothing() {
+        let game = FakeGame::running();
+        let (code, out, err) = run_with(&game, &["--recognize-live"]);
+        assert_eq!(code, EXIT_OK, "{err}");
+        assert_eq!(err, "");
+        assert_eq!(out.lines().count(), 1);
+        let json: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(json["screen"], "anomaly_select");
+        assert_eq!(
+            json["boss"],
+            serde_json::json!({ "id": "kraken", "name": "크라켄" })
+        );
+        // 한 번 찍었고, 저장 요청은 없었고, 결과에 파일 경로가 없다.
+        assert_eq!(game.frames.get(), 1);
+        assert!(game.captures.borrow().is_empty());
+        assert!(json.get("path").is_none());
+    }
+
+    #[test]
+    fn recognize_live_without_the_game_exits_with_2() {
+        for error in [GameError::NotRunning, GameError::LauncherOnly] {
+            let (code, out, err) = run_with(&FakeGame::failing(error), &["--recognize-live"]);
+            assert_eq!(code, EXIT_NO_GAME);
+            assert_eq!(code, 2);
+            assert_eq!(out, "");
+            assert!(!err.is_empty());
+        }
+        // 최소화·빈 화면은 게임이 있는 것이다 — 종료 코드 1.
+        for (error, expected) in [
+            (GameError::Minimized, "최소화"),
+            (
+                GameError::BlankFrame {
+                    method: CaptureMethod::Wgc,
+                    kind: capture::BlankKind::Black,
+                },
+                "전부 검다",
+            ),
+        ] {
+            let (code, out, err) = run_with(&FakeGame::failing(error), &["--recognize-live"]);
+            assert_eq!(code, EXIT_ERROR);
+            assert_eq!(out, "");
+            assert!(err.contains(expected), "{err}");
+        }
+    }
+
     #[test]
     fn help_prints_usage_and_succeeds() {
         let (code, out, err) = run_with(&FakeGame::failing(GameError::NotRunning), &["--help"]);
@@ -439,5 +677,7 @@ mod tests {
         assert_eq!(err, "");
         assert!(out.contains("nikke-capture --info"));
         assert!(out.contains("data/captures"));
+        assert!(out.contains("nikke-capture --recognize <PNG 파일>"));
+        assert!(out.contains("nikke-capture --recognize-live"));
     }
 }

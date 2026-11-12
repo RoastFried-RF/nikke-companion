@@ -18,6 +18,7 @@ import {
   pickJsonFile,
   quitApp,
   readJsonFile,
+  recognizeGameScreen,
   setFollowGame,
   startupReportPath,
 } from '../src/lib/backend';
@@ -26,6 +27,7 @@ import tauriConf from '../src-tauri/tauri.conf.json';
 import buildRs from '../src-tauri/build.rs?raw';
 import cargoToml from '../src-tauri/Cargo.toml?raw';
 import captureRs from '../src-tauri/src/capture.rs?raw';
+import captureCliRs from '../src-tauri/src/capture_cli.rs?raw';
 import engineRs from '../src-tauri/src/engine.rs?raw';
 import engineWin32Rs from '../src-tauri/src/engine_win32.rs?raw';
 import gameWin32Rs from '../src-tauri/src/game_win32.rs?raw';
@@ -33,6 +35,7 @@ import gameWindowRs from '../src-tauri/src/game_window.rs?raw';
 import libRs from '../src-tauri/src/lib.rs?raw';
 import overlayStateRs from '../src-tauri/src/overlay_state.rs?raw';
 import overlayWin32Rs from '../src-tauri/src/overlay_win32.rs?raw';
+import recognizeRs from '../src-tauri/src/recognize.rs?raw';
 import gitignore from '../../.gitignore?raw';
 import formatSource from '../src/lib/format.ts?raw';
 
@@ -59,6 +62,7 @@ const COMMANDS = [
   'set_follow_game',
   'capture_game',
   'engine_cancel',
+  'recognize_game_screen',
 ];
 
 const gameWindow = {
@@ -81,6 +85,14 @@ const captureRecord = {
   method: 'wgc',
   window: gameWindow,
 };
+const recognition = {
+  screen: 'anomaly_select',
+  boss: { id: 'kraken', name: '크라켄' },
+  confidence: 0.97,
+  evidence: ['아래 띠 주황 100%(화면 맨 아래 가장자리)', '→ 이상 개체 보스 선택 화면, 보스 크라켄(테마 색 주황)'],
+  width: 1881,
+  height: 1058,
+};
 
 describe('Rust 명령 호출', () => {
   it('명령 이름과 인자가 Rust 쪽과 같다', async () => {
@@ -97,6 +109,7 @@ describe('Rust 명령 호출', () => {
       if (cmd === 'set_follow_game') return { ...gameSnapshot, follow: true };
       if (cmd === 'capture_game') return captureRecord;
       if (cmd === 'engine_cancel') return true;
+      if (cmd === 'recognize_game_screen') return recognition;
       return null;
     });
     await expect(loadReport('D:\\r.json')).resolves.toEqual({ schema_version: 1 });
@@ -112,6 +125,7 @@ describe('Rust 명령 호출', () => {
     await expect(setFollowGame(true)).resolves.toEqual({ ...gameSnapshot, follow: true });
     await expect(captureGame()).resolves.toEqual(captureRecord);
     await expect(engineCancel()).resolves.toBe(true);
+    await expect(recognizeGameScreen()).resolves.toEqual(recognition);
     expect(calls.map((c) => c.cmd)).toEqual(COMMANDS);
     expect(calls[0].args).toEqual({ path: 'D:\\r.json' });
     expect(calls[6].args).toEqual({ requests: [{ squad: ['크라운'] }] });
@@ -119,6 +133,8 @@ describe('Rust 명령 호출', () => {
     expect(calls[8].args).toEqual({ title: '계정 상태 파일 고르기' });
     expect(calls[10].args).toEqual({ enabled: true });
     expect(calls[11].args).toEqual({ label: null });
+    // 화면 인식은 화면에서 받는 인자가 없다(무엇을 찍을지·어디에 둘지 화면이 정하지 못한다).
+    expect(calls[13].args).toEqual({});
   });
 
   it('인자 이름이 Rust 명령의 매개변수와 같다', () => {
@@ -128,6 +144,7 @@ describe('Rust 명령 호출', () => {
     expect(libRs).toMatch(/async fn game_window_status\(app: AppHandle\)/);
     expect(libRs).toMatch(/async fn set_follow_game\(app: AppHandle, enabled: bool\)/);
     expect(libRs).toMatch(/async fn capture_game\(app: AppHandle, label: Option<String>\)/);
+    expect(libRs).toMatch(/async fn recognize_game_screen\(app: AppHandle\) -> Result<Recognition, String>/);
     // 중단 명령은 화면에서 받는 인자가 없다(무엇을 멈출지는 Rust가 안다 — 도는 배치 하나).
     expect(libRs).toMatch(/fn engine_cancel\(run: State<'_, EngineRun>\) -> bool/);
   });
@@ -168,7 +185,14 @@ describe('게임 창 추적·캡처(Rust)', () => {
       .split('\n')
       .filter((line) => !line.trim().startsWith('//'))
       .join('\n');
-  const rustSources = { 'game_win32.rs': gameWin32Rs, 'game_window.rs': gameWindowRs, 'capture.rs': captureRs, 'lib.rs': libRs };
+  const rustSources = {
+    'game_win32.rs': gameWin32Rs,
+    'game_window.rs': gameWindowRs,
+    'capture.rs': captureRs,
+    'capture_cli.rs': captureCliRs,
+    'recognize.rs': recognizeRs,
+    'lib.rs': libRs,
+  };
 
   it('게임 창을 옮기거나 앞으로 가져오거나 입력을 보내는 호출이 없다', () => {
     const forbidden =
@@ -216,6 +240,70 @@ describe('게임 창 추적·캡처(Rust)', () => {
 
   it('캡처 폴더는 저장소에 올리지 않는다', () => {
     expect(gitignore.split(/\r?\n/)).toContain('data/captures/');
+  });
+});
+
+describe('화면 인식(Rust)', () => {
+  /** 주석을 뺀 코드. */
+  const code = (source: string) =>
+    source
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+  /** `#[cfg(test)]` 앞까지 — 테스트 코드를 뺀 부분. */
+  const beforeTests = (source: string) => source.slice(0, source.indexOf('#[cfg(test)]'));
+
+  it('인식 모듈은 순수하다 — 프레임만 받고 창·파일·프로세스·네트워크에 닿지 않는다', () => {
+    const body = code(beforeTests(recognizeRs));
+    expect(body).toContain('pub fn recognize(frame: &Frame) -> Recognition');
+    expect(body).toContain('use crate::capture::Frame;');
+    expect(body).not.toMatch(/windows::|HWND|std::fs|std::io|std::path|std::process|std::net|std::env|game_window|game_win32/);
+    // 다른 모듈에서 가져오는 것은 프레임 하나뿐이다.
+    expect(body.match(/use crate::/g)).toHaveLength(1);
+  });
+
+  it('OCR 엔진·ML 런타임·이미지 처리 라이브러리를 더하지 않았다', () => {
+    expect(cargoToml).not.toMatch(/^\s*(tesseract|leptess|rusty-tesseract|ocrs|onnxruntime|ort|tract[\w-]*|candle[\w-]*|burn|tch|opencv|imageproc|image|template-matching)\s*=/m);
+    expect(code(recognizeRs)).not.toMatch(/include_bytes!/);
+  });
+
+  it('게임 이미지 조각을 저장소에 두지 않는다 — 인식 코드에는 수치(자리 비율·색 범위)만 있다', () => {
+    const images = import.meta.glob('../src-tauri/{src,tests}/**/*.{png,jpg,jpeg,bmp,webp,gif}');
+    expect(Object.keys(images)).toEqual([]);
+    expect(recognizeRs).toContain('pub const STRIP: Region = Region::new(');
+    expect(recognizeRs).toContain('pub const STRIP_MIN: f32 =');
+  });
+
+  it('화면 비율로 자리를 정하고 16:9가 아닌 프레임은 판단하지 않는다', () => {
+    expect(recognizeRs).toContain('pub const SUPPORTED_ASPECT: f64 = 16.0 / 9.0;');
+    expect(recognizeRs).toContain('pub const ASPECT_TOLERANCE: f64 = 0.03;');
+  });
+
+  it('앱 명령은 찍은 프레임을 인식에만 쓴다 — 저장하지도 화면에 넘기지도 않는다', () => {
+    const body = libRs.slice(libRs.indexOf('fn recognize_game('), libRs.indexOf('fn capture_from_shortcut('));
+    expect(body).toMatch(/let \(frame, _method, _window\) = capture::grab_game_frame\(\)\?;\s*Ok\(recognize::recognize\(&frame\)\)/);
+    expect(body).not.toMatch(/save_png|capture_game_to_dir|default_capture_dir|emit\(/);
+    // 저장 없이 찍는 함수에는 저장하는 호출이 없다.
+    const grab = captureRs.slice(captureRs.indexOf('pub fn grab_game_frame('), captureRs.indexOf('fn read_error('));
+    expect(grab).toContain('game_window::capture_window(&window)');
+    expect(grab).not.toMatch(/save_png|fs::/);
+    // 인식 결과에는 이미지가 없다: 화면 종류·보스·신뢰도·근거·프레임 크기뿐이다.
+    const result = recognizeRs.slice(recognizeRs.indexOf('pub struct Recognition {'), recognizeRs.indexOf('// ── 색'));
+    expect(result.match(/^\s*pub (\w+):/gm)?.map((f) => f.trim())).toEqual([
+      'pub screen:',
+      'pub boss:',
+      'pub confidence:',
+      'pub evidence:',
+      'pub width:',
+      'pub height:',
+    ]);
+  });
+
+  it('명령줄의 --recognize-live도 저장하지 않는다', () => {
+    const live = captureCliRs.slice(captureCliRs.indexOf('Command::RecognizeLive => {'), captureCliRs.indexOf('/// 명령을 실행하고 종료 코드를'));
+    expect(live).toContain('game.frame()?');
+    expect(live).not.toMatch(/game\.capture\(|save_png|default_dir/);
+    expect(captureCliRs).toMatch(/fn frame\(&self\) -> Result<Frame, GameError> \{\s*capture::grab_game_frame\(\)\.map\(\|\(frame, _, _\)\| frame\)/);
   });
 });
 

@@ -417,14 +417,78 @@ pub struct CaptureRecord {
     pub window: GameWindowInfo,
 }
 
-/// 게임 창을 찾아 클라이언트 영역을 찍고 `dir`에 저장한다.
-/// 게임이 없거나 최소화돼 있거나 빈 화면만 나오면 저장하지 않고 한국어 오류를 돌려준다.
-pub fn capture_game_to_dir(dir: &Path, label: Option<&str>) -> Result<CaptureRecord, GameError> {
+/// 게임 창을 찾아 클라이언트 영역을 찍는다. **저장하지 않는다** — 프레임은 메모리에만 있다.
+/// 게임이 없거나 최소화돼 있거나 빈 화면만 나오면 한국어 오류를 돌려준다.
+pub fn grab_game_frame() -> Result<(Frame, CaptureMethod, GameWindowInfo), GameError> {
     let window = game_window::find_game_window()?;
     if window.minimized {
         return Err(GameError::Minimized);
     }
     let (frame, method) = game_window::capture_window(&window)?;
+    Ok((frame, method, window))
+}
+
+fn read_error(path: &Path, detail: impl ToString) -> GameError {
+    GameError::ReadImage {
+        path: path.display().to_string(),
+        detail: detail.to_string(),
+    }
+}
+
+/// PNG 파일을 프레임(8비트 RGB)으로 읽는다. 알파는 버리고, 회색조는 세 채널에 같은 값을 넣는다.
+/// 이 앱이 저장한 캡처(8비트 RGB)를 화면 인식에 다시 넣을 때 쓴다.
+pub fn load_png(path: &Path) -> Result<Frame, GameError> {
+    let file = fs::File::open(path).map_err(|e| read_error(path, e))?;
+    let mut decoder = png::Decoder::new(std::io::BufReader::new(file));
+    // 팔레트·16비트·1~4비트 회색조를 8비트 채널로 편다.
+    decoder.set_transformations(png::Transformations::normalize_to_color8());
+    let mut reader = decoder
+        .read_info()
+        .map_err(|e| read_error(path, format!("PNG가 아니거나 깨졌다: {e}")))?;
+    let size = reader
+        .output_buffer_size()
+        .ok_or_else(|| read_error(path, "이미지가 너무 크다"))?;
+    let mut buf = vec![0; size];
+    let info = reader
+        .next_frame(&mut buf)
+        .map_err(|e| read_error(path, format!("PNG를 풀지 못했다: {e}")))?;
+    let channels = match info.color_type {
+        png::ColorType::Rgb => 3,
+        png::ColorType::Rgba => 4,
+        png::ColorType::Grayscale => 1,
+        png::ColorType::GrayscaleAlpha => 2,
+        png::ColorType::Indexed => {
+            return Err(read_error(path, "팔레트 PNG를 RGB로 펴지 못했다"));
+        }
+    };
+    let pixels = info.width as usize * info.height as usize;
+    let data = buf
+        .get(..pixels * channels)
+        .ok_or_else(|| read_error(path, "픽셀 수가 크기와 맞지 않는다"))?;
+    let rgb = match channels {
+        3 => data.to_vec(),
+        4 => data
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|px| [px[0], px[1], px[2]])
+            .collect(),
+        _ => data
+            .chunks_exact(channels)
+            .flat_map(|px| [px[0], px[0], px[0]])
+            .collect(),
+    };
+    Ok(Frame {
+        width: info.width,
+        height: info.height,
+        rgb,
+    })
+}
+
+/// 게임 창을 찾아 클라이언트 영역을 찍고 `dir`에 저장한다.
+/// 게임이 없거나 최소화돼 있거나 빈 화면만 나오면 저장하지 않고 한국어 오류를 돌려준다.
+pub fn capture_game_to_dir(dir: &Path, label: Option<&str>) -> Result<CaptureRecord, GameError> {
+    let (frame, method, window) = grab_game_frame()?;
     let (utc, local) = now_stamps();
     let path = save_png(dir, &capture_file_name(&local, label), &frame)?;
     Ok(CaptureRecord {
@@ -900,6 +964,68 @@ mod tests {
         assert!(path.is_absolute());
         assert_eq!(path.file_name().unwrap(), "a.png");
         assert_eq!(read_png(&path), (3, 2, frame.rgb.clone()));
+        // 저장한 캡처를 다시 읽으면 같은 프레임이다.
+        assert_eq!(load_png(&path).unwrap(), frame);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// 주어진 색 형식의 PNG를 쓴다(테스트용).
+    fn write_raw_png(path: &Path, width: u32, height: u32, color: png::ColorType, data: &[u8]) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut encoder = png::Encoder::new(fs::File::create(path).unwrap(), width, height);
+        encoder.set_color(color);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(data).unwrap();
+        writer.finish().unwrap();
+    }
+
+    #[test]
+    fn load_png_drops_alpha_and_expands_greyscale() {
+        let dir = temp_dir("load");
+        let rgba = dir.join("rgba.png");
+        write_raw_png(
+            &rgba,
+            2,
+            1,
+            png::ColorType::Rgba,
+            &[10, 20, 30, 255, 40, 50, 60, 0],
+        );
+        assert_eq!(
+            load_png(&rgba).unwrap(),
+            Frame {
+                width: 2,
+                height: 1,
+                rgb: vec![10, 20, 30, 40, 50, 60],
+            }
+        );
+        let grey = dir.join("grey.png");
+        write_raw_png(&grey, 1, 2, png::ColorType::Grayscale, &[7, 200]);
+        assert_eq!(
+            load_png(&grey).unwrap(),
+            Frame {
+                width: 1,
+                height: 2,
+                rgb: vec![7, 7, 7, 200, 200, 200],
+            }
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn load_png_explains_missing_and_broken_files() {
+        let dir = temp_dir("load-bad");
+        fs::create_dir_all(&dir).unwrap();
+        let missing = load_png(&dir.join("없는 파일.png")).unwrap_err();
+        assert!(matches!(missing, GameError::ReadImage { .. }), "{missing:?}");
+        assert!(missing.to_string().contains("이미지를 읽지 못했다"), "{missing}");
+        assert!(missing.to_string().contains("없는 파일.png"), "{missing}");
+        assert!(!missing.is_game_missing());
+
+        let text = dir.join("not-a-png.png");
+        fs::write(&text, "PNG가 아니다").unwrap();
+        let broken = load_png(&text).unwrap_err();
+        assert!(broken.to_string().contains("PNG가 아니거나 깨졌다"), "{broken}");
         fs::remove_dir_all(&dir).unwrap();
     }
 

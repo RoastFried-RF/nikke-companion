@@ -243,6 +243,8 @@ pub enum GameError {
     CaptureDirUnknown,
     /// 저장하지 못했다.
     Save { path: String, detail: String },
+    /// 이미지 파일을 읽지 못했다.
+    ReadImage { path: String, detail: String },
     /// 이미 캡처하고 있다.
     Busy,
     /// Windows가 아니다.
@@ -301,6 +303,9 @@ impl fmt::Display for GameError {
                 crate::capture::ENV_CAPTURE_DIR
             ),
             Self::Save { path, detail } => write!(f, "캡처를 저장하지 못했다: {path} ({detail})"),
+            Self::ReadImage { path, detail } => {
+                write!(f, "이미지를 읽지 못했다: {path} ({detail})")
+            }
             Self::Busy => write!(f, "이미 캡처하고 있다. 끝난 뒤에 다시 시도하라"),
             Self::Unsupported => write!(f, "게임 창 추적과 화면 캡처는 Windows에서만 된다"),
         }

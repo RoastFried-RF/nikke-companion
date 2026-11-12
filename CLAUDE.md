@@ -57,13 +57,17 @@ cargo build --manifest-path app/src-tauri/Cargo.toml
 npm --prefix app run fixture                              # 컴포넌트 테스트용 샘플 결과를 실제 CLI로 다시 만든다
 ```
 
-게임 창·화면 캡처(실행 중인 니케가 필요하다. 게임은 읽기만 한다 — `app/README.md` §게임 창·화면 캡처):
+게임 창·화면 캡처·요격전 화면 인식(실행 중인 니케가 필요하다 — `--recognize <PNG>`와 `live_recognize`만 빼고. 게임은 읽기만 한다 —
+`app/README.md` §게임 창·화면 캡처, §화면 인식):
 
 ```bash
 cargo run --quiet --manifest-path app/src-tauri/Cargo.toml --bin nikke-capture -- --info          # 게임 창 정보(JSON)
 cargo run --quiet --manifest-path app/src-tauri/Cargo.toml --bin nikke-capture -- --name <라벨>   # 게임 화면을 data/captures/에 PNG로 저장
+cargo run --quiet --manifest-path app/src-tauri/Cargo.toml --bin nikke-capture -- --recognize <PNG 파일>   # 캡처에서 화면 종류·보스 인식(JSON 한 줄, 게임 불필요)
+cargo run --quiet --manifest-path app/src-tauri/Cargo.toml --bin nikke-capture -- --recognize-live        # 게임 창을 찍어 인식만(이미지는 저장하지 않는다. 게임이 없으면 종료 코드 2)
 cargo test --manifest-path app/src-tauri/Cargo.toml --test live_game -- --ignored                # 실제 게임 테스트(창이 떠 있어야 한다)
 cargo test --manifest-path app/src-tauri/Cargo.toml --test live_capture -- --ignored             # 게임 없이 캡처 경로 확인(테스트가 띄운 자기 창을 찍는다)
+cargo test --manifest-path app/src-tauri/Cargo.toml --test live_recognize -- --ignored           # 화면 인식을 라벨 붙은 캡처로 확인(data/captures/labels.json이 있어야 한다. 게임 불필요)
 ```
 
 엔진은 `vendor/nikke-calc`(서브모듈, Python 3.12, 표준 라이브러리만). 직접 고치지 않는다.

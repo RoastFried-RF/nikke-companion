@@ -16,6 +16,7 @@ fn main() {
             "game_window_status",
             "set_follow_game",
             "capture_game",
+            "recognize_game_screen",
         ]),
     );
     tauri_build::try_build(attributes).expect("tauri-build 실패");

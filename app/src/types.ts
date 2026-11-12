@@ -208,6 +208,33 @@ export interface CaptureRecord {
   window: GameWindowInfo;
 }
 
+/**
+ * 인식한 화면 종류(src-tauri/src/recognize.rs의 ScreenKind).
+ * `other`는 이상 개체 요격전 화면이 아니라는 뜻이고, `unknown`은 판단하지 않았다는 뜻이다
+ * (표지가 일부만 보임, 두 보스의 색이 섞임, 지원하지 않는 화면 비율).
+ */
+export type ScreenKind = 'anomaly_select' | 'anomaly_squad' | 'other' | 'unknown';
+
+/** 인식한 보스. `id`·`name`은 보스 묶음(data/intercept/anomaly.json)의 것과 같다. */
+export interface RecognizedBoss {
+  id: string;
+  name: string;
+}
+
+/** 게임 화면 인식 결과(src-tauri/src/recognize.rs의 Recognition). 이미지는 오지 않는다. */
+export interface ScreenRecognition {
+  screen: ScreenKind;
+  /** 이상 개체 화면(`anomaly_select`·`anomaly_squad`)일 때만 있다. 그 밖에는 null — 추측으로 채우지 않는다. */
+  boss: RecognizedBoss | null;
+  /** 0~1. 이상 개체 화면이면 0.5 이상, `unknown`이면 0. */
+  confidence: number;
+  /** 무엇을 보고 그렇게 판단했는지(한국어 문장들). */
+  evidence: string[];
+  /** 본 프레임의 크기(물리 픽셀). */
+  width: number;
+  height: number;
+}
+
 /** 단축키로 저장한 결과(src-tauri/src/lib.rs의 GameCaptureOutcome). 둘 중 하나만 있다. */
 export interface GameCaptureOutcome {
   capture: CaptureRecord | null;
