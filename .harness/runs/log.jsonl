@@ -75,3 +75,4 @@
 {"at":"2026-11-12T02:55:56.741Z","event":"checkpoint","task":"P-013","commit":"2efbfa234235ec09656a7cf8aba6d95831a5c25e","tree":"30c22d810c00c10af73eb99a5773e3fccf13128a"}
 {"at":"2026-11-12T02:55:56.762Z","event":"verified","task":"P-013","attempt":1,"run":".harness/runs/20261112T023226-P-013-a1","tree":"30c22d810c00c10af73eb99a5773e3fccf13128a","reason":null}
 {"at":"2026-11-12T02:55:56.787Z","event":"session_end","stop_reason":"한도 도달: 반복 2회","tasks":{"done":["H-001","P-001","P-002","P-003","P-004","H-002","P-005","P-006","P-007","P-008","P-009","P-010","P-012","P-013"],"blocked":["P-011"],"pending":["P-014","P-015","P-016","P-017"]}}
+{"at":"2026-11-12T02:58:29.273Z","event":"manual_verify","task":"P-011","passed":true,"tree":"39bd738c194136ed4ef54f9f26ac82fc5397a328","reason":null}
