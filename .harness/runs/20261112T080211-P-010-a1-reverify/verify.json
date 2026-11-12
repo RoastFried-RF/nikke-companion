@@ -1,0 +1,65 @@
+{
+  "task": "P-010",
+  "started_at": "2026-11-12T08:02:11.508Z",
+  "head": "fa9f2d219e416bc290d8006c5e558903b5eb661c",
+  "tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
+  "dirty": true,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "unit",
+      "cmd": "node --test tests/unit/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 2864,
+      "log": "verify-1-unit.log"
+    },
+    {
+      "name": "integration",
+      "cmd": "node --test tests/integration/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 74468,
+      "log": "verify-2-integration.log"
+    },
+    {
+      "name": "install",
+      "cmd": "npm --prefix app install",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 902,
+      "log": "verify-3-install.log"
+    },
+    {
+      "name": "frontend-build",
+      "cmd": "npm --prefix app run build",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 3198,
+      "log": "verify-4-frontend-build.log"
+    },
+    {
+      "name": "frontend-test",
+      "cmd": "npm --prefix app test",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 5142,
+      "log": "verify-5-frontend-test.log"
+    },
+    {
+      "name": "rust-test",
+      "cmd": "cargo test --manifest-path app/src-tauri/Cargo.toml",
+      "exit_code": 101,
+      "timed_out": false,
+      "duration_ms": 21971,
+      "log": "verify-6-rust-test.log",
+      "tail": "test engine_runs_in_its_folder_with_utf8_and_batch_arguments ... ok\ntest output_that_is_not_json_or_misses_a_request_is_an_error ... ok\ntest real_engine_keeps_input_order_isolates_row_errors_and_is_deterministic ... ok\ntest a_stuck_engine_is_stopped_at_the_time_limit ... ok\ntest rust_command_and_node_runtime_give_the_same_total_damage ... ok\n\ntest result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.53s\n\n\nrunning 2 tests\ntest stopping_a_long_real_batch_returns_within_seconds_and_leaves_no_engine_process ... FAILED\ntest stopping_also_ends_processes_the_engine_started ... ok\n\nfailures:\n\n---- stopping_a_long_real_batch_returns_within_seconds_and_leaves_no_engine_process stdout ----\n중단: 4/40건 끝난 뒤 멈춤, 돌아오기까지 8.5708ms, 그때 띄워 둔 프로세스 [(20176, \"conhost.exe\"), (27828, \"OverwolfHelper64.exe\"), (31404, \"python.exe\"), (31656, \"OverwolfBrowser.exe\"), (32384, \"python.exe\"), (32404, \"Overwolf.exe\"), (33424, \"OverwolfBrowser.exe\"), (33652, \"OverwolfBrowser.exe\"), (33672, \"OverwolfBrowser.exe\"), (33728, \"OverwolfBrowser.exe\"), (34280, \"OverwolfHelper.exe\"), (41612, \"conhost.exe\"), (43796, \"python.exe\"), (48348, \"conhost.exe\"), (50928, \"python.exe\"), (51412, \"conhost.exe\")]\n\nthread 'stopping_a_long_real_batch_returns_within_seconds_and_leaves_no_engine_process' (50072) panicked at tests\\engine_cancel.rs:203:5:\nassertion `left == right` failed: 멈춘 뒤에도 엔진 프로세스가 남아 있다\n  left: [(27828, \"OverwolfHelper64.exe\"), (31656, \"OverwolfBrowser.exe\"), (32404, \"Overwolf.exe\"), (33424, \"OverwolfBrowser.exe\"), (33652, \"OverwolfBrowser.exe\"), (33672, \"OverwolfBrowser.exe\"), (33728, \"OverwolfBrowser.exe\"), (34280, \"OverwolfHelper.exe\")]\n right: []\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    stopping_a_long_real_batch_returns_within_seconds_and_leaves_no_engine_process\n\ntest result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.62s\n\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.29s\n     Running unittests src\\lib.rs (app\\src-tauri\\target\\debug\\deps\\nikke_companion_lib-b25991a886c36c3c.exe)\n     Running unittests src\\bin\\nikke-capture.rs (app\\src-tauri\\target\\debug\\deps\\nikke_capture-31a6a08ca5db4592.exe)\n     Running unittests src\\main.rs (app\\src-tauri\\target\\debug\\deps\\nikke_companion-6b9b87c78d5a3815.exe)\n     Running tests\\account_fetch.rs (app\\src-tauri\\target\\debug\\deps\\account_fetch-fcdf26745a7773b9.exe)\n     Running tests\\engine_batch.rs (app\\src-tauri\\target\\debug\\deps\\engine_batch-1be646b8cda22ff1.exe)\n     Running tests\\engine_cancel.rs (app\\src-tauri\\target\\debug\\deps\\engine_cancel-572d369bd794f2ac.exe)\nerror: test failed, to rerun pass `--test engine_cancel`\n"
+    }
+  ],
+  "passed": false,
+  "reason": "검증 실패: rust-test(exit 101)",
+  "env_skipped": [],
+  "env_only": false,
+  "tree_after": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
+  "finished_at": "2026-11-12T08:04:00.333Z"
+}

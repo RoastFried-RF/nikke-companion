@@ -1,0 +1,32 @@
+{
+  "task": "P-003",
+  "started_at": "2026-11-12T07:55:48.139Z",
+  "head": "fa9f2d219e416bc290d8006c5e558903b5eb661c",
+  "tree": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
+  "dirty": true,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "unit",
+      "cmd": "node --test tests/unit/compare.test.mjs",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 138,
+      "log": "verify-1-unit.log"
+    },
+    {
+      "name": "integration",
+      "cmd": "node --test tests/integration/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 83154,
+      "log": "verify-2-integration.log"
+    }
+  ],
+  "passed": true,
+  "reason": null,
+  "env_skipped": [],
+  "env_only": false,
+  "tree_after": "ced979de915c7684bb15cc1ace1ba21a1b2caa7a",
+  "finished_at": "2026-11-12T07:57:11.704Z"
+}
