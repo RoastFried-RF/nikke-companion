@@ -7,6 +7,7 @@
 
 1. `docs/spec.md` — 요구사항, 단계, 결정 기록, 미검증 가정
    (요격전 작업이면 `docs/intercept.md`도 — 게임 화면에서 확인한 보스 정보와 모르는 것)
+   (계산기 작업이면 `docs/calculators.md`도 — 값의 출처 조사: 무엇이 엔진 데이터에 없어 만들지 않았는지)
 2. `.harness/progress.md` — 지금 상황과 다음 행동
 3. `.harness/tasks.json` — 작업 목록(수락 조건·검증 명령·상태)
 4. 맡은 작업과 관련된 코드
@@ -161,6 +162,19 @@ node --test tests/unit/journal.test.mjs tests/unit/marks.test.mjs tests/unit/lin
 node --test tests/integration/exclude.engine.test.mjs     # 실제 엔진(약 25초): 「안 씀」을 뺀 편성 추천·요격전 추천(뺀 사실이 결과에 남는다), 빼지 않은 계산은 그대로
 npm --prefix app test -- DailyTools                       # 화면(가짜 backend): 계정 바꾸기·잠금·숨기기, 표시와 거르기·추천에서 빼기, 기록장, 도구 목록(여는 것은 목록의 id뿐)
 cargo test --manifest-path app/src-tauri/Cargo.toml --lib tool_links   # 목록에 없는 것(주소·경로·프로그램)은 열지 않는다(브라우저를 띄우지 않고 본다)
+```
+
+**계산기는 만들지 않았다**(P-034 — 조사 결과 `docs/calculators.md`, 형식은 `docs/data-model.md` §계산기 출처 점검): 소장품 강화 · 모집 확률
+계산기를 만들려면 값의 출처가 있어야 하는데, 소장품 단계별 필요 경험치 · 관리 키트의 경험치 · 모집 확률 표가 엔진의 데이터
+(`vendor/nikke-calc/data/` — 소장품 표 `collection.json`의 칸은 `skill_lv`·`hp`·`atk`·`def`뿐이다)와 수집 코드가 받는 공개 표의 경로
+아홉 어디에도 없다. **편성 도구에 「계산기」 구획이 없고 화면은 바뀌지 않았다.** 있는 것은 그 결론을 다시 보는 점검뿐이다 — 순수 모듈
+`src/core/calculators.mjs`(`auditCalculatorSources` — 표들의 칸 이름에서 경험치·키트·모집을 찾는다. 걸려도 「확인 필요」까지다).
+**기억이나 다른 사이트의 숫자로 계산기를 만들지 않는다** — 출처는 엔진이 받는 공식 표이거나 사용자가 게임 화면에서 확인한 값이고,
+`docs/calculators.md`에 먼저 적는다. 그 모듈에는 게임의 값을 적지 않는다(단위 테스트가 본다).
+
+```bash
+node --test tests/unit/calculators.test.mjs                 # 순수 함수: 칸 이름 찾기·소장품 표의 칸·수집 경로·보고서
+node --test tests/integration/calculators.engine.test.mjs   # 실제 엔진 데이터(1초 안쪽, 네트워크 없음): 성장 표 일곱·수집 경로 아홉·계산기 둘 다 「출처 없음」 — 실패하면 엔진 데이터가 바뀐 것이니 문서를 다시 조사한다
 ```
 
 **오버레이는 작은 위젯이다**(P-028 — `app/README.md` §오버레이 위젯): 모양 셋 — 접힘(알약: 보스 얼굴·이름·총딜) · 한 줄 카드(기본:

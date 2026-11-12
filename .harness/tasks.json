@@ -2073,9 +2073,19 @@
         "만들어진 계산기의 결과가 게임에서와 맞는지 한 사례로 확인한다"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261112T145827-P-034-a1",
+        "verified_tree": "a6d5255e47999ea5d1217bb43ee4920e93eb1da7",
+        "verified_at": "2026-11-12T15:10:39.040Z",
+        "commit": null
+      }
     },
     {
       "id": "P-014",

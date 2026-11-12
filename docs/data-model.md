@@ -786,6 +786,51 @@ P-033. 커뮤니티 도구 목록(이름 · 한 줄 설명 · 주소)과 「이 
 - 이 앱이 하지 않는 것 넷: **PVP 계산**(계산 도구가 PVP를 계산하지 않는다 — 지원하지 않음) · **통계·랭킹**(서버 데이터가 필요하다) ·
   **스토리 열람** · **유니온 구인**. 각각 까닭과 안내할 도구가 있다.
 
+## 계산기 출처 점검 — `src/core/calculators.mjs`
+
+P-034. 소장품 강화 · 모집 확률 계산기는 **만들지 않았다 — 값의 출처가 없다**(조사 결과는 `docs/calculators.md`). 그래서 계산기의
+입력·결과 형식은 없고, 있는 것은 「엔진의 표에 그 값의 칸이 있는가」를 다시 보는 점검뿐이다. 순수 모듈이고(`node:` import 없음)
+**게임의 값이 하나도 없다**(단위 테스트가 소스에 두 자리 넘는 숫자가 없는지 본다). 화면은 이 모듈을 쓰지 않는다.
+
+- `CALCULATOR_NEEDS` — 쓰려던 값 셋: `collection-exp`(소장품 단계별 필요 경험치) · `kit-exp`(관리 키트 세 종류의 경험치) ·
+  `recruit-rates`(공식 모집 확률 표). 값마다 칸 이름에서 찾을 말이 있다: `words`는 칸 이름을 영문·숫자 토막으로 나눈 것과 **같아야**
+  하고(`need_exp`·`needExp`의 `exp` — `spot_explosion_range`는 아니다), `parts`는 들어 있기만 하면 되는 한국어다(「경험치」·「키트」·
+  「모집」·「뽑기」). 「확률」·`rate`만으로는 걸지 않는다(크리티컬 확률·연사 같은 전투 칸이 있다).
+- `CALCULATORS` — 살펴본 계산기 둘과 각각이 쓰는 값: `collection-upgrade`(소장품 강화 — 앞의 둘) · `recruit`(모집 확률 — 셋째).
+- `keyNames(문서)` — JSON의 모든 칸 이름(객체의 열쇠). **값은 보지 않는다**(설명문 안의 「경험치」는 버프 이름이다).
+- `collectionColumns(소장품 표)` → `{stages, columns}` — 엔진 `collection.json`의 `_stat_table` 줄 수와 칸 이름. 지금은
+  `{stages: 32, columns: ["atk", "def", "hp", "skill_lv"]}`다.
+- `cdnPathsIn(수집 코드의 글)` — 따옴표로 적힌 평문 경로(`"/equip/….json"`). `{locale}`은 `ko`로 읽어 같은 표를 하나로 센다.
+- `auditCalculatorSources({files, cdnPaths})` — `files`는 `{파일 이름: 읽어 둔 JSON}`(읽는 쪽은 테스트다), `cdnPaths`는 경로 목록.
+
+```jsonc
+{
+  "schema_version": 1,
+  "kind": "calculator_sources",
+  "looked": { "files": ["base_stat_tables/collection.json", "…"], "cdn_paths": ["/equip/ko/favorite_{fid}.json", "…"] },
+  "collection_table": { "stages": 32, "columns": ["atk", "def", "hp", "skill_lv"] },
+  "needs": [
+    { "id": "collection-exp", "label": "소장품 단계별 필요 경험치", "found": false,
+      "hits": [] }               // 걸린 칸: {where: "file", file, key} 또는 {where: "cdn_path", path}
+  ],
+  "calculators": [
+    { "id": "collection-upgrade", "title": "소장품 강화", "needs": ["collection-exp", "kit-exp"],
+      "missing": ["collection-exp", "kit-exp"],   // 칸이 보이지 않는 값
+      "status": "no_source",                      // no_source = 출처 없음 · candidate = 확인 필요
+      "status_label": "출처 없음",
+      "built": false }                            // 이 점검은 계산기를 만들지 않는다 — 늘 false
+  ],
+  "caveats": ["칸 이름만 본다 — …", "수집 코드가 받는 공개 표의 원본에 … 알 수 없다."]
+}
+```
+
+- **상태는 둘뿐이다.** 필요한 값 가운데 하나라도 칸이 보이지 않으면 `no_source`, 다 보이면 `candidate`다. `candidate`는
+  「확인됨」이 아니다 — 칸 이름이 걸렸을 뿐이고 그 표가 맞는지는 사람이 읽고 정한다. 이 점검만으로 계산기가 생기지 않는다.
+- `renderSourceReport(보고서)` — 사람이 읽는 줄들(「소장품 표: 32단계 · 칸 atk, def, hp, skill_lv」 · 「- 공식 모집 확률 표: 없다」 ·
+  「소장품 강화 계산기: 출처 없음」).
+- 실제 엔진 데이터로 돌리는 것은 `tests/integration/calculators.engine.test.mjs`다(성장 표 일곱 · 소장품 표의 칸 · 수집 경로 아홉 ·
+  걸린 칸 0개). 엔진의 데이터가 바뀌어 이 테스트가 실패하면 `docs/calculators.md`를 다시 조사한다.
+
 ## 덱 빌더 — `src/core/deck.mjs`
 
 P-030. 손으로 짠 편성 하나를 계산하고 바꿔 보는 순수 모듈이다(`node:` import 없음 — 웹뷰와 Node가 함께 쓴다).
