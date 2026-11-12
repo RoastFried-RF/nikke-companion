@@ -224,7 +224,8 @@ describe('개발 실행에서만 뜬다', () => {
     // 빌드할 때 false로 굳는 값이 조건의 맨 앞에 있고, 화면은 그 갈래 안에서만(필요할 때) 불러온다.
     expect(code).toMatch(/if \(import\.meta\.env\.DEV && galleryRequested\(true, window\.location\.search, import\.meta\.env\.VITE_UI_GALLERY\)\) \{\s*void import\('\.\/ui\/gallery\/UiGallery\.vue'\)/);
     expect(code).not.toMatch(/^import .*gallery\/UiGallery/m);
-    expect(code).toMatch(/\} else \{\s*createApp\(App\)\.mount\('#app'\);\s*\}/);
+    // 그 밖에는 창에 맞는 화면을 그린다(P-027: 오버레이 창은 Overlay.vue, 데스크톱 앱 창은 App.vue).
+    expect(code).toMatch(/\} else \{\s*createApp\(windowLabel\(\) === OVERLAY_WINDOW \? Overlay : App\)\.mount\('#app'\);\s*\}/);
     // 다른 어떤 화면 코드도 부품 모아 보기를 가져오지 않는다(시작 코드와 그 폴더 안의 파일만).
     for (const [file, text] of Object.entries(sources)) {
       if (file === '../src/main.ts' || file.startsWith('../src/ui/gallery/')) continue;
@@ -232,9 +233,13 @@ describe('개발 실행에서만 뜬다', () => {
     }
   });
 
-  it('기존 화면은 새 부품을 아직 쓰지 않는다 — 화면을 옮기는 것은 다음 작업이다', () => {
+  it('새 부품은 새 화면(앱 창의 틀·pages·views·오버레이)이 쓴다 — 고급으로 옮긴 예전 화면(components·screens)은 예전 모양 그대로다', () => {
+    // P-027에서 화면을 옮겼다: 데스크톱 앱 창의 화면들과 결과 그림(views)이 부품을 쓴다.
+    const users = Object.entries(sources).filter(([, text]) => /from '(\.\.?\/)+ui\/[A-Z]/.test(text)).map(([file]) => file);
+    expect(users).toEqual(expect.arrayContaining(['../src/App.vue', '../src/Overlay.vue', '../src/pages/InterceptPage.vue', '../src/views/InterceptResult.vue', '../src/views/TierBoard.vue']));
+    // 예전 화면은 설정 > 고급(파일 직접 고르기)에 예전 모양으로 남았다 — 부품을 섞어 쓰지 않는다.
     for (const [file, text] of Object.entries(sources)) {
-      if (!/\/(components|screens)\//.test(file) && file !== '../src/App.vue') continue;
+      if (!/\/(components|screens)\//.test(file)) continue;
       expect(text, file).not.toMatch(/from '(\.\.?\/)+ui\//);
     }
   });

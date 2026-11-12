@@ -35,6 +35,14 @@ fn main() {
             "nikke_portrait",
             "boss_image",
             "game_icon",
+            "shared_state",
+            "set_default_account",
+            "set_overlay_launch",
+            "read_account",
+            "save_intercept_result",
+            "load_intercept_result",
+            "show_app_window",
+            "set_overlay_visible",
         ]),
     );
     tauri_build::try_build(attributes).expect("tauri-build 실패");

@@ -1,4 +1,8 @@
-//! 니케 컴패니언 오버레이 — Tauri 쪽.
+//! 니케 컴패니언 — Tauri 쪽.
+//!
+//! 창이 둘이다(P-027): 데스크톱 앱 창(`app` — 테두리가 있는 보통 창. 계정 연결·계산·설정을 전부 여기서 한다)과
+//! 오버레이 창(`main` — 게임 위에 뜨는 작은 창. 결과만 보여 준다). 권한은 창마다 따로다(`capabilities/app.json`·`overlay.json`).
+//! 앱 창을 닫으면 앱이 끝나고, 오버레이 창은 닫히지 않고 숨는다.
 //!
 //! 이 파일은 창·단축키·명령을 잇는 접착 코드다. 규칙은 창 API를 모르는 모듈에 있다:
 //! - `overlay_state`: 보임/숨김·클릭 통과의 전환 규칙, 시작 위치 계산
@@ -22,6 +26,8 @@
 //!   정해진 요청 하나), 켜고 끄기와 코드의 기억
 //! - `assets`: 게임 이미지 읽기 — 니케 초상화·보스 이미지·아이콘을 이 PC의 정해진 폴더에서 읽어 화면에 넘긴다
 //!   (이름·id·종류는 경로가 아니라 열쇠다. 네트워크를 쓰지 않는다)
+//! - `shared_state`: 두 창이 함께 보는 것 — 기본 계정의 이름, 오버레이를 띄우는 때, 마지막 요격전 추천 결과를 계정 폴더의
+//!   파일에 두고 읽는다(계정 이름은 경로가 아니라 열쇠다. 결과는 종류·판을 확인한 뒤에만 쓴다)
 //!
 //! 편성 비교·추천의 계산은 화면 쪽의 `src/core`(JS)가 하고, 여기서는 엔진 프로세스만 대신 띄운다.
 //! 이 앱의 Rust 코드는 네트워크 요청을 하지 않는다. 밖으로 나가는 요청은 둘뿐이다: 사용자가 연 로그인 창이
@@ -36,14 +42,15 @@
 //! 게임은 읽기만 한다: 게임 창을 옮기거나 크기를 바꾸거나 앞으로 가져오지 않고, 입력을 보내지 않는다.
 //! 붙이기가 옮기는 것도, 게임 위에 머물기가 창 순서를 올리는 것도 오버레이 창뿐이다.
 //!
-//! 앱이 끝날 때(끝내기 단추, 오버레이 창 닫기) 돌던 엔진 계산과 계정 수집을 멈추고 그 프로세스가 끝나기를 잠깐
+//! 앱이 끝날 때(앱 창 닫기, 오버레이의 끝내기 단추) 돌던 엔진 계산과 계정 수집을 멈추고 그 프로세스가 끝나기를 잠깐
 //! 기다린다(`stop_running_work`). 앱이 정리할 틈 없이 죽어도 프로세스 묶음(Job Object)이 함께 닫히며 끝낸다.
 //!
 //! 스레드는 둘이다: 게임 창 추적(`track_game` — 창 상태·붙이기·게임 위에 머물기)과 화면 추적(`track_screen` — 켜 둔 동안 주기적으로
 //! 게임 화면을 찍어 인식만 한다. 찍은 프레임은 그 자리에서 버린다). 캡처가 붙이기를 늦추지 않게 따로 둔다.
 //!
-//! 오버레이는 한 번만 뜬다(`tauri-plugin-single-instance`): 두 번째 실행은 창을 만들기 전에 끝나고, 이미 떠 있는
-//! 쪽이 숨겨져 있었다면 활성화 없이 보인다(`reveal_overlay`).
+//! 앱은 한 번만 뜬다(`tauri-plugin-single-instance`): 두 번째 실행은 창을 만들기 전에 끝나고, 이미 떠 있는
+//! 쪽의 앱 창이 앞으로 온다(`focus_app_window`). 오버레이는 설정대로 뜬다 — 앱과 함께, 게임 창을 찾았을 때
+//! (`reveal_overlay` — 활성화 없이), 또는 사용자가 띄울 때.
 
 pub mod account_sync;
 pub mod assets;
@@ -64,6 +71,7 @@ pub mod overlay_win32;
 pub mod recognize;
 pub mod report;
 pub mod screen_track;
+pub mod shared_state;
 pub mod stay_on_top;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -85,16 +93,22 @@ use account_sync::{
 use capture::CaptureRecord;
 use extension_link::{LinkHub, LinkStatus, Stored};
 use game_window::{
-    follow_step, follow_target, FollowStep, GameError, GameWindowInfo, GameWindowStatus,
+    follow_step, follow_target, FollowStep, GameError, GameWindowInfo, GameWindowState,
+    GameWindowStatus,
 };
 use overlay_state::{
     top_right_position, OverlayAction, OverlayState, Transition, VisibilityChange,
 };
 use recognize::Recognition;
 use screen_track::{Reading, TrackSettings, TrackStatus};
+use shared_state::{OverlayLaunch, SharedSnapshot};
 
-/// tauri.conf.json의 창 label.
+/// tauri.conf.json의 오버레이 창 label(게임 위에 뜨는 작은 창 — 결과만 보여 준다).
 const MAIN_WINDOW: &str = "main";
+
+/// tauri.conf.json의 데스크톱 앱 창 label(일반 창 — 계정 연결·계산·설정을 전부 여기서 한다).
+/// 권한은 창마다 따로다: `capabilities/app.json`이 이 창, `capabilities/overlay.json`이 오버레이 창.
+const APP_WINDOW: &str = "app";
 
 /// 상태가 바뀔 때 화면으로 보내는 이벤트. 프런트의 `OVERLAY_STATE_EVENT`(src/lib/backend.ts)와 같아야 한다.
 pub const OVERLAY_STATE_EVENT: &str = "overlay-state";
@@ -121,6 +135,11 @@ pub const ACCOUNT_FETCH_EVENT: &str = "account-fetch";
 /// 크롬 확장 연결의 상태가 바뀔 때(확장에서 쿠키를 받았다·코드가 틀린 요청이 왔다) 오버레이 창으로 보내는 이벤트.
 /// 싣는 것은 상태(`LinkStatus`)뿐이다 — 쿠키는 없다. 프런트의 `EXTENSION_LINK_EVENT`와 같아야 한다.
 pub const EXTENSION_LINK_EVENT: &str = "extension-link";
+
+/// 두 창이 함께 보는 것(기본 계정·오버레이를 띄우는 때·마지막 요격전 결과를 저장한 시각)이 바뀔 때 모든 창으로 보내는
+/// 이벤트. 싣는 것은 `SharedSnapshot`이다 — 결과 문서는 싣지 않는다(창이 `load_intercept_result`로 다시 읽는다).
+/// 프런트의 `SHARED_STATE_EVENT`와 같아야 한다.
+pub const SHARED_STATE_EVENT: &str = "shared-state";
 
 /// 엔진 설정 파일 이름. 앱 설정 폴더(`%APPDATA%/<identifier>`)에 둔다.
 const SETTINGS_FILE: &str = "settings.json";
@@ -195,6 +214,11 @@ struct ExtensionLink(LinkHub);
 /// 게임 이미지 명령이 쓰는 엔진 카탈로그의 이름 색인(카탈로그가 바뀔 때만 다시 읽는다). 규칙은 `assets`에 있다.
 #[derive(Default)]
 struct GameImages(assets::NameIndex);
+
+/// 오버레이를 언제 띄우는가(앱과 함께·게임을 찾았을 때·스스로 띄우지 않음). 시작할 때 계정 폴더의 설정에서 읽고,
+/// 앱 창의 설정이 바꾸면 함께 바뀐다. 규칙은 `shared_state::OverlayLaunch`에 있다.
+#[derive(Default)]
+struct LaunchMode(Mutex<OverlayLaunch>);
 
 /// 캡처가 끝나면(오류로 끝나도) 표시를 내린다.
 struct BusyGuard<'a>(&'a AtomicBool);
@@ -510,8 +534,8 @@ async fn account_fetch_profile(app: AppHandle, name: String) -> Result<FetchOutc
         // 표는 이 함수가 끝날 때(실패로 끝나도) 버려져 자리가 빈다 — 중단 뒤에 다시 받을 수 있다.
         let ticket = run.0.begin().map_err(|_| SyncError::Busy)?;
         let on_line = |line: &FetchLine| {
-            // 오버레이 창에만 보낸다. 진행 줄을 못 보내도 수집은 계속한다.
-            let _ = app.emit_to(MAIN_WINDOW, ACCOUNT_FETCH_EVENT, line.clone());
+            // 앱 창에만 보낸다(계정 받기는 앱 창에서 한다). 진행 줄을 못 보내도 수집은 계속한다.
+            let _ = app.emit_to(APP_WINDOW, ACCOUNT_FETCH_EVENT, line.clone());
         };
         account_sync::fetch_profile(&config, &name, &on_line, ticket.signal())
     })
@@ -753,6 +777,8 @@ fn track_game(app: AppHandle) {
     let mut scanned_at: Option<Instant> = None;
     let mut on_top = stay_on_top::StayOnTop::new();
     let mut overlay_window = OverlayOnTop::default();
+    // 「게임을 찾았을 때 오버레이를 띄운다」용: 앞 주기에 게임 창을 찾았는가.
+    let mut game_was_found = false;
     loop {
         let follow = tracker.follow.load(Ordering::Acquire);
         let overlay_visible = lock(&app.state::<Overlay>().state).visible;
@@ -770,6 +796,15 @@ fn track_game(app: AppHandle) {
             }
         };
         known = status.window.clone();
+
+        // 오버레이를 「게임을 찾았을 때」 띄우기로 했으면, 게임 창을 방금 찾았을 때 한 번 보인다(활성화 없이).
+        // 게임이 떠 있는 동안 사용자가 숨긴 오버레이는 다시 띄우지 않는다(`OverlayLaunch::reveals_on_game`).
+        let game_found = status.state == GameWindowState::Found;
+        let launch = *lock(&app.state::<LaunchMode>().0);
+        if launch.reveals_on_game(game_was_found, game_found, overlay_visible) {
+            reveal_overlay(&app);
+        }
+        game_was_found = game_found;
 
         applied = follow_game(&app, follow, &status, applied);
         // 붙이기로 옮긴 뒤에 본다 — 붙이기를 켜지 않았어도 본다.
@@ -946,10 +981,11 @@ fn open_extension_link(app: &AppHandle) -> ExtensionLink {
         }
     };
     let notify = app.clone();
-    // 오버레이 창에만 상태를 알린다. 못 보내도 받은 것은 남는다(화면이 상태를 물으면 보인다).
+    // 앱 창에만 상태를 알린다(연결 코드가 실린다 — 오버레이 창에는 보내지 않는다). 못 보내도 받은 것은 남는다
+    // (화면이 상태를 물으면 보인다).
     let changed = move || {
         if let Some(link) = notify.try_state::<ExtensionLink>() {
-            let _ = notify.emit_to(MAIN_WINDOW, EXTENSION_LINK_EVENT, link.0.status());
+            let _ = notify.emit_to(APP_WINDOW, EXTENSION_LINK_EVENT, link.0.status());
         }
     };
     ExtensionLink(LinkHub::open(
@@ -985,6 +1021,116 @@ fn extension_link_take_pending(link: State<'_, ExtensionLink>) -> bool {
     link.0.take_pending()
 }
 
+// ── 두 창이 함께 보는 것 ──────────────────────────────────────────────────────
+//
+// 기본 계정·오버레이를 띄우는 때·마지막 요격전 추천 결과는 계정 폴더(`data/accounts` — gitignore)에 둔다(`shared_state`).
+// 앱 창이 바꾸면 `shared-state` 이벤트가 모든 창으로 가고, 오버레이 창은 결과를 다시 읽는다. 화면이 넘기는 계정 이름은
+// 경로가 아니라 열쇠다 — 계정 폴더의 `<이름>.json`만 읽는다.
+
+/// 계정 폴더(환경 변수 NIKKE_ACCOUNTS_DIR → 저장소의 data/accounts). 화면은 이 폴더를 정하지 못한다.
+fn shared_dir() -> Result<PathBuf, String> {
+    account_sync::default_accounts_dir().map_err(|e| e.to_string())
+}
+
+/// 바뀐 공유 상태를 모든 창에 알린다. 못 보내도 디스크에는 남아 있다(창이 물으면 보인다).
+fn emit_shared(app: &AppHandle, snapshot: &SharedSnapshot) {
+    if let Err(e) = app.emit(SHARED_STATE_EVENT, snapshot.clone()) {
+        eprintln!("공유 상태를 창에 알리지 못했다: {e}");
+    }
+}
+
+/// 두 창이 함께 보는 것의 지금 상태: `{default_account, remembered, accounts, overlay_launch, intercept_saved_at, problems}`.
+/// 계정의 내용과 결과 문서는 싣지 않는다.
+#[tauri::command]
+async fn shared_state() -> Result<SharedSnapshot, String> {
+    blocking(|| Ok(shared_state::snapshot(&shared_dir()?))).await
+}
+
+/// 기본 계정을 정한다(그 이름의 계정이 계정 폴더에 있어야 한다). 바뀐 상태를 모든 창에 알린다.
+#[tauri::command]
+async fn set_default_account(app: AppHandle, name: String) -> Result<SharedSnapshot, String> {
+    blocking(move || {
+        let snapshot =
+            shared_state::set_default_account(&shared_dir()?, &name).map_err(|e| e.to_string())?;
+        emit_shared(&app, &snapshot);
+        Ok(snapshot)
+    })
+    .await
+}
+
+/// 오버레이를 언제 띄울지 정한다(`with_app`·`with_game`·`manual`). 다음 실행부터, 그리고 지금 도는 게임 창 추적에도 쓰인다.
+#[tauri::command]
+async fn set_overlay_launch(app: AppHandle, mode: String) -> Result<SharedSnapshot, String> {
+    blocking(move || {
+        let snapshot =
+            shared_state::set_overlay_launch(&shared_dir()?, &mode).map_err(|e| e.to_string())?;
+        *lock(&app.state::<LaunchMode>().0) = snapshot.overlay_launch;
+        emit_shared(&app, &snapshot);
+        Ok(snapshot)
+    })
+    .await
+}
+
+/// 계정 하나를 읽는다: `{name, modified_at, account}`. 이름을 주지 않으면 지금 쓰는 계정이다.
+/// 형식 확인과 계산은 화면 쪽의 `src/core`가 한다.
+#[tauri::command]
+async fn read_account(name: Option<String>) -> Result<Value, String> {
+    blocking(move || {
+        shared_state::read_account(&shared_dir()?, name.as_deref()).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// 요격전 추천 결과를 계정 폴더에 저장하고 모든 창에 알린다(오버레이 창이 새 결과를 읽는다).
+/// 종류·판이 맞지 않으면 쓰지 않고 한국어로 거부한다 — 앞서 저장한 결과는 그대로다.
+#[tauri::command]
+async fn save_intercept_result(app: AppHandle, report: Value) -> Result<SharedSnapshot, String> {
+    blocking(move || {
+        let snapshot =
+            shared_state::save_intercept(&shared_dir()?, &report).map_err(|e| e.to_string())?;
+        emit_shared(&app, &snapshot);
+        Ok(snapshot)
+    })
+    .await
+}
+
+/// 저장해 둔 마지막 요격전 추천 결과. 없으면 null. 읽을 수 없으면(깨졌다·다른 종류·다른 판) 한국어 오류 문장.
+#[tauri::command]
+async fn load_intercept_result() -> Result<Option<Value>, String> {
+    blocking(|| shared_state::load_intercept(&shared_dir()?).map_err(|e| e.to_string())).await
+}
+
+/// 데스크톱 앱 창을 앞으로 가져온다(최소화돼 있으면 되돌린다). 오버레이의 「앱 열기」와 두 번째 실행이 부른다 —
+/// 둘 다 사용자가 방금 한 일이라 이 창이 활성화돼도 된다. 게임 창은 건드리지 않는다.
+fn focus_app_window(app: &AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window(APP_WINDOW)
+        .ok_or("앱 창을 찾을 수 없다")?;
+    window.unminimize().map_err(|e| e.to_string())?;
+    window.show().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())
+}
+
+/// 데스크톱 앱 창을 앞으로 가져온다.
+#[tauri::command]
+fn show_app_window(app: AppHandle) -> Result<(), String> {
+    focus_app_window(&app)
+}
+
+/// 오버레이 창을 보이거나 숨긴다(앱 창의 설정·홈에서). 보일 때는 활성화하지 않는다 — 단축키(Alt+Shift+O)와 같은 길이다.
+#[tauri::command]
+fn set_overlay_visible(app: AppHandle, visible: bool) -> OverlaySnapshot {
+    handle_action(
+        &app,
+        if visible {
+            OverlayAction::Show
+        } else {
+            OverlayAction::Hide
+        },
+    );
+    app.state::<Overlay>().snapshot()
+}
+
 /// 현재 오버레이 상태.
 #[tauri::command]
 fn overlay_status(overlay: State<'_, Overlay>) -> OverlaySnapshot {
@@ -997,7 +1143,8 @@ fn startup_report_path() -> Option<String> {
     report::first_path_arg(std::env::args().skip(1))
 }
 
-/// 앱을 끝낸다. 테두리도 작업 표시줄 단추도 없어서 화면의 닫기 단추가 이것을 부른다.
+/// 앱을 끝낸다. 오버레이 창에는 테두리도 작업 표시줄 단추도 없어서 그 창의 끝내기 단추가 이것을 부른다
+/// (앱 창은 창의 닫기 단추로 끝낸다 — 아래 `run`의 창 이벤트).
 /// 돌던 엔진 계산·계정 수집은 앱이 끝나는 길(`run`의 종료 처리 — `stop_running_work`)에서 멈춘다.
 #[tauri::command]
 fn quit_app(app: AppHandle) {
@@ -1087,8 +1234,8 @@ fn handle_action(app: &AppHandle, action: OverlayAction) {
     wake_game_tracker(app);
 }
 
-/// 오버레이를 한 번 더 실행했을 때 이미 떠 있는 쪽이 하는 일: 숨겨져 있었다면 보인다 — 활성화 없이
-/// (게임을 하다가 바로 가기를 눌렀어도 게임의 키보드 포커스는 그대로다). 두 번째 실행은 창을 만들지 않고 끝난다.
+/// 오버레이가 숨겨져 있었다면 보인다 — 활성화 없이(게임의 키보드 포커스는 그대로다). 「게임을 찾았을 때 띄운다」로
+/// 정해 둔 경우 게임 창 추적이 부른다.
 ///
 /// 논리 상태가 「보임」이어도 창에 한 번 더 요청한다: 이미 보이는 창에는 아무 일도 일어나지 않고,
 /// 상태와 실제 창이 어긋나 있었다면(그럴 일은 없어야 하지만) 이때 맞춰진다.
@@ -1101,7 +1248,7 @@ fn reveal_overlay(app: &AppHandle) {
         let mut state = lock(&overlay.state);
         let transition = state.apply(OverlayAction::Show);
         if let Err(e) = show_overlay_without_activating(&window) {
-            eprintln!("두 번째 실행을 받았지만 오버레이를 보이지 못했다: {e}");
+            eprintln!("오버레이를 보이지 못했다: {e}");
             return;
         }
         *state = transition.next;
@@ -1167,13 +1314,17 @@ fn place_top_right(window: &WebviewWindow) -> tauri::Result<()> {
 
 pub fn run() {
     tauri::Builder::default()
-        // 맨 먼저 등록한다: 이미 떠 있는 오버레이가 있으면 이 실행은 여기서(창을 만들고 단축키를 등록하기 전에) 끝나고,
-        // 떠 있던 쪽에서 아래 함수가 불린다. 실행 인자와 작업 폴더는 쓰지 않는다.
+        // 맨 먼저 등록한다: 이미 떠 있는 앱이 있으면 이 실행은 여기서(창을 만들고 단축키를 등록하기 전에) 끝나고,
+        // 떠 있던 쪽에서 아래 함수가 불린다 — 앱 창을 앞으로 가져온다(사용자가 방금 앱을 실행했다). 오버레이 창은
+        // 건드리지 않는다. 실행 인자와 작업 폴더는 쓰지 않는다.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            reveal_overlay(app);
+            if let Err(e) = focus_app_window(app) {
+                eprintln!("두 번째 실행을 받았지만 앱 창을 앞으로 가져오지 못했다: {e}");
+            }
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Overlay::default())
+        .manage(LaunchMode::default())
         .manage(EngineRun::default())
         .manage(GameTracker::default())
         .manage(ScreenTracker::default())
@@ -1211,19 +1362,40 @@ pub fn run() {
             extension_link_take_pending,
             nikke_portrait,
             boss_image,
-            game_icon
+            game_icon,
+            shared_state,
+            set_default_account,
+            set_overlay_launch,
+            read_account,
+            save_intercept_result,
+            load_intercept_result,
+            show_app_window,
+            set_overlay_visible
         ])
         .setup(|app| {
             let window = app
                 .get_webview_window(MAIN_WINDOW)
                 .ok_or("오버레이 창(main)이 설정에 없다")?;
-            // 설정에서는 숨긴 채 만들고, 자리를 잡은 뒤에 보인다(엉뚱한 자리에서 번쩍이지 않게).
-            // 시작할 때만 창 라이브러리의 show()를 쓴다 — 사용자가 방금 띄운 창이라 활성화돼도 된다.
-            // 그 뒤의 보임/숨김(단축키)은 활성화 없는 길로만 한다(apply_transition).
+            // 앱 창은 설정(tauri.conf.json)대로 곧바로 보인다 — 사용자가 방금 띄운 창이라 포커스를 갖는다.
+            if app.get_webview_window(APP_WINDOW).is_none() {
+                return Err("앱 창(app)이 설정에 없다".into());
+            }
+            // 오버레이는 설정에서 숨긴 채 만들고, 자리를 잡은 뒤에 보인다(엉뚱한 자리에서 번쩍이지 않게).
             if let Err(e) = place_top_right(&window) {
                 eprintln!("창을 화면 오른쪽 위로 옮기지 못했다: {e}");
             }
-            window.show()?;
+            // 오버레이를 언제 띄울지는 계정 폴더의 설정에 있다(읽지 못하면 기본값 — 앱과 함께).
+            // 보일 때는 활성화하지 않는다 — 방금 뜬 앱 창이 포커스를 갖고, 그 뒤의 보임/숨김도 같은 길이다(apply_transition).
+            let launch = shared_dir()
+                .map(|dir| shared_state::read_state(&dir).0.overlay_launch)
+                .unwrap_or_default();
+            *lock(&app.state::<LaunchMode>().0) = launch;
+            if launch.shows_at_start() {
+                show_overlay_without_activating(&window)?;
+            } else {
+                // 숨긴 채로 시작한다: 게임 창을 찾았을 때(`track_game`) 또는 앱 창의 단추·단축키로 보인다.
+                lock(&app.state::<Overlay>().state).visible = false;
+            }
             // 크롬 확장 연결: 켜 둔 채로 끝냈으면 여기서 다시 듣기 시작한다(기본은 꺼짐).
             app.manage(open_extension_link(app.handle()));
             register_shortcuts(app.handle());
@@ -1232,14 +1404,21 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // 오버레이 창이 닫히면(Alt+F4 등) 앱을 끝낸다 — 로그인 창이 떠 있어도 오버레이 없이 남지 않는다.
-            // 돌던 계산·수집은 아래 종료 처리에서 멈춘다.
-            if window.label() == MAIN_WINDOW && matches!(event, tauri::WindowEvent::Destroyed) {
+            // 앱 창을 닫으면 앱을 끝낸다 — 트레이 아이콘이 없어 오버레이만 남으면 다시 열 길이 없고, 보이지 않는 채
+            // 프로세스가 남는다. 로그인 창이 떠 있어도 함께 끝난다. 돌던 계산·수집은 아래 종료 처리에서 멈춘다.
+            if window.label() == APP_WINDOW && matches!(event, tauri::WindowEvent::Destroyed) {
                 window.app_handle().exit(0);
+            }
+            // 오버레이 창은 닫지 않고 숨긴다(Alt+F4 등) — 닫혀 버리면 앱 창이 떠 있는 동안 다시 띄울 수 없다.
+            if window.label() == MAIN_WINDOW {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    handle_action(window.app_handle(), OverlayAction::Hide);
+                }
             }
         })
         .build(tauri::generate_context!())
-        .expect("니케 컴패니언 오버레이를 시작하지 못했다")
+        .expect("니케 컴패니언을 시작하지 못했다")
         .run(|app, event| {
             // 앱이 끝나는 모든 길(끝내기 단추, 창 닫기)이 여기를 지난다. 프로세스가 끝나기 직전이다.
             if let tauri::RunEvent::Exit = event {

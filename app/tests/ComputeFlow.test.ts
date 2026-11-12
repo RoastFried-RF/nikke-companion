@@ -1,4 +1,5 @@
-// 오버레이에서 추천·비교를 실행하는 흐름: 파일 고르기 → 실행 → 진행 중 표시 → 순위 또는 오류.
+// 파일을 직접 골라 추천·비교를 실행하는 흐름(설정 > 고급 > 추천·비교): 파일 고르기 → 실행 → 진행 중 표시 → 순위 또는 오류.
+// (P-027: 이 화면은 오버레이의 첫 탭에서 데스크톱 앱의 설정 > 고급으로 옮겼다 — 확인하는 동작은 그대로다.)
 // Rust 쪽(backend)은 가짜다. 후보 생성·순위는 루트의 실제 계산 코드가 하고, 결과는 P-009의 화면(ReportView)이 그린다.
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,9 +9,11 @@ import { simCache } from '../src/lib/runtime';
 import type { CompareReport, EngineProgress, EngineRequest, EngineRow } from '../src/types';
 import fixture from './fixtures/compare.sample.json';
 import { ACCOUNT_PATH, catalog, CONDITION_PATH, documents, FAKE_EVALUATOR, fakeRow, SQUADS_PATH } from './helpers/fakeEngine';
+import { installShell, openLegacy } from './helpers/shell';
 
 vi.mock('../src/lib/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/backend')>()),
+  ...(await import('./helpers/shell')).shellMocks(),
   loadReport: vi.fn(),
   overlayStatus: vi.fn(),
   startupReportPath: vi.fn(),
@@ -71,9 +74,11 @@ function holdEngine(): void {
   );
 }
 
+/** 앱 창을 띄우고 설정 > 고급 > 추천·비교를 연다(이 파일이 보는 화면). */
 async function render() {
   const wrapper = mount(App);
   await flushPromises();
+  await openLegacy(wrapper, 'compare');
   return wrapper;
 }
 type Wrapper = Awaited<ReturnType<typeof render>>;
@@ -130,6 +135,7 @@ beforeEach(() => {
   simCache.clear(); // 시뮬 결과 캐시는 앱이 켜져 있는 동안 남는다 — 테스트끼리 섞이지 않게 비운다.
   batches = [];
   held = false;
+  installShell(api);
   api.overlayStatus.mockResolvedValue({ visible: true, click_through: false, shortcut_problems: [] });
   api.startupReportPath.mockResolvedValue(null);
   api.loadReport.mockResolvedValue(loaded);

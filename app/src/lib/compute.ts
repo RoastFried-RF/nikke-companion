@@ -94,12 +94,39 @@ export async function runSuggest(input: SuggestInput, deps: ComputeDeps = defaul
   try {
     const account = await readInput(deps, '계정', input.accountPath);
     const condition = await readInput(deps, '전투 조건', input.conditionPath);
-    const report = await suggestSquads(
-      { account: account as object, condition: condition as object },
-      { limit: input.limit, top: input.top, refine: input.refine, budget: input.budget },
-      coreDeps(deps),
-    );
-    return report as unknown as CompareReport;
+    return await suggestWith({ account, condition, limit: input.limit, top: input.top, refine: input.refine, budget: input.budget }, deps);
+  } catch (e) {
+    throw asComputeError(e);
+  }
+}
+
+/** 추천 계산의 선택 값(주지 않으면 계산 코드의 기본값). */
+export interface SuggestOptions {
+  limit?: number;
+  top?: number;
+  refine?: boolean;
+  budget?: number;
+}
+
+async function suggestWith(input: { account: unknown; condition: unknown } & SuggestOptions, deps: ComputeDeps): Promise<CompareReport> {
+  const report = await suggestSquads(
+    { account: input.account as object, condition: input.condition as object },
+    { limit: input.limit, top: input.top, refine: input.refine, budget: input.budget },
+    coreDeps(deps),
+  );
+  return report as unknown as CompareReport;
+}
+
+/**
+ * 이미 읽어 둔 계정과 전투 조건으로 추천을 계산한다 — 데스크톱 앱의 편성 도구가 쓴다(기본 계정 + 내장 조건, 파일 경로 없음).
+ * `runSuggest`와 같은 함수(`suggestSquads`)를 부른다.
+ */
+export async function runSuggestWith(
+  input: { account: unknown; condition: unknown } & SuggestOptions,
+  deps: ComputeDeps = defaultDeps,
+): Promise<CompareReport> {
+  try {
+    return await suggestWith(input, deps);
   } catch (e) {
     throw asComputeError(e);
   }
@@ -124,12 +151,31 @@ export async function runIntercept(input: InterceptInput, deps: ComputeDeps = de
   try {
     const account = await readInput(deps, '계정', input.accountPath);
     const bundle = await readInput(deps, '보스 묶음', input.bossesPath);
-    const report = await recommendIntercept(
-      { account: account as object, bundle: bundle as object },
-      { top: input.top, budget: input.budget },
-      coreDeps(deps),
-    );
-    return report as unknown as InterceptReport;
+    return await interceptWith({ account, bundle, top: input.top, budget: input.budget }, deps);
+  } catch (e) {
+    throw asComputeError(e);
+  }
+}
+
+async function interceptWith(input: { account: unknown; bundle: unknown; top?: number; budget?: number }, deps: ComputeDeps): Promise<InterceptReport> {
+  const report = await recommendIntercept(
+    { account: input.account as object, bundle: input.bundle as object },
+    { top: input.top, budget: input.budget },
+    coreDeps(deps),
+  );
+  return report as unknown as InterceptReport;
+}
+
+/**
+ * 이미 읽어 둔 계정과 보스 묶음으로 보스별 추천을 계산한다 — 데스크톱 앱의 요격전 화면이 쓴다(기본 계정 + 내장 보스 묶음,
+ * 파일 경로 없음). `runIntercept`와 같은 함수(`recommendIntercept`)를 부른다.
+ */
+export async function runInterceptWith(
+  input: { account: unknown; bundle: unknown; top?: number; budget?: number },
+  deps: ComputeDeps = defaultDeps,
+): Promise<InterceptReport> {
+  try {
+    return await interceptWith(input, deps);
   } catch (e) {
     throw asComputeError(e);
   }

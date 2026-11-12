@@ -28,6 +28,7 @@ import {
   syncFailure,
 } from '../lib/backend';
 import { recall, remember } from '../lib/remember';
+import { useShared } from '../lib/shared';
 import type { CookieSaved, FetchLine, SyncFailure, SyncStatus } from '../types';
 
 /** 마지막으로 받은 계정의 이름을 기억하는 이름. 쿠키는 기억하지 않는다. */
@@ -59,6 +60,8 @@ const elapsed = ref(0);
 const imported = ref<ImportedAccount | null>(null);
 
 const link = useAccountLink();
+/** 두 창이 함께 보는 자리(App.vue가 내려 준다). 받은 계정을 계산에 쓸 계정으로 정한다. */
+const shared = useShared();
 /** 크롬 확장 연결(App.vue가 내려 준다 — 상태는 Rust가 들고 있다). 화면만 따로 띄우면 null이고 그 칸은 없다. */
 const extension = useExtensionLink();
 const extensionStatus = computed(() => extension?.status.value ?? null);
@@ -210,7 +213,9 @@ async function fetchAccount(): Promise<void> {
       const result = await importFetchedProfile(target);
       imported.value = result;
       remember(LAST_NAME, target);
-      // 열려 있는 화면의 계정 칸에 넣고, 아직 열지 않은 화면을 위해 기억해 둔다(lib/accountLink.ts). 계산은 시작하지 않는다.
+      // 받은 계정을 계산에 쓸 계정으로 정한다 — 요격전·편성 도구·내 니케 화면이 이 계정을 쓴다(계산은 시작하지 않는다).
+      // 고급의 계정 칸에도 넣는다(lib/accountLink.ts).
+      await shared?.setDefaultAccount(target);
       link?.adopt(result.saved.path);
     } catch (e) {
       failure.value = { step: 3, detail: syncFailure(e) };
@@ -261,8 +266,8 @@ watch([() => extensionStatus.value?.pending, busy], continueFromExtension, { imm
           </span>
         </h2>
         <p class="step__hint">
-          계정을 받으려면 blablalink 로그인 세션 쿠키가 있어야 한다. 쿠키는 <strong>계정 접근권</strong>이다 — 이 앱은 엔진의 쿠키 파일
-          한 곳에만 저장하고, 화면에 다시 보이지 않는다. 받는 방법은 셋이다.
+          계정을 받으려면 blablalink 로그인 세션 쿠키가 있어야 한다. 쿠키는 <strong>계정 접근권</strong>이다 — 이 앱은 이 PC의 한 곳에만
+          저장하고, 화면에 다시 보이지 않는다. 받는 방법은 셋이다.
         </p>
 
         <!-- 방법 1 ───────────────────────────────────────────────────────── -->
@@ -403,7 +408,7 @@ watch([() => extensionStatus.value?.pending, busy], continueFromExtension, { imm
             spellcheck="false"
             autocomplete="off"
             :placeholder="DEFAULT_NAME"
-            aria-label="계정 이름 (계정 파일 이름이 된다)"
+            aria-label="계정 이름"
             :disabled="busy !== ''"
             data-testid="account-name"
             @change="refresh"
@@ -417,29 +422,29 @@ watch([() => extensionStatus.value?.pending, busy], continueFromExtension, { imm
           </button>
         </div>
         <p class="step__hint">
-          엔진의 수집 스크립트가 저장된 쿠키로 blablalink에서 내 니케의 육성 상태를 받는다(1~2분 걸릴 수 있다). 큐브는 장착 중인 것만 받는다.
+          저장된 쿠키로 blablalink에서 내 니케의 육성 상태를 받는다(1~2분 걸릴 수 있다). 큐브는 장착 중인 것만 받는다.
           <template v-if="status?.profile_fetched_at">
             <span data-testid="last-fetch">마지막으로 받은 때: {{ when(status.profile_fetched_at) }}.</span>
           </template>
         </p>
 
         <p v-if="fetching" class="step__progress" role="status" data-testid="fetch-progress">
-          {{ busy === 'import' ? '받은 프로필을 계정 상태로 바꿔 저장하는 중…' : `받는 중… ${elapsed}초` }}
+          {{ busy === 'import' ? '받은 것을 정리해 저장하는 중…' : `받는 중… ${elapsed}초` }}
         </p>
         <p v-else-if="stopped" class="step__progress" role="status" data-testid="fetch-stopped">
-          중단됨 — 계정을 받지 않았다. 계정 파일은 그대로다.
+          중단됨 — 계정을 받지 않았다. 앞서 받은 계정은 그대로다.
         </p>
         <AccountFailure v-if="failure?.step === 2" :step="2" :detail="failure.detail" />
 
         <template v-if="lines.length">
           <div v-if="warnings.length" class="step__box" data-testid="fetch-warnings">
-            <p class="step__box-title">수집 스크립트의 경고 {{ warnings.length }}건</p>
+            <p class="step__box-title">받는 중에 나온 경고 {{ warnings.length }}건</p>
             <ul class="notes">
               <li v-for="(line, i) in warnings" :key="i" data-testid="fetch-warning">{{ line.text.trim() }}</li>
             </ul>
           </div>
           <div class="step__box" data-testid="fetch-log">
-            <p class="step__box-title">수집 스크립트가 낸 줄 {{ lines.length }}개 <span class="step__sub">쿠키 값은 가려져 있다</span></p>
+            <p class="step__box-title">받는 과정 {{ lines.length }}줄 <span class="step__sub">쿠키 값은 가려져 있다</span></p>
             <ul class="step__log">
               <li v-for="(line, i) in lines" :key="i" :class="{ 'step__log-warn': line.warning }" data-testid="fetch-line">{{ line.text }}</li>
             </ul>
@@ -453,20 +458,20 @@ watch([() => extensionStatus.value?.pending, busy], continueFromExtension, { imm
         <template v-if="imported">
           <p class="step__done" data-testid="import-summary">
             가져온 니케 <strong>{{ imported.report.summary.imported }}명</strong>
-            (프로필 {{ imported.report.summary.roster }}개 항목) · 건너뛴 항목 {{ imported.report.summary.skipped }}개 · 미확인 칸이 있는 니케
+            (받은 항목 {{ imported.report.summary.roster }}개) · 건너뛴 항목 {{ imported.report.summary.skipped }}개 · 미확인 칸이 있는 니케
             {{ imported.report.summary.with_unknown }}명 · 동기화 레벨 {{ imported.synchroLevel ?? '미확인' }}
             <span class="badge" :class="imported.report.account.is_test_data ? 'badge--test' : 'badge--real'" data-testid="import-kind">
               {{ imported.report.account.is_test_data ? '검증용 데이터' : '실제 계정 데이터' }}
             </span>
           </p>
           <p class="step__path" data-testid="import-path">
-            저장: <code>{{ imported.saved.path }}</code>
+            저장한 곳: <code>{{ imported.saved.path }}</code>
             <template v-if="imported.saved.backup">
-              <br />앞서 있던 파일은 <code data-testid="import-backup">{{ imported.saved.backup }}</code>로 한 벌 남겼다.
+              <br />앞서 받은 것은 <code data-testid="import-backup">{{ imported.saved.backup }}</code>에 한 벌 남겼다.
             </template>
           </p>
           <p class="step__hint" data-testid="import-adopted">
-            추천·비교, 요격전, 성장 화면의 계정 칸에 이 파일을 넣었다 — 그 화면에서 실행을 누르면 이 계정으로 계산한다.
+            이 계정을 계산에 쓸 계정으로 정했다 — 요격전과 편성 도구가 이 계정으로 계산하고, 내 니케에 보인다.
           </p>
 
           <div v-if="imported.report.skipped.length" class="step__box" data-testid="import-skipped">
@@ -495,10 +500,10 @@ watch([() => extensionStatus.value?.pending, busy], continueFromExtension, { imm
           </div>
         </template>
         <p v-else class="step__hint" data-testid="import-hint">
-          계정을 받으면 여기서 계정 상태로 바꿔 계정 파일(<code>data/accounts/{{ account }}.json</code>)로 저장하고, 추천·비교, 요격전, 성장
-          화면의 계정 칸에 넣는다. 같은 이름의 파일이 있으면 덮어쓰기 전에 <code>.bak</code>으로 한 벌 남긴다.
+          계정을 받으면 여기서 정리해 <strong>{{ account }}</strong>(이)라는 이름으로 저장하고, 계산에 쓸 계정으로 정한다. 같은 이름으로 받아 둔
+          것이 있으면 덮어쓰기 전에 한 벌 남긴다.
           <template v-if="status?.account_file">
-            <br />지금 있는 계정 파일: <code data-testid="existing-account">{{ status.account_file }}</code>
+            <br />지금 받아 둔 것: <code data-testid="existing-account">{{ status.account_file }}</code>
           </template>
         </p>
 

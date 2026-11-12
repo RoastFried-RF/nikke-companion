@@ -1,4 +1,6 @@
-// 탭과 새 화면 세 개(요격전·성장 비교·티어)의 흐름: 탭 옮기기, 실행 → 진행 표시 → 결과·오류·중단, 결과 파일 불러오기.
+// 설정 > 고급(파일 직접 고르기)의 탭과 화면 넷(추천·비교·요격전·성장 비교·티어)의 흐름: 탭 옮기기, 실행 → 진행 표시 → 결과·오류·중단,
+// 결과 파일 불러오기. (P-027: 이 화면들은 오버레이의 탭에서 데스크톱 앱의 설정 > 고급으로 옮겼다 — 확인하는 동작은 그대로다.
+// 앱 창의 메뉴와 새 화면은 AppShell.test.ts·AppPages.test.ts가 본다.)
 // Rust 쪽(backend)은 가짜다. 보스별 추천·성장 비교는 루트의 실제 계산 코드(src/core)가 하고 엔진 실행만 가짜다.
 // 결과 파일로 넣는 문서는 실제 CLI가 만든 샘플이다(tests/fixtures — `npm run fixture`).
 import { flushPromises, mount } from '@vue/test-utils';
@@ -26,9 +28,11 @@ import {
   SQUADS_PATH,
   UPGRADES_PATH,
 } from './helpers/fakeEngine';
+import { FakeDisk, installShell, openLegacy, openPage } from './helpers/shell';
 
 vi.mock('../src/lib/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/backend')>()),
+  ...(await import('./helpers/shell')).shellMocks(),
   loadReport: vi.fn(),
   overlayStatus: vi.fn(),
   startupReportPath: vi.fn(),
@@ -109,9 +113,19 @@ function growthRow(request: EngineRequest): EngineRow {
   return { ...base, total_damage: total, members: members.map((m) => ({ ...m, share: m.damage / total })) };
 }
 
+/** 계정 폴더를 흉내 내는 가짜 디스크(마지막 요격전 결과가 여기에 남는다 — 「앱을 다시 켜도」를 볼 때 쓴다). */
+let disk = new FakeDisk();
+
+/** 앱 창을 띄우고 설정 > 고급을 연다(처음 보이는 탭은 추천·비교 — 기억해 둔 탭이 있으면 그 탭). */
 async function render() {
   const wrapper = mount(App);
   await flushPromises();
+  // 실행 인자로 결과 파일을 받았으면 앱이 스스로 고급의 추천·비교를 연다.
+  if (!wrapper.find('[data-testid="advanced"]').exists()) {
+    await wrapper.find('[data-testid="nav-settings"]').trigger('click');
+    await wrapper.find('[data-testid="section-advanced"]').trigger('click');
+    await flushPromises();
+  }
   return wrapper;
 }
 type Wrapper = Awaited<ReturnType<typeof render>>;
@@ -121,8 +135,7 @@ const texts = (w: Wrapper, testid: string) => w.findAll(`[data-testid="${testid}
 const value = (w: Wrapper, testid: string) => (at(w, testid).element as HTMLInputElement).value;
 
 async function openTab(w: Wrapper, key: 'compare' | 'intercept' | 'growth' | 'tier'): Promise<void> {
-  await at(w, `tab-${key}`).trigger('click');
-  await flushPromises();
+  await openLegacy(w, key);
 }
 
 /** 실행 단추만 누른다(계산이 어디까지 갔는지는 기다리지 않는다). */
@@ -187,6 +200,7 @@ beforeEach(() => {
   localStorage.clear();
   simCache.clear(); // 시뮬 결과 캐시는 앱이 켜져 있는 동안 남는다 — 테스트끼리 섞이지 않게 비운다.
   batches = [];
+  disk = installShell(api);
   api.overlayStatus.mockResolvedValue({ visible: true, click_through: false, shortcut_problems: [] });
   api.startupReportPath.mockResolvedValue(null);
   api.loadReport.mockResolvedValue(compareFixture as never);
@@ -215,10 +229,11 @@ beforeEach(() => {
 });
 
 describe('탭', () => {
-  it('탭 다섯 개가 있고 처음에는 추천·비교가 보인다', async () => {
+  it('고급의 탭 넷이 있고 처음에는 추천·비교가 보인다 — 계정은 설정의 계정 연결에 있다', async () => {
     const w = await render();
-    // 다섯째 탭(계정)은 P-022에서 더했다 — 그 화면의 흐름은 AccountFlow.test.ts가 본다.
-    expect(w.findAll('[role="tab"]').map((t) => t.text())).toEqual(['추천·비교', '요격전', '성장', '티어', '계정']);
+    // 예전의 다섯째 탭(계정)은 설정의 「계정 연결」 구획이 됐다 — 그 화면의 흐름은 AccountFlow.test.ts가 본다.
+    expect(w.findAll('[data-testid="tabs"] [role="tab"]').map((t) => t.text())).toEqual(['추천·비교', '요격전', '성장', '티어']);
+    expect(at(w, 'section-account').text()).toBe('계정 연결');
     expect(at(w, 'tab-compare').attributes('aria-selected')).toBe('true');
     expect(at(w, 'screen-compare').exists()).toBe(true);
     for (const key of ['intercept', 'growth', 'tier']) expect(at(w, `screen-${key}`).exists()).toBe(false);
@@ -252,10 +267,16 @@ describe('탭', () => {
   it('마지막으로 본 탭을 기억해 다음 실행 때 그 탭을 연다', async () => {
     const first = await render();
     await openTab(first, 'intercept');
-    expect(localStorage.getItem('nikke-companion.tab')).toBe('intercept');
+    expect(localStorage.getItem('nikke-companion.settings.advanced')).toBe('intercept');
+    // 앱 창은 마지막으로 본 화면(설정)과 그 구획(고급)도 기억한다.
+    expect(localStorage.getItem('nikke-companion.page')).toBe('settings');
+    expect(localStorage.getItem('nikke-companion.settings.section')).toBe('advanced');
     first.unmount();
 
-    const second = await render();
+    const second = mount(App);
+    await flushPromises();
+    // 메뉴를 누르지 않아도 그 화면·그 탭이 열려 있다.
+    expect(at(second, 'nav-settings').attributes('aria-current')).toBe('page');
     expect(at(second, 'tab-intercept').attributes('aria-selected')).toBe('true');
     expect(at(second, 'screen-intercept').exists()).toBe(true);
     // 보이지 않는 추천·비교 화면은 아직 아무것도 읽지 않았다.
@@ -263,18 +284,23 @@ describe('탭', () => {
   });
 
   it('실행 인자로 비교 결과 파일을 받으면 기억해 둔 탭 대신 추천·비교를 연다', async () => {
-    localStorage.setItem('nikke-companion.tab', 'tier');
+    localStorage.setItem('nikke-companion.settings.advanced', 'tier');
+    localStorage.setItem('nikke-companion.page', 'roster');
     api.startupReportPath.mockResolvedValue('D:\\arg.json');
-    const w = await render();
+    const w = mount(App);
+    await flushPromises();
+    // 메뉴를 누르지 않아도 설정 > 고급 > 추천·비교가 열려 있다.
+    expect(at(w, 'nav-settings').attributes('aria-current')).toBe('page');
     expect(at(w, 'tab-compare').attributes('aria-selected')).toBe('true');
     expect(api.loadReport).toHaveBeenCalledWith('D:\\arg.json');
     expect(w.findAll('[data-testid="ranking-entry"]')).toHaveLength(3);
-    // 기억해 둔 탭은 바꾸지 않는다.
-    expect(localStorage.getItem('nikke-companion.tab')).toBe('tier');
+    // 기억해 둔 탭과 화면은 바꾸지 않는다.
+    expect(localStorage.getItem('nikke-companion.settings.advanced')).toBe('tier');
+    expect(localStorage.getItem('nikke-companion.page')).toBe('roster');
   });
 
   it('기억해 둔 탭 이름이 모르는 것이면 추천·비교를 연다', async () => {
-    localStorage.setItem('nikke-companion.tab', 'union');
+    localStorage.setItem('nikke-companion.settings.advanced', 'union');
     const w = await render();
     expect(at(w, 'screen-compare').exists()).toBe(true);
   });
@@ -489,6 +515,8 @@ describe('요격전 화면', () => {
 
     const engineCalls = api.engineRunBatch.mock.calls.length;
     const reads = api.readJsonFile.mock.calls.length;
+    // 결과는 디스크(계정 폴더 — 여기서는 가짜)에 남아 있다. 다시 켠 앱이 거기서 읽는다.
+    expect(disk.intercept).not.toBeNull();
     const second = await render();
     expect(at(second, 'screen-intercept').exists()).toBe(true);
     expect({ name: at(second, 'boss-name').text(), weak: at(second, 'boss-weak').text(), totals: texts(second, 'total-raw') }).toEqual(shown);
@@ -503,14 +531,18 @@ describe('요격전 화면', () => {
     expect((at(second, 'intercept-inputs').element as HTMLElement).style.display).toBe('none');
   });
 
-  it('기억해 둔 결과가 이 판이 읽을 수 없는 문서면 버리고 안내를 보인다', async () => {
-    localStorage.setItem('nikke-companion.tab', 'intercept');
-    localStorage.setItem('nikke-companion.intercept.report', JSON.stringify({ ...interceptFixture, schema_version: 0 }));
+  it('저장해 둔 결과가 이 판이 읽을 수 없는 문서면 보이지 않고 안내를 보인다 — 요격전 화면이 한국어로 알린다', async () => {
+    localStorage.setItem('nikke-companion.settings.advanced', 'intercept');
+    // 다른 판의 앱이 써 둔 결과(지금의 저장 명령은 이런 문서를 받지 않는다).
+    disk.putIntercept({ ...interceptFixture, schema_version: 0 });
     const w = await render();
     expect(at(w, 'boss').exists()).toBe(false);
     expect(at(w, 'hint').exists()).toBe(true);
     expect(at(w, 'error').exists()).toBe(false);
-    expect(localStorage.getItem('nikke-companion.intercept.report')).toBeNull();
+    await openPage(w, 'intercept');
+    expect(at(w, 'result-problem').text()).toContain('앞서 저장한 요격전 추천을 읽지 못했다');
+    expect(at(w, 'result-problem').text()).toContain('schema_version이 맞지 않는다');
+    expect(at(w, 'intercept-result').exists()).toBe(false);
   });
 
   it('`intercept --json`이 만든 결과 파일을 불러와 보인다', async () => {

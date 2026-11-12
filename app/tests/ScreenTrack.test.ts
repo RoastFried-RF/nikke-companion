@@ -6,6 +6,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../src/App.vue';
 import * as backend from '../src/lib/backend';
+import { clearNikkeCatalog } from '../src/lib/nikkeInfo';
 import { simCache } from '../src/lib/runtime';
 import {
   clampIntervalSec,
@@ -24,9 +25,11 @@ import type { InterceptReport, ScreenKind, ScreenRecognition, ScreenTrackState, 
 import anomalyBundle from '../../data/intercept/anomaly.json';
 import interceptFixture from './fixtures/intercept.sample.json';
 import { ACCOUNT_PATH, BOSSES_PATH, catalog, CONDITION_PATH, documents, FAKE_EVALUATOR, fakeRow } from './helpers/fakeEngine';
+import { currentPage, FakeDisk, installShell, openLegacy, openPage, openSection } from './helpers/shell';
 
 vi.mock('../src/lib/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/backend')>()),
+  ...(await import('./helpers/shell')).shellMocks(),
   loadReport: vi.fn(),
   overlayStatus: vi.fn(),
   startupReportPath: vi.fn(),
@@ -250,6 +253,12 @@ describe('표시 도우미', () => {
 });
 
 // ── 화면 흐름(가짜 backend) ──────────────────────────────────────────────────
+//
+// P-027에서 화면의 자리가 바뀌었다 — 확인하는 동작은 그대로다:
+//   - 자동 추적 칸(스위치·인식 상태·주기·자동 이동)은 요격전 탭에서 **설정 > 오버레이**로 옮겼다.
+//   - 「요격전 탭」은 왼쪽 메뉴의 **요격전 화면**이 됐다(새 부품으로 그린다: 보스 카드·니케 타일·순위 줄).
+//   - 추천·비교·성장·티어 탭은 **설정 > 고급**의 탭이 됐다. 결과 파일 불러오기도 거기에 있다.
+//   - 마지막 요격전 결과는 웹뷰 저장소가 아니라 디스크(계정 폴더 — 여기서는 가짜)에 있다.
 
 /** 실제 CLI 샘플의 보스 id·이름만 실제 이상 개체 5종으로 바꾼 추천 결과. */
 const realReport = (() => {
@@ -265,15 +274,17 @@ const REAL_RESULT = 'D:\\결과\\intercept.real.json';
 const TEST_RESULT = 'D:\\결과\\intercept.test.json';
 const files: Record<string, unknown> = { ...documents, [REAL_RESULT]: realReport, [TEST_RESULT]: interceptFixture };
 
-const SAVED_REPORT = 'nikke-companion.intercept.report';
 const TRACK_ENABLED = 'nikke-companion.track.enabled';
 const TRACK_AUTO_TAB = 'nikke-companion.track.auto-tab';
 const TRACK_INTERVAL = 'nikke-companion.track.interval-sec';
+const LAST_PAGE = 'nikke-companion.page';
 
 /** Rust가 보내는 `screen-track` 이벤트를 흉내 낸다. 구독이 없으면(추적을 켠 적이 없으면) 아무 일도 없다. */
 let listeners: Array<(next: ScreenTrackStatus) => void> = [];
 /** 가짜 Rust가 쥐고 있는 지금 상태(상태 명령이 돌려준다). */
 let rustStatus: ScreenTrackStatus = status('off');
+/** 계정 폴더를 흉내 내는 가짜 디스크(마지막 요격전 결과와 기본 계정). */
+let disk = new FakeDisk();
 
 async function emit(next: ScreenTrackStatus): Promise<void> {
   rustStatus = next;
@@ -291,25 +302,59 @@ async function render() {
 }
 type Wrapper = Awaited<ReturnType<typeof render>>;
 
+/** 이 파일이 다니는 자리: 요격전 화면(메뉴), 설정 > 고급의 탭 셋, 설정 > 오버레이(자동 추적 칸이 있는 곳). */
+type Tab = 'intercept' | 'compare' | 'growth' | 'tier' | 'overlay';
+
 const at = (w: Wrapper, testid: string) => w.find(`[data-testid="${testid}"]`);
 const texts = (w: Wrapper, testid: string) => w.findAll(`[data-testid="${testid}"]`).map((el) => el.text());
-const selectedTab = (w: Wrapper) => w.findAll('[role="tab"][data-testid^="tab-"]').find((t) => t.attributes('aria-selected') === 'true')?.attributes('data-testid');
+const bossCard = (w: Wrapper, id: string) => w.find(`[data-testid="boss-card"][data-boss="${id}"]`);
 
-async function openTab(w: Wrapper, key: 'compare' | 'intercept' | 'growth' | 'tier'): Promise<void> {
-  await at(w, `tab-${key}`).trigger('click');
-  await flushPromises();
+/** 지금 보이는 자리를 예전 탭의 이름으로: 요격전 화면은 'tab-intercept', 설정 > 고급의 탭은 'tab-<이름>', 설정 > 오버레이는 'tab-overlay'. */
+function selectedTab(w: Wrapper): string {
+  const page = currentPage(w);
+  if (page === 'intercept') return 'tab-intercept';
+  if (page !== 'settings') return `page-${page}`;
+  if (at(w, 'settings-overlay').exists()) return 'tab-overlay';
+  return w.findAll('[role="tab"][data-testid^="tab-"]').find((t) => t.attributes('aria-selected') === 'true')?.attributes('data-testid') ?? 'settings';
 }
 
+async function openTab(w: Wrapper, key: Tab): Promise<void> {
+  if (key === 'intercept') await openPage(w, 'intercept');
+  else if (key === 'overlay') await openSection(w, 'overlay');
+  else await openLegacy(w, key);
+}
+
+/** 설정 > 오버레이(자동 추적 칸)를 잠깐 열어 `look`을 하고, 보던 자리로 돌아온다. */
+async function inPanel<T>(w: Wrapper, look: () => T | Promise<T>): Promise<T> {
+  const where = selectedTab(w);
+  if (where !== 'tab-overlay') await openTab(w, 'overlay');
+  const seen = await look();
+  await flushPromises();
+  if (where !== 'tab-overlay' && where.startsWith('tab-')) await openTab(w, where.slice(4) as Tab);
+  return seen;
+}
+
+/** 자동 추적 칸의 글자(없으면 null). 어느 자리를 보고 있든 읽고 돌아온다. */
+const panelText = (w: Wrapper, testid: string): Promise<string | null> => inPanel(w, () => (at(w, testid).exists() ? at(w, testid).text() : null));
+
+/** 스위치를 켜거나 끈다(설정 > 오버레이에 있다). 보던 자리로 돌아온다. */
 async function toggle(w: Wrapper, on: boolean): Promise<void> {
-  await at(w, 'track-switch').setValue(on);
-  await flushPromises();
+  await inPanel(w, async () => {
+    await at(w, 'track-switch').setValue(on);
+    await flushPromises();
+  });
 }
 
-/** 추적을 켜 둔 채로(기억해 둔 스위치) 앱을 연다. `tab`은 기억해 둔 탭. */
-async function renderTracking(options: { report?: InterceptReport | null; tab?: string } = {}) {
+/** 추적을 켜 둔 채로(기억해 둔 스위치) 앱을 연다. `report`는 디스크에 저장돼 있던 마지막 결과, `tab`은 기억해 둔 자리. */
+async function renderTracking(options: { report?: InterceptReport | null; tab?: Tab } = {}) {
   localStorage.setItem(TRACK_ENABLED, '1');
-  if (options.report) localStorage.setItem(SAVED_REPORT, JSON.stringify(options.report));
-  if (options.tab) localStorage.setItem('nikke-companion.tab', options.tab);
+  if (options.report) disk.putIntercept(options.report);
+  if (options.tab === 'intercept') localStorage.setItem(LAST_PAGE, 'intercept');
+  else if (options.tab) {
+    localStorage.setItem(LAST_PAGE, 'settings');
+    localStorage.setItem('nikke-companion.settings.section', options.tab === 'overlay' ? 'overlay' : 'advanced');
+    if (options.tab !== 'overlay') localStorage.setItem('nikke-companion.settings.advanced', options.tab);
+  }
   return render();
 }
 
@@ -317,8 +362,10 @@ beforeEach(() => {
   vi.resetAllMocks();
   localStorage.clear();
   simCache.clear();
+  clearNikkeCatalog();
   listeners = [];
   rustStatus = status('off');
+  disk = installShell(api);
   api.overlayStatus.mockResolvedValue({ visible: true, click_through: false, shortcut_problems: [] });
   api.startupReportPath.mockResolvedValue(null);
   api.onOverlayState.mockResolvedValue(() => {});
@@ -356,10 +403,12 @@ afterEach(() => {
 });
 
 describe('스위치', () => {
-  it('요격전 화면에 있고 기본은 꺼짐이다 — 켜기 전에는 Rust에 아무것도 시키지 않는다', async () => {
+  it('설정의 오버레이에 있고 기본은 꺼짐이다 — 켜기 전에는 Rust에 아무것도 시키지 않는다', async () => {
     const w = await render();
-    expect(at(w, 'track-panel').exists()).toBe(false); // 추천·비교 탭에는 없다
+    expect(at(w, 'track-panel').exists()).toBe(false); // 홈에는 없다
     await openTab(w, 'intercept');
+    expect(at(w, 'track-panel').exists()).toBe(false); // 요격전 화면에도 없다(설정으로 옮겼다)
+    await openTab(w, 'overlay');
     expect(at(w, 'track-panel').exists()).toBe(true);
     expect((at(w, 'track-switch').element as HTMLInputElement).checked).toBe(false);
     expect(at(w, 'track-state').text()).toBe('꺼짐');
@@ -371,7 +420,7 @@ describe('스위치', () => {
 
   it('켜면 Rust에 알리고(기본 주기 2초) 기억한다 — 다시 열면 켜진 채로 시작한다', async () => {
     const first = await render();
-    await openTab(first, 'intercept');
+    await openTab(first, 'overlay');
     await toggle(first, true);
     expect(api.setScreenTracking.mock.calls).toEqual([[true, 2000]]);
     expect(api.onScreenTrack).toHaveBeenCalledTimes(1);
@@ -380,16 +429,16 @@ describe('스위치', () => {
     first.unmount();
 
     api.setScreenTracking.mockClear();
-    localStorage.setItem('nikke-companion.tab', 'compare');
+    localStorage.setItem(LAST_PAGE, 'home');
     const second = await render();
-    // 요격전 탭을 열지 않아도 앱이 뜰 때 추적을 켠다.
+    // 설정을 열지 않아도 앱이 뜰 때 추적을 켠다.
     expect(api.setScreenTracking.mock.calls).toEqual([[true, 2000]]);
-    await openTab(second, 'intercept');
+    await openTab(second, 'overlay');
     expect((at(second, 'track-switch').element as HTMLInputElement).checked).toBe(true);
   });
 
   it('끄면 Rust에 알리고 기억한다 — 다시 열어도 꺼져 있다', async () => {
-    const first = await renderTracking({ tab: 'intercept' });
+    const first = await renderTracking({ tab: 'overlay' });
     await toggle(first, false);
     expect(api.setScreenTracking.mock.calls).toEqual([
       [true, 2000],
@@ -405,7 +454,7 @@ describe('스위치', () => {
     expect((at(second, 'track-switch').element as HTMLInputElement).checked).toBe(false);
   });
 
-  it('스위치를 끄면 이벤트를 무시한다 — 탭도 보스도 그대로다', async () => {
+  it('스위치를 끄면 이벤트를 무시한다 — 화면도 보스도 그대로다', async () => {
     const w = await renderTracking({ report: realReport, tab: 'intercept' });
     await emit(read('anomaly_select', 'kraken'));
     expect(at(w, 'boss-name').text()).toBe('크라켄');
@@ -417,11 +466,12 @@ describe('스위치', () => {
     expect(selectedTab(w)).toBe('tab-growth');
     await openTab(w, 'intercept');
     expect(at(w, 'boss-name').text()).toBe('크라켄');
-    expect(at(w, 'track-state').text()).toBe('꺼짐');
+    expect(await panelText(w, 'track-state')).toBe('꺼짐');
     expect(at(w, 'track-need-run').exists()).toBe(false);
 
     // 다시 켜면 지금 화면부터 새로 따라간다(같은 보스여도).
-    await w.find('[data-testid="boss-tab"][data-boss="ultra"]').trigger('click');
+    await bossCard(w, 'ultra').trigger('click');
+    expect(at(w, 'boss-name').text()).toBe('울트라');
     await toggle(w, true);
     await emit(read('anomaly_select', 'kraken'));
     expect(at(w, 'boss-name').text()).toBe('크라켄');
@@ -430,7 +480,7 @@ describe('스위치', () => {
   it('켜지 못하면 그 사실을 추적 칸에 보인다 — 앱의 오류 줄은 건드리지 않는다', async () => {
     api.setScreenTracking.mockRejectedValue('화면 추적을 시작하지 못했다');
     const w = await render();
-    await openTab(w, 'intercept');
+    await openTab(w, 'overlay');
     await toggle(w, true);
     expect(at(w, 'track-problem').text()).toBe('자동 추적을 켜지 못했다: 화면 추적을 시작하지 못했다');
     expect(at(w, 'error').exists()).toBe(false);
@@ -439,23 +489,25 @@ describe('스위치', () => {
 });
 
 describe('인식한 보스를 따라간다', () => {
-  it('다른 탭을 보고 있어도 요격전 탭으로 옮기고 그 보스를 고른다 — 결과가 있으면 편성이 바로 보인다', async () => {
+  it('다른 화면을 보고 있어도 요격전 화면으로 옮기고 그 보스를 고른다 — 결과가 있으면 편성이 바로 보인다', async () => {
     const w = await renderTracking({ report: realReport, tab: 'compare' });
     expect(selectedTab(w)).toBe('tab-compare');
 
     await emit(read('anomaly_select', 'kraken'));
     expect(selectedTab(w)).toBe('tab-intercept');
     expect(at(w, 'boss-name').text()).toBe('크라켄');
-    expect(w.find('[data-testid="boss-tab"][data-boss="kraken"]').attributes('aria-selected')).toBe('true');
-    expect(texts(w, 'rank')).toEqual(['1위', '2위', '3위']);
-    expect(w.findAll('[data-testid="ranking-entry"]')[0].findAll('[data-testid="member-name"]')).toHaveLength(5);
+    expect(bossCard(w, 'kraken').attributes('aria-pressed')).toBe('true');
+    // 1위 편성의 니케 다섯이 타일로, 2·3위가 순위 줄로 보인다.
+    expect(at(w, 'squad-caption').text()).toBe('1위 편성');
+    expect(texts(w, 'rank-row-place')).toEqual(['2위', '3위']);
+    expect(w.findAll('[data-testid="squad-member"]')).toHaveLength(5);
     expect(at(w, 'track-need-run').exists()).toBe(false);
     // 그 보스를 기억한다(다음에 열어도 그 보스다).
     expect(localStorage.getItem('nikke-companion.intercept.boss')).toBe('kraken');
-    expect(localStorage.getItem('nikke-companion.tab')).toBe('intercept');
-    // 계산을 시작하지 않았다.
+    expect(localStorage.getItem(LAST_PAGE)).toBe('intercept');
+    // 계산을 시작하지 않았다(계정도 읽지 않았다).
     expect(api.engineRunBatch).not.toHaveBeenCalled();
-    expect(api.engineCatalog).not.toHaveBeenCalled();
+    expect(api.readAccount).not.toHaveBeenCalled();
   });
 
   it('요격전 화면을 이미 보고 있었다면 보스만 바뀐다. 게임에서 보스를 넘기면 따라 바뀐다', async () => {
@@ -465,15 +517,15 @@ describe('인식한 보스를 따라간다', () => {
     for (const b of [boss('ultra'), boss('harvester'), boss('mirror_container'), boss('indivilia')]) {
       await emit(read('anomaly_select', b.id));
       expect(at(w, 'boss-name').text()).toBe(b.name);
-      expect(at(w, 'track-state').text()).toBe(`${b.name} · 보스 선택 화면`);
+      expect(await panelText(w, 'track-state')).toBe(`${b.name} · 보스 선택 화면`);
     }
     // 같은 보스의 편성 화면으로 들어가도 그 보스다.
     await emit(read('anomaly_squad', 'indivilia'));
     expect(at(w, 'boss-name').text()).toBe('인디빌리아');
-    expect(at(w, 'track-state').text()).toBe('인디빌리아 · 편성 화면');
+    expect(await panelText(w, 'track-state')).toBe('인디빌리아 · 편성 화면');
   });
 
-  it('다른 탭에 가 있다가 돌아와도 그 사이에 따라간 보스가 보인다(자동 이동을 꺼 둔 경우)', async () => {
+  it('다른 화면에 가 있다가 돌아와도 그 사이에 따라간 보스가 보인다(자동 이동을 꺼 둔 경우)', async () => {
     localStorage.setItem(TRACK_AUTO_TAB, '0');
     const w = await renderTracking({ report: realReport, tab: 'intercept' });
     expect(at(w, 'boss-name').text()).toBe('인디빌리아');
@@ -485,30 +537,33 @@ describe('인식한 보스를 따라간다', () => {
     expect(at(w, 'boss-name').text()).toBe('크라켄');
   });
 
-  it('결과가 없으면 「추천을 먼저 실행하라」고 알릴 뿐 계산을 시작하지 않는다', async () => {
+  it('결과가 없으면 「추천 계산을 누르라」고 알릴 뿐 계산을 시작하지 않는다', async () => {
     const w = await renderTracking({ tab: 'growth' });
     await emit(read('anomaly_select', 'kraken'));
 
     expect(selectedTab(w)).toBe('tab-intercept');
-    expect(at(w, 'boss').exists()).toBe(false);
+    expect(at(w, 'boss-detail').exists()).toBe(false);
     const note = at(w, 'track-need-run').text();
     expect(note).toContain('게임에서 보고 있는 보스: 크라켄');
-    expect(note).toContain('추천 결과가 아직 없다. 요격전 추천을 먼저 실행하라');
-    expect(note).toContain('자동으로 계산을 시작하지 않는다');
+    expect(note).toContain('아직 추천이 없다. 추천 계산을 누르면 찾아 준다');
+    expect(note).toContain('스스로 계산을 시작하지 않는다');
     // 다른 보스로 넘기면 안내의 보스도 바뀐다.
     await emit(read('anomaly_select', 'ultra'));
     expect(at(w, 'track-need-run').text()).toContain('게임에서 보고 있는 보스: 울트라');
 
-    // 엔진도 파일도 건드리지 않았다.
+    // 계산 도구도 파일도 계정도 건드리지 않았다.
     expect(api.engineRunBatch).not.toHaveBeenCalled();
-    expect(api.engineCatalog).not.toHaveBeenCalled();
     expect(api.readJsonFile).not.toHaveBeenCalled();
-    expect(at(w, 'compute-progress').exists()).toBe(false);
+    expect(api.readAccount).not.toHaveBeenCalled();
+    expect(at(w, 'progress-panel').exists()).toBe(false);
 
-    // 결과가 생기면(불러오든 계산하든) 그 보스의 편성이 바로 보이고 안내는 사라진다.
+    // 결과가 생기면(불러오든 계산하든) 그 보스의 편성이 바로 보이고 안내는 사라진다. 불러오는 곳은 설정 > 고급이다.
+    await openTab(w, 'intercept');
+    await openLegacy(w, 'intercept');
     await at(w, 'result-path').setValue(REAL_RESULT);
     await at(w, 'load-result').trigger('click');
     await flushPromises();
+    await openTab(w, 'intercept');
     expect(at(w, 'boss-name').text()).toBe('울트라');
     expect(at(w, 'track-need-run').exists()).toBe(false);
   });
@@ -516,12 +571,12 @@ describe('인식한 보스를 따라간다', () => {
   it('결과에 그 보스가 없으면 그렇게 알리고 고른 보스는 바꾸지 않는다', async () => {
     // 검증용 보스 묶음으로 만든 결과(보스 id가 test-a…)를 보고 있다.
     const w = await renderTracking({ report: interceptFixture as unknown as InterceptReport, tab: 'intercept' });
-    await w.find('[data-testid="boss-tab"][data-boss="test-c"]').trigger('click');
+    await bossCard(w, 'test-c').trigger('click');
 
     await emit(read('anomaly_select', 'kraken'));
     expect(at(w, 'boss-name').text()).toBe('시험 보스 C');
     expect(at(w, 'track-need-run').text()).toContain('게임에서 보고 있는 보스: 크라켄');
-    expect(at(w, 'track-need-run').text()).toContain('지금 결과에는 이 보스가 없다');
+    expect(at(w, 'track-need-run').text()).toContain('지금 추천에는 이 보스가 없다');
     expect(api.engineRunBatch).not.toHaveBeenCalled();
   });
 
@@ -530,13 +585,13 @@ describe('인식한 보스를 따라간다', () => {
     renamed.bosses[3].name = '크라켄'; // id는 test-d 그대로
     const w = await renderTracking({ report: renamed, tab: 'intercept' });
     await emit(read('anomaly_select', 'kraken'));
-    expect(at(w, 'boss').attributes('data-boss')).toBe('test-d');
+    expect(at(w, 'boss-detail').attributes('data-boss')).toBe('test-d');
     expect(at(w, 'track-need-run').exists()).toBe(false);
   });
 });
 
 describe('바꾸지 않는 경우', () => {
-  it('unknown·other·게임 없음·최소화·읽기 실패에서는 고른 보스와 탭을 바꾸지 않는다(마지막 보스 유지)', async () => {
+  it('unknown·other·게임 없음·최소화·읽기 실패에서는 고른 보스와 화면을 바꾸지 않는다(마지막 보스 유지)', async () => {
     const w = await renderTracking({ report: realReport, tab: 'intercept' });
     await emit(read('anomaly_select', 'kraken'));
     expect(at(w, 'boss-name').text()).toBe('크라켄');
@@ -550,12 +605,12 @@ describe('바꾸지 않는 경우', () => {
       [failed(5), '읽기 실패 (연속 5회)'],
     ] as const) {
       await emit(next);
-      expect(at(w, 'track-state').text(), label).toBe(label);
-      expect(at(w, 'boss-name').text(), label).toBe('크라켄');
       expect(selectedTab(w), label).toBe('tab-intercept');
-      expect(at(w, 'track-reason').text(), label).toContain('마지막 보스 크라켄 유지');
+      expect(at(w, 'boss-name').text(), label).toBe('크라켄');
+      expect(await panelText(w, 'track-state'), label).toBe(label);
+      expect(await panelText(w, 'track-reason'), label).toContain('마지막 보스 크라켄 유지');
     }
-    // 처음부터 unknown·other만 오면 아무것도 고르지 않고 탭도 옮기지 않는다.
+    // 처음부터 unknown·other만 오면 아무것도 고르지 않고 화면도 옮기지 않는다.
     const fresh = await renderTracking({ report: realReport, tab: 'compare' });
     await emit(read('unknown'));
     await emit(read('other'));
@@ -571,7 +626,7 @@ describe('바꾸지 않는 경우', () => {
     expect(at(w, 'boss-name').text()).toBe('크라켄');
 
     // 손으로 다른 보스를 고른다.
-    await w.find('[data-testid="boss-tab"][data-boss="ultra"]').trigger('click');
+    await bossCard(w, 'ultra').trigger('click');
     expect(at(w, 'boss-name').text()).toBe('울트라');
 
     // 같은 결과가 또 와도(읽은 시각만 다르다), 잠깐 모르게 됐다 돌아와도, 읽기가 실패했다 돌아와도 그대로다.
@@ -588,7 +643,7 @@ describe('바꾸지 않는 경우', () => {
     expect(at(w, 'boss-name').text()).toBe('하베스터');
   });
 
-  it('같은 결과가 이어지는 동안에는 손으로 옮긴 탭도 그대로 둔다', async () => {
+  it('같은 결과가 이어지는 동안에는 손으로 옮긴 화면도 그대로 둔다', async () => {
     const w = await renderTracking({ report: realReport, tab: 'compare' });
     const kraken = read('anomaly_squad', 'kraken');
     await emit(kraken);
@@ -608,8 +663,8 @@ describe('바꾸지 않는 경우', () => {
     expect(at(w, 'boss-name').text()).toBe('크라켄');
   });
 
-  it('자동 이동을 끄면 탭은 그대로 두고 보스만 고른다. 끈 것을 기억한다', async () => {
-    const w = await renderTracking({ report: realReport, tab: 'intercept' });
+  it('자동 이동을 끄면 화면은 그대로 두고 보스만 고른다. 끈 것을 기억한다', async () => {
+    const w = await renderTracking({ report: realReport, tab: 'overlay' });
     expect((at(w, 'track-auto-tab').element as HTMLInputElement).checked).toBe(true);
     await at(w, 'track-auto-tab').setValue(false);
     expect(localStorage.getItem(TRACK_AUTO_TAB)).toBe('0');
@@ -621,6 +676,7 @@ describe('바꾸지 않는 경우', () => {
     expect(at(w, 'boss-name').text()).toBe('미러 컨테이너');
 
     // 다시 켜면 옮긴다.
+    await openTab(w, 'overlay');
     await at(w, 'track-auto-tab').setValue(true);
     expect(localStorage.getItem(TRACK_AUTO_TAB)).toBe('1');
     await openTab(w, 'compare');
@@ -631,7 +687,8 @@ describe('바꾸지 않는 경우', () => {
 
 describe('인식 상태 표시', () => {
   it('지금 인식한 화면·보스와 마지막으로 읽은 시각이 보이고, 근거는 펼쳐서 본다', async () => {
-    const w = await renderTracking({ report: realReport, tab: 'intercept' });
+    localStorage.setItem(TRACK_AUTO_TAB, '0'); // 추적 칸(설정 > 오버레이)을 보는 동안 요격전 화면으로 옮겨 가지 않게
+    const w = await renderTracking({ report: realReport, tab: 'overlay' });
     await emit(read('anomaly_select', 'kraken'));
 
     expect(at(w, 'track-state').text()).toBe('크라켄 · 보스 선택 화면');
@@ -651,7 +708,8 @@ describe('인식 상태 표시', () => {
   });
 
   it('인식 못 함·게임 없음·읽기 실패는 이유와 함께 상태로만 보인다 — 오류 줄이 쌓이지 않는다', async () => {
-    const w = await renderTracking({ tab: 'intercept' });
+    localStorage.setItem(TRACK_AUTO_TAB, '0');
+    const w = await renderTracking({ tab: 'overlay' });
 
     await emit(read('unknown'));
     expect(at(w, 'track-state').text()).toBe('인식 못 함');
@@ -680,11 +738,14 @@ describe('인식 상태 표시', () => {
     expect(at(w, 'track-read-at').text()).toBe(`읽음 ${clockTime('2026-11-12T05:10:00.000Z')}`);
   });
 
-  it('보이는 동안 주기마다 상태를 물어 읽은 시각을 최신으로 둔다 — 같은 결과면 화면을 건드리지 않는다', async () => {
+  it('추적 칸이 보이는 동안 주기마다 상태를 물어 읽은 시각을 최신으로 둔다 — 같은 결과면 화면을 건드리지 않는다', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    localStorage.setItem(TRACK_AUTO_TAB, '0');
     const w = await renderTracking({ report: realReport, tab: 'intercept' });
     await emit(read('anomaly_select', 'kraken'));
-    await w.find('[data-testid="boss-tab"][data-boss="ultra"]').trigger('click');
+    // 손으로 다른 보스를 골라 두고 추적 칸을 연다.
+    await bossCard(w, 'ultra').trigger('click');
+    await openTab(w, 'overlay');
     const asked = api.screenTrackStatus.mock.calls.length;
 
     // Rust는 같은 결과라 이벤트를 보내지 않았지만, 읽은 시각은 새로워졌다.
@@ -694,15 +755,15 @@ describe('인식 상태 표시', () => {
     expect(api.screenTrackStatus.mock.calls.length).toBe(asked + 1);
     expect(at(w, 'track-read-at').text()).toBe(`읽음 ${clockTime('2026-11-12T05:03:30.000Z')}`);
     expect(at(w, 'track-numbers').text()).toContain('캡처 1회 71ms');
-    // 손으로 고른 보스는 그대로다.
-    expect(at(w, 'boss-name').text()).toBe('울트라');
 
-    // 다른 탭으로 가면 묻지 않는다. 돌아오면 바로 한 번 묻고 다시 주기마다 묻는다.
-    await openTab(w, 'tier');
+    // 다른 화면으로 가면 묻지 않는다. 손으로 고른 보스는 그대로다.
+    await openTab(w, 'intercept');
+    expect(at(w, 'boss-name').text()).toBe('울트라');
     vi.advanceTimersByTime(10_000);
     await flushPromises();
     expect(api.screenTrackStatus.mock.calls.length).toBe(asked + 1);
-    await openTab(w, 'intercept');
+    // 돌아오면 바로 한 번 묻고 다시 주기마다 묻는다.
+    await openTab(w, 'overlay');
     expect(api.screenTrackStatus.mock.calls.length).toBe(asked + 2);
     vi.advanceTimersByTime(2000);
     await flushPromises();
@@ -718,7 +779,7 @@ describe('인식 상태 표시', () => {
 
 describe('주기', () => {
   it('바꾸면 Rust에 알리고 기억한다. 범위 밖의 값은 0.5~60초로 맞춘다', async () => {
-    const w = await renderTracking({ tab: 'intercept' });
+    const w = await renderTracking({ tab: 'overlay' });
     expect((at(w, 'track-interval').element as HTMLInputElement).value).toBe('2');
     api.setScreenTracking.mockClear();
 
@@ -740,7 +801,7 @@ describe('주기', () => {
 
   it('꺼져 있을 때 바꾸면 기억만 하고, 켤 때 그 주기로 알린다', async () => {
     const w = await render();
-    await openTab(w, 'intercept');
+    await openTab(w, 'overlay');
     await at(w, 'track-interval').setValue('3');
     await flushPromises();
     expect(api.setScreenTracking).not.toHaveBeenCalled();
@@ -814,7 +875,7 @@ describe('탭 이동 규칙(tabMoveStep)', () => {
   });
 });
 
-describe('계산 중에는 탭을 옮기지 않는다', () => {
+describe('계산 중에는 화면을 옮기지 않는다', () => {
   /** 엔진 배치를 붙든다: 풀어 줄 때까지 계산이 끝나지 않는다. */
   function holdEngine(): { release: () => void } {
     const waiting: Array<() => void> = [];
@@ -843,7 +904,7 @@ describe('계산 중에는 탭을 옮기지 않는다', () => {
     await flushPromises();
   }
 
-  /** 추천·비교 탭에서 추천 계산을 시작한다. */
+  /** 설정 > 고급의 추천·비교에서 추천 계산을 시작한다. */
   async function startCompare(w: Wrapper): Promise<void> {
     await at(w, 'account-path').setValue(ACCOUNT_PATH);
     await at(w, 'condition-path').setValue(CONDITION_PATH);
@@ -851,23 +912,31 @@ describe('계산 중에는 탭을 옮기지 않는다', () => {
     await reachEngine();
   }
 
-  /** 계산이 끝날 때까지 기다린다(탭의 「계산 중」 점이 사라진다). */
+  /** 요격전 화면에서 추천 계산을 시작한다(기본 계정 + 내장 보스 묶음 — 파일 경로를 넣지 않는다). */
+  async function startIntercept(w: Wrapper): Promise<void> {
+    await at(w, 'run-intercept').trigger('click');
+    await reachEngine();
+  }
+
+  /** 계산이 끝날 때까지 기다린다(메뉴의 「계산 중」 점이 사라진다 — 어느 화면을 보고 있든 보이는 표시다). */
   async function finish(w: Wrapper, engine: { release: () => void }): Promise<void> {
     engine.release();
     await vi.waitFor(
       () => {
-        if (at(w, 'tab-busy').exists()) throw new Error('아직 계산 중이다');
+        if (at(w, 'nav-busy').exists()) throw new Error('아직 계산 중이다');
       },
       { timeout: 5000 },
     );
     await flushPromises();
   }
 
-  it('보고 있는 탭에서 계산이 도는 동안에는 그 탭에 머문다 — 한 줄로 알리고, 계산이 끝나면 요격전 탭으로 옮긴다', async () => {
+  it('보고 있는 화면에서 계산이 도는 동안에는 그 화면에 머문다 — 한 줄로 알리고, 계산이 끝나면 요격전 화면으로 옮긴다', async () => {
     const engine = holdEngine();
     const w = await renderTracking({ report: realReport, tab: 'compare' });
     await startCompare(w);
     expect(at(w, 'tab-busy').exists()).toBe(true);
+    // 메뉴에도 계산 중인 화면(설정)이 표시된다.
+    expect(at(w, 'nav-settings').find('[data-testid="nav-busy"]').exists()).toBe(true);
     expect(at(w, 'track-pending-move').exists()).toBe(false);
 
     await emit(read('anomaly_select', 'kraken'));
@@ -875,12 +944,12 @@ describe('계산 중에는 탭을 옮기지 않는다', () => {
     expect(at(w, 'compute-progress').exists()).toBe(true); // 보고 있던 계산 화면 그대로다
     const note = at(w, 'track-pending-move').text();
     expect(note).toContain('게임에서 보고 있는 보스: 크라켄');
-    expect(note).toContain('계산이 끝나면 요격전 탭으로 옮긴다');
-    // 보스는 요격전 화면의 선택에 반영됐다(탭만 그대로다).
+    expect(note).toContain('계산이 끝나면 요격전 화면으로 옮긴다');
+    // 보스는 요격전 화면의 선택에 반영됐다(화면만 그대로다).
     expect(localStorage.getItem('nikke-companion.intercept.boss')).toBe('kraken');
-    expect(localStorage.getItem('nikke-companion.tab')).toBe('compare');
+    expect(localStorage.getItem(LAST_PAGE)).toBe('settings');
 
-    // 계산 중에 게임에서 보스를 넘겨도 탭은 그대로이고, 안내의 보스만 바뀐다.
+    // 계산 중에 게임에서 보스를 넘겨도 화면은 그대로이고, 안내의 보스만 바뀐다.
     await emit(read('anomaly_select', 'ultra'));
     expect(selectedTab(w)).toBe('tab-compare');
     expect(at(w, 'track-pending-move').text()).toContain('게임에서 보고 있는 보스: 울트라');
@@ -889,33 +958,33 @@ describe('계산 중에는 탭을 옮기지 않는다', () => {
     expect(selectedTab(w)).toBe('tab-intercept');
     expect(at(w, 'boss-name').text()).toBe('울트라');
     expect(at(w, 'track-pending-move').exists()).toBe(false);
-    // 한 번만 옮긴다: 다른 탭으로 가면 그대로 둔다.
+    // 한 번만 옮긴다: 다른 화면으로 가면 그대로 둔다.
     await openTab(w, 'compare');
     await emit(read('anomaly_select', 'ultra'));
     expect(selectedTab(w)).toBe('tab-compare');
   });
 
-  it('다른 탭의 계산이 도는 동안에도 옮기지 않는다 — 요격전 계산을 돌려 놓고 성장 탭을 보는 경우', async () => {
+  it('다른 화면의 계산이 도는 동안에도 옮기지 않는다 — 요격전 계산을 돌려 놓고 고급의 성장 탭을 보는 경우', async () => {
     const engine = holdEngine();
+    disk.addAccount('me', documents[ACCOUNT_PATH]);
     const w = await renderTracking({ report: realReport, tab: 'intercept' });
-    await at(w, 'toggle-inputs').trigger('click');
-    await at(w, 'account-path').setValue(ACCOUNT_PATH);
-    await at(w, 'bosses-path').setValue(BOSSES_PATH);
-    await at(w, 'intercept-budget').setValue('10');
-    await at(w, 'run-compute').trigger('click');
-    await reachEngine();
+    await startIntercept(w);
+    // 계산 중에는 진행 패널이 보이고 이전 결과는 그대로 남는다. 메뉴에는 요격전이 계산 중으로 표시된다.
+    expect(at(w, 'progress-panel').exists()).toBe(true);
+    expect(at(w, 'intercept-result').exists()).toBe(true);
+    expect(at(w, 'nav-intercept').find('[data-testid="nav-busy"]').exists()).toBe(true);
     await openTab(w, 'growth');
 
     await emit(read('anomaly_squad', 'harvester'));
     expect(selectedTab(w)).toBe('tab-growth');
-    expect(at(w, 'track-pending-move').text()).toContain('계산이 끝나면 요격전 탭으로 옮긴다');
+    expect(at(w, 'track-pending-move').text()).toContain('계산이 끝나면 요격전 화면으로 옮긴다');
 
     await finish(w, engine);
     expect(selectedTab(w)).toBe('tab-intercept');
     expect(at(w, 'track-pending-move').exists()).toBe(false);
   });
 
-  it('계산 중에 게임이 이상 개체 화면을 떠나면 미뤄 둔 이동을 버린다 — 계산이 끝나도 탭은 그대로다', async () => {
+  it('계산 중에 게임이 이상 개체 화면을 떠나면 미뤄 둔 이동을 버린다 — 계산이 끝나도 화면은 그대로다', async () => {
     const engine = holdEngine();
     const w = await renderTracking({ report: realReport, tab: 'compare' });
     await startCompare(w);
@@ -940,7 +1009,7 @@ describe('계산 중에는 탭을 옮기지 않는다', () => {
     expect(selectedTab(w)).toBe('tab-intercept');
   });
 
-  it('계산 중에 사용자가 요격전 탭을 직접 열어 봤으면 계산이 끝나도 다시 옮기지 않는다', async () => {
+  it('계산 중에 사용자가 요격전 화면을 직접 열어 봤으면 계산이 끝나도 다시 옮기지 않는다', async () => {
     const engine = holdEngine();
     const w = await renderTracking({ report: realReport, tab: 'compare' });
     await startCompare(w);
@@ -969,34 +1038,32 @@ describe('계산 중에는 탭을 옮기지 않는다', () => {
 
   it('계산 중에 스위치를 끄면 미뤄 둔 이동을 버린다', async () => {
     const engine = holdEngine();
+    disk.addAccount('me', documents[ACCOUNT_PATH]);
     const w = await renderTracking({ report: realReport, tab: 'intercept' });
-    await at(w, 'toggle-inputs').trigger('click');
-    await at(w, 'account-path').setValue(ACCOUNT_PATH);
-    await at(w, 'bosses-path').setValue(BOSSES_PATH);
-    await at(w, 'intercept-budget').setValue('10');
-    await at(w, 'run-compute').trigger('click');
-    await reachEngine();
+    await startIntercept(w);
     await openTab(w, 'tier');
     await emit(read('anomaly_select', 'kraken'));
     expect(at(w, 'track-pending-move').exists()).toBe(true);
 
-    // 스위치는 요격전 화면에 있다 — 열면 미뤄 둔 이동은 이미 버려진다. 끄고 다른 탭으로 간다.
-    await openTab(w, 'intercept');
+    // 스위치는 설정 > 오버레이에 있다 — 거기를 열어도(요격전 화면이 아니다) 미뤄 둔 이동은 남아 있고, 끄면 버려진다.
+    await openTab(w, 'overlay');
+    expect(at(w, 'track-pending-move').exists()).toBe(true);
     await toggle(w, false);
-    await openTab(w, 'tier');
     expect(at(w, 'track-pending-move').exists()).toBe(false);
+    await openTab(w, 'tier');
     await finish(w, engine);
     expect(selectedTab(w)).toBe('tab-tier');
   });
 });
 
-describe('추천 실행과 함께', () => {
+describe('추천 계산과 함께', () => {
   it('추적 중에도 추천은 사용자가 눌러야 돈다 — 계산한 결과에 인식한 보스가 없으면 그렇게 알린다', async () => {
     const w = await renderTracking({ tab: 'intercept' });
     await emit(read('anomaly_select', 'kraken'));
     expect(api.engineRunBatch).not.toHaveBeenCalled();
 
-    // 검증용 보스 묶음(보스 id가 test-a…)으로 직접 실행한다.
+    // 검증용 보스 묶음(보스 id가 test-a…)으로 직접 계산한다 — 파일을 고르는 곳은 설정 > 고급이다.
+    await openLegacy(w, 'intercept');
     await at(w, 'account-path').setValue(ACCOUNT_PATH);
     await at(w, 'bosses-path').setValue(BOSSES_PATH);
     await at(w, 'intercept-budget').setValue('10');
@@ -1010,6 +1077,35 @@ describe('추천 실행과 함께', () => {
     await flushPromises();
     expect(api.engineRunBatch).toHaveBeenCalled();
     expect(at(w, 'boss-name').text()).toBe('시험 보스 A');
-    expect(at(w, 'track-need-run').text()).toContain('지금 결과에는 이 보스가 없다');
+    // 그 결과가 요격전 화면에도 보이고, 게임에서 보고 있는 보스가 거기에 없다고 알린다.
+    await openTab(w, 'intercept');
+    expect(at(w, 'boss-name').text()).toBe('시험 보스 A');
+    expect(at(w, 'track-need-run').text()).toContain('게임에서 보고 있는 보스: 크라켄');
+    expect(at(w, 'track-need-run').text()).toContain('지금 추천에는 이 보스가 없다');
+  });
+
+  it('요격전 화면의 「추천 계산」은 기본 계정과 내장 보스 5종으로 돈다 — 끝나면 인식한 보스의 편성이 바로 보인다', async () => {
+    disk.addAccount('me', documents[ACCOUNT_PATH]);
+    const w = await renderTracking({ tab: 'intercept' });
+    await emit(read('anomaly_select', 'kraken'));
+    expect(at(w, 'track-need-run').text()).toContain('아직 추천이 없다');
+    expect(api.engineRunBatch).not.toHaveBeenCalled();
+
+    await at(w, 'precision-fast').trigger('click');
+    await at(w, 'run-intercept').trigger('click');
+    await vi.waitFor(
+      () => {
+        if (!at(w, 'intercept-result').exists() || at(w, 'progress-panel').exists()) throw new Error('아직 계산 중이다');
+      },
+      { timeout: 10000 },
+    );
+    await flushPromises();
+    // 내장 보스 묶음의 보스 5종이 카드로 보이고, 게임에서 보고 있는 보스가 골라져 있다.
+    expect(w.findAll('[data-testid="boss-card"]').map((c) => c.attributes('data-boss'))).toEqual(BOSSES.map((b) => b.id));
+    expect(at(w, 'boss-name').text()).toBe('크라켄');
+    expect(at(w, 'track-need-run').exists()).toBe(false);
+    // 결과는 디스크에 저장됐다(오버레이 창이 이것을 읽는다).
+    expect(api.saveInterceptResult).toHaveBeenCalledTimes(1);
+    expect((disk.intercept as InterceptReport).bosses.map((b) => b.id)).toEqual(BOSSES.map((b) => b.id));
   });
 });

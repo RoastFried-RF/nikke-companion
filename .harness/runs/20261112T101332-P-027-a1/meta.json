@@ -1,0 +1,16 @@
+{
+  "task": "P-027",
+  "attempt": 1,
+  "resumed": false,
+  "run": ".harness/runs/20261112T101332-P-027-a1",
+  "agent": {
+    "ok": false,
+    "error": "시간 초과(60분)",
+    "effort": "high",
+    "exit_code": null,
+    "signal": "SIGTERM",
+    "duration_ms": 3600073,
+    "result": null
+  },
+  "outcome": "agent_error"
+}

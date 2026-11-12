@@ -240,8 +240,11 @@ const KEY: InjectionKey<ScreenTrack> = Symbol('screen-track');
  * 자동 추적 상태를 만든다. 보스를 따라갈 때 탭을 옮길지는 `tabMoveStep`이 정하고, 옮기는 것은 `host`(App.vue)가 한다.
  * `start`는 기억해 둔 스위치가 켜져 있으면 Rust의 추적을 켠다. `dispose`는 이벤트 구독을 끊는다.
  */
-export function createScreenTrack(host: TrackHost): { track: ScreenTrack; start: () => Promise<void>; dispose: () => void } {
-  const enabled = ref(recall(TRACK_ENABLED) === '1');
+export function createScreenTrack(
+  host: TrackHost,
+  options: { /** 보기만 한다(오버레이 창): 켜고 끄는 것은 앱 창이 하고, 여기서는 Rust가 알려 주는 상태를 따라갈 뿐이다. */ passive?: boolean } = {},
+): { track: ScreenTrack; start: () => Promise<void>; dispose: () => void } {
+  const enabled = ref(options.passive ? false : recall(TRACK_ENABLED) === '1');
   const autoTab = ref(recall(TRACK_AUTO_TAB) !== '0');
   const intervalSec = ref(clampIntervalSec(recall(TRACK_INTERVAL) || DEFAULT_INTERVAL_SEC));
   const status = ref<ScreenTrackStatus | null>(null);
@@ -357,10 +360,40 @@ export function createScreenTrack(host: TrackHost): { track: ScreenTrack; start:
     }
   }
 
+  /** 보기만 하는 쪽: Rust가 알려 준 켜짐 여부를 그대로 따른다. 꺼졌으면 따라가던 것을 잊는다. */
+  function follow_rust(next: ScreenTrackStatus | null | undefined): void {
+    if (!next) return;
+    enabled.value = next.enabled;
+    if (!next.enabled) {
+      follow = NOT_FOLLOWING;
+      target.value = null;
+      status.value = next;
+      return;
+    }
+    accept(next);
+  }
+
+  /** 보기만 하는 쪽의 시작: 알림을 듣고 지금 상태를 한 번 묻는다. Rust에 아무것도 시키지 않는다. */
+  async function watchOnly(): Promise<void> {
+    try {
+      const stop = await onScreenTrack(follow_rust);
+      if (disposed) stop();
+      else unlisten = stop;
+    } catch {
+      // 알림을 듣지 못해도 물어서 읽은 상태는 보인다.
+    }
+    try {
+      follow_rust(await screenTrackStatus());
+    } catch {
+      // 상태를 모르면 꺼진 것으로 보인다.
+    }
+  }
+
   return {
     track: { enabled, autoTab, intervalSec, status, problem, target, pendingMove, setEnabled, setAutoTab, setIntervalSec, refresh, settle: () => stepTabMove(false) },
     start: async () => {
-      if (enabled.value) await push();
+      if (options.passive) await watchOnly();
+      else if (enabled.value) await push();
     },
     dispose: () => {
       disposed = true;
@@ -371,8 +404,8 @@ export function createScreenTrack(host: TrackHost): { track: ScreenTrack; start:
 }
 
 /** App.vue가 부른다: 상태를 만들어 아래 화면들에 내려 주고, 기억해 둔 스위치가 켜져 있으면 추적을 켠다. */
-export function provideScreenTrack(host: TrackHost): ScreenTrack {
-  const { track, start, dispose } = createScreenTrack(host);
+export function provideScreenTrack(host: TrackHost, options: { passive?: boolean } = {}): ScreenTrack {
+  const { track, start, dispose } = createScreenTrack(host, options);
   provide(KEY, track);
   onMounted(start);
   onBeforeUnmount(dispose);

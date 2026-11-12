@@ -1,4 +1,5 @@
 // 프런트와 Rust 쪽이 맞물리는 곳, 그리고 "쓰는 것만 허용한다·네트워크를 쓰지 않는다"는 약속의 정적 확인.
+import { INTERCEPT_REPORT_SCHEMA_VERSION } from '@core/intercept.mjs';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -35,15 +36,25 @@ import {
   OVERLAY_STATE_EVENT,
   pickJsonFile,
   quitApp,
+  readAccount,
   readJsonFile,
   recognizeGameScreen,
+  saveInterceptResult,
   SCREEN_TRACK_EVENT,
   screenTrackStatus,
+  setDefaultAccount,
   setFollowGame,
+  setOverlayLaunch,
+  setOverlayVisible,
   setScreenTracking,
+  SHARED_STATE_EVENT,
+  sharedState,
+  showAppWindow,
+  loadInterceptResult,
   startupReportPath,
   syncFailure,
 } from '../src/lib/backend';
+import appCapability from '../src-tauri/capabilities/app.json';
 import capability from '../src-tauri/capabilities/overlay.json';
 import tauriConf from '../src-tauri/tauri.conf.json';
 import buildRs from '../src-tauri/build.rs?raw';
@@ -63,6 +74,7 @@ import overlayStateRs from '../src-tauri/src/overlay_state.rs?raw';
 import overlayWin32Rs from '../src-tauri/src/overlay_win32.rs?raw';
 import recognizeRs from '../src-tauri/src/recognize.rs?raw';
 import screenTrackRs from '../src-tauri/src/screen_track.rs?raw';
+import sharedStateRs from '../src-tauri/src/shared_state.rs?raw';
 import stayOnTopRs from '../src-tauri/src/stay_on_top.rs?raw';
 import gitignore from '../../.gitignore?raw';
 import formatSource from '../src/lib/format.ts?raw';
@@ -116,14 +128,49 @@ const COMMANDS = [
   'nikke_portrait',
   'boss_image',
   'game_icon',
+  'shared_state',
+  'set_default_account',
+  'set_overlay_launch',
+  'read_account',
+  'save_intercept_result',
+  'load_intercept_result',
+  'show_app_window',
+  'set_overlay_visible',
 ];
+
+/** 오버레이 창(main)이 부를 수 있는 명령 — 결과 읽기와 창 조작뿐이다(P-027). 나머지는 데스크톱 앱 창(app)의 것이다. */
+const OVERLAY_COMMANDS = [
+  'overlay_status',
+  'quit_app',
+  'show_app_window',
+  'shared_state',
+  'load_intercept_result',
+  'screen_track_status',
+  'engine_catalog',
+  'nikke_portrait',
+  'boss_image',
+  'game_icon',
+];
+/** 데스크톱 앱 창이 부르지 않는 명령: 끝내기(창의 닫기 단추로 끝낸다)와 앱 창 열기(자기 자신이다). */
+const NOT_FOR_APP = ['quit_app', 'show_app_window'];
 
 /** 계정 받기(P-022)에서 더한 명령 아홉 개. */
 const ACCOUNT_COMMANDS = COMMANDS.slice(16, 25);
 /** 크롬 확장 연결(P-025)에서 더한 명령 네 개. */
 const EXTENSION_COMMANDS = COMMANDS.slice(25, 29);
 /** 게임 이미지(P-026)에서 더한 명령 세 개. */
-const IMAGE_COMMANDS = COMMANDS.slice(29);
+const IMAGE_COMMANDS = COMMANDS.slice(29, 32);
+/** 두 창이 함께 보는 것·창 열기와 보이기(P-027)에서 더한 명령 여덟 개. */
+const SHARED_COMMANDS = COMMANDS.slice(32);
+/** 공유 상태(지어낸 값). 계정의 내용과 결과 문서는 싣지 않는다. */
+const sharedSnapshot = {
+  default_account: 'me',
+  remembered: true,
+  accounts: [{ name: 'me', modified_at: '2026-11-12T06:00:00.000Z' }],
+  overlay_launch: 'with_app',
+  intercept_saved_at: null,
+  problems: [],
+};
 /** 없는 이미지(지어낸 값). 이미지 명령은 없는 이미지를 거부하지 않고 이렇게 돌려준다. */
 const missingImage = { found: false, mime: null, data: null, source: null };
 /** 크롬 확장 연결의 상태(지어낸 값). 쿠키는 없다 — 연결 코드는 쿠키가 아니다. */
@@ -227,6 +274,9 @@ describe('Rust 명령 호출', () => {
       if (cmd === 'extension_link_status' || cmd === 'extension_link_set' || cmd === 'extension_link_new_code') return linkStatus;
       if (cmd === 'extension_link_take_pending') return true;
       if (cmd === 'nikke_portrait' || cmd === 'boss_image' || cmd === 'game_icon') return missingImage;
+      if (['shared_state', 'set_default_account', 'set_overlay_launch', 'save_intercept_result'].includes(cmd)) return sharedSnapshot;
+      if (cmd === 'read_account') return { name: 'me', modified_at: null, account: { schema_version: 1, nikkes: {} } };
+      if (cmd === 'set_overlay_visible') return { visible: false, click_through: false, shortcut_problems: [] };
       return null;
     });
     await expect(loadReport('D:\\r.json')).resolves.toEqual({ schema_version: 1 });
@@ -261,6 +311,14 @@ describe('Rust 명령 호출', () => {
     await expect(nikkePortrait('크라운')).resolves.toEqual(missingImage);
     await expect(bossImage('kraken')).resolves.toEqual(missingImage);
     await expect(gameIcon('element', '작열')).resolves.toEqual(missingImage);
+    await expect(sharedState()).resolves.toEqual(sharedSnapshot);
+    await expect(setDefaultAccount('me')).resolves.toEqual(sharedSnapshot);
+    await expect(setOverlayLaunch('with_game')).resolves.toEqual(sharedSnapshot);
+    await expect(readAccount()).resolves.toEqual({ name: 'me', modified_at: null, account: { schema_version: 1, nikkes: {} } });
+    await expect(saveInterceptResult({ schema_version: 1, kind: 'intercept_report' } as never)).resolves.toEqual(sharedSnapshot);
+    await expect(loadInterceptResult()).resolves.toBeNull();
+    await expect(showAppWindow()).resolves.toBeNull();
+    await expect(setOverlayVisible(false)).resolves.toEqual({ visible: false, click_through: false, shortcut_problems: [] });
     expect(calls.map((c) => c.cmd)).toEqual(COMMANDS);
     expect(calls[0].args).toEqual({ path: 'D:\\r.json' });
     expect(calls[6].args).toEqual({ requests: [{ squad: ['크라운'] }] });
@@ -293,6 +351,15 @@ describe('Rust 명령 호출', () => {
     expect(calls[29].args).toEqual({ name: '크라운' });
     expect(calls[30].args).toEqual({ id: 'kraken' });
     expect(calls[31].args).toEqual({ kind: 'element', key: '작열' });
+    // 두 창이 함께 보는 것: 화면이 넘기는 것은 계정 이름(경로가 아니다)·오버레이를 띄우는 때·결과 문서뿐이다 — 폴더나 파일 이름은 없다.
+    expect(calls[32].args).toEqual({});
+    expect(calls[33].args).toEqual({ name: 'me' });
+    expect(calls[34].args).toEqual({ mode: 'with_game' });
+    expect(calls[35].args).toEqual({ name: null });
+    expect(calls[36].args).toEqual({ report: { schema_version: 1, kind: 'intercept_report' } });
+    expect(calls[37].args).toEqual({});
+    expect(calls[38].args).toEqual({});
+    expect(calls[39].args).toEqual({ visible: false });
   });
 
   it('자동 추적의 주기를 주지 않으면 null을 넘긴다 — Rust가 기본값(2초)을 쓴다', async () => {
@@ -334,6 +401,15 @@ describe('Rust 명령 호출', () => {
     expect(libRs).toMatch(/async fn extension_link_set\(app: AppHandle, enabled: bool\) -> Result<LinkStatus, String>/);
     expect(libRs).toMatch(/fn extension_link_new_code\(link: State<'_, ExtensionLink>\) -> LinkStatus/);
     expect(libRs).toMatch(/fn extension_link_take_pending\(link: State<'_, ExtensionLink>\) -> bool/);
+    // 두 창이 함께 보는 것(P-027). 계정 폴더·파일 이름은 인자에 없다 — Rust가 정한다.
+    expect(libRs).toMatch(/async fn shared_state\(\) -> Result<SharedSnapshot, String>/);
+    expect(libRs).toMatch(/async fn set_default_account\(app: AppHandle, name: String\) -> Result<SharedSnapshot, String>/);
+    expect(libRs).toMatch(/async fn set_overlay_launch\(app: AppHandle, mode: String\) -> Result<SharedSnapshot, String>/);
+    expect(libRs).toMatch(/async fn read_account\(name: Option<String>\) -> Result<Value, String>/);
+    expect(libRs).toMatch(/async fn save_intercept_result\(app: AppHandle, report: Value\) -> Result<SharedSnapshot, String>/);
+    expect(libRs).toMatch(/async fn load_intercept_result\(\) -> Result<Option<Value>, String>/);
+    expect(libRs).toMatch(/fn show_app_window\(app: AppHandle\) -> Result<\(\), String>/);
+    expect(libRs).toMatch(/fn set_overlay_visible\(app: AppHandle, visible: bool\) -> OverlaySnapshot/);
   });
 
   it('Rust가 거부한 한국어 문장을 그대로 넘긴다', async () => {
@@ -386,6 +462,7 @@ describe('Rust 명령 호출', () => {
     expect(libRs).toContain(`SCREEN_TRACK_EVENT: &str = "${SCREEN_TRACK_EVENT}"`);
     expect(libRs).toContain(`ACCOUNT_FETCH_EVENT: &str = "${ACCOUNT_FETCH_EVENT}"`);
     expect(libRs).toContain(`EXTENSION_LINK_EVENT: &str = "${EXTENSION_LINK_EVENT}"`);
+    expect(libRs).toContain(`SHARED_STATE_EVENT: &str = "${SHARED_STATE_EVENT}"`);
   });
 });
 
@@ -448,9 +525,10 @@ describe('계정 받기 — 세션 쿠키의 길(Rust)', () => {
     for (const [file, source] of Object.entries({ 'cookie.rs': cookieCode, 'account_sync.rs': syncCode, 'login_window.rs': loginCode, 'lib.rs(계정 받기)': glue })) {
       expect(source, file).not.toMatch(/\b(println|eprintln|print|eprint|dbg)!|\blog::|\btracing::/);
     }
-    // 계정 받기 명령이 보내는 이벤트는 하나다: 수집 스크립트의 줄(가려진 것)을 오버레이 창으로만.
+    // 계정 받기 명령이 보내는 이벤트는 하나다: 수집 스크립트의 줄(가려진 것)을 계정 받기를 하는 창(데스크톱 앱 창)으로만.
+    // (P-027: 계정 받기가 오버레이 창에서 앱 창으로 옮겨 가 받는 창이 MAIN_WINDOW에서 APP_WINDOW로 바뀌었다 — 한 창에만 보낸다는 약속은 그대로다.)
     expect(glue.match(/\.emit\w*\(/g)).toHaveLength(1);
-    expect(glue).toContain('app.emit_to(MAIN_WINDOW, ACCOUNT_FETCH_EVENT, line.clone())');
+    expect(glue).toContain('app.emit_to(APP_WINDOW, ACCOUNT_FETCH_EVENT, line.clone())');
     // 스크립트의 줄은 가린 뒤에야 모으고 알린다.
     expect(syncCode).toMatch(/let line = FetchLine::new\(truncate\(&redactor\.redact\(text\), MAX_LINE_CHARS\)\);/);
     expect(syncCode.match(/on_line\(/g)).toHaveLength(2);
@@ -554,23 +632,26 @@ describe('로그인 창(Rust)', () => {
     expect(build).toContain('.skip_taskbar(false)');
     expect(build).toContain('.always_on_top(false)');
     expect(build).not.toMatch(/\.transparent\(|\.visible\(false\)/);
-    // 창은 실행 중에 만든다 — 설정 파일의 창은 오버레이 하나뿐이다.
-    expect(tauriConf.app.windows.map((w) => w.label)).toEqual(['main']);
+    // 창은 실행 중에 만든다 — 설정 파일의 창은 오버레이와 데스크톱 앱 창 둘이고(P-027) 로그인 창은 거기에 없다.
+    expect(tauriConf.app.windows.map((w) => w.label)).toEqual(['main', 'app']);
     // 여는 주소는 정해져 있다. 화면이 주소를 넘기지 못한다.
     expect(login).toMatch(/pub const LOGIN_URL: &str = "https:\/\/www\.blablalink\.com\/";/);
     expect(libRs).toMatch(/async fn login_window_open\(app: AppHandle\) -> Result<\(\), SyncFailure> \{\s*Ok\(login_window::open\(&app\)\?\)/);
   });
 
   it('이 창은 앱 명령을 부를 수 없다 — capability가 없고, 원격 주소에 IPC를 여는 설정이 없다', () => {
-    // capability 파일은 하나이고, 그 창 목록에 로그인 창이 없다(이름을 묶어 맞추는 * 도 없다).
-    expect(Object.keys(capabilityFiles)).toEqual(['../src-tauri/capabilities/overlay.json']);
+    // capability 파일은 둘이고(오버레이 창·데스크톱 앱 창 — P-027), 어느 쪽 창 목록에도 로그인 창이 없다(이름을 묶어 맞추는 * 도 없다).
+    expect(Object.keys(capabilityFiles).sort()).toEqual(['../src-tauri/capabilities/app.json', '../src-tauri/capabilities/overlay.json']);
     expect(capability.windows).toEqual(['main']);
-    expect(capability.windows).not.toContain('login');
-    for (const name of capability.windows) expect(name).not.toMatch(/[*?]/);
-    // 원격 주소에 권한을 주는 칸이 없다 — 창의 주소가 어디로 바뀌든 권한은 생기지 않는다.
-    expect(Object.keys(capability).sort()).toEqual(['$schema', 'description', 'identifier', 'permissions', 'windows']);
-    expect(JSON.stringify(capability.permissions)).not.toMatch(/remote|https?:/);
-    expect(tauriConf.app.security.capabilities).toEqual(['overlay']);
+    expect(appCapability.windows).toEqual(['app']);
+    for (const cap of [capability, appCapability]) {
+      expect(cap.windows).not.toContain('login');
+      for (const name of cap.windows) expect(name).not.toMatch(/[*?]/);
+      // 원격 주소에 권한을 주는 칸이 없다 — 창의 주소가 어디로 바뀌든 권한은 생기지 않는다.
+      expect(Object.keys(cap).sort()).toEqual(['$schema', 'description', 'identifier', 'permissions', 'windows']);
+      expect(JSON.stringify(cap.permissions)).not.toMatch(/remote|https?:/);
+    }
+    expect(tauriConf.app.security.capabilities).toEqual(['overlay', 'app']);
     expect(JSON.stringify(tauriConf)).not.toMatch(/dangerousRemoteDomainIpcAccess|dangerousRemoteUrlIpcAccess|"remote"/);
     // 앱 명령은 권한 목록(build.rs)에 올라 있다 — 올리지 않은 명령은 어느 창에서나 불린다.
     for (const cmd of COMMANDS) expect(buildRs, cmd).toContain(`"${cmd}"`);
@@ -624,7 +705,7 @@ describe('크롬 확장 연결(Rust)', () => {
   const beforeTests = (source: string) => source.slice(0, source.indexOf('#[cfg(test)]'));
   const link = code(beforeTests(extensionLinkRs));
   /** lib.rs에서 크롬 확장 연결 명령들이 있는 부분. */
-  const glue = code(libRs.slice(libRs.indexOf('// ── 크롬 확장 연결'), libRs.indexOf('/// 현재 오버레이 상태.')));
+  const glue = code(libRs.slice(libRs.indexOf('// ── 크롬 확장 연결'), libRs.indexOf('// ── 두 창이 함께 보는 것')));
 
   it('루프백(127.0.0.1)에만 묶는다 — 듣는 소켓을 만드는 곳은 한 줄이고, 화면은 주소·포트를 정하지 못한다', () => {
     expect(link.match(/TcpListener::bind\(/g)).toHaveLength(1);
@@ -751,9 +832,10 @@ describe('크롬 확장 연결(Rust)', () => {
     expect(front.match(/^ {2}(\w+):/gm)?.map((f) => f.trim())).toEqual(fields.map((f) => `${f}:`));
     const activity = extensionLinkRs.slice(extensionLinkRs.indexOf('pub struct LinkActivity {'), extensionLinkRs.indexOf('/// 크롬 확장 연결의 지금 상태.'));
     expect(activity.match(/^\s*pub (\w+):/gm)?.map((f) => f.trim())).toEqual(['pub at:', 'pub outcome:', 'pub message:']);
-    // 이벤트는 하나다: 상태를 오버레이 창으로만. 알리는 쪽에는 인자가 없다(쿠키가 지나갈 길이 없다).
+    // 이벤트는 하나다: 상태를 계정 받기를 하는 창(데스크톱 앱 창)으로만. 알리는 쪽에는 인자가 없다(쿠키가 지나갈 길이 없다).
+    // (P-027: 받는 창이 MAIN_WINDOW에서 APP_WINDOW로 바뀌었다. 연결 코드가 실린 상태가 오버레이 창에는 가지 않는다.)
     expect(glue.match(/\.emit\w*\(/g)).toHaveLength(1);
-    expect(glue).toContain('notify.emit_to(MAIN_WINDOW, EXTENSION_LINK_EVENT, link.0.status())');
+    expect(glue).toContain('notify.emit_to(APP_WINDOW, EXTENSION_LINK_EVENT, link.0.status())');
     expect(extensionLinkRs).toContain('pub type Changed = dyn Fn() + Send + Sync;');
     // 명령이 돌려주는 것은 상태와 참·거짓뿐이다.
     expect(glue.match(/-> (LinkStatus|Result<LinkStatus, String>|bool|ExtensionLink) \{/g)).toHaveLength(5);
@@ -766,11 +848,12 @@ describe('크롬 확장 연결(Rust)', () => {
     expect(rule).toContain('export function arrivalStep(state: ArrivalState, input: ArrivalInput): ArrivalStep');
     expect(rule.match(/extensionLinkTakePending\(\)/g)).toHaveLength(1);
     const app = sources['../src/App.vue'];
+    // (P-027: 계정 탭은 설정의 「계정 연결」 구획이 됐다 — 묻는 것과 시키는 것의 이름만 바뀌었다.)
     expect(app).toMatch(
-      /provideExtensionLink\(\{\s*computing: \(\) => computingTab\.value !== null,\s*onAccount: \(\) => tab\.value === 'account',\s*openAccount: \(\) => select\('account'\),\s*\}\);/,
+      /provideExtensionLink\(\{\s*computing: \(\) => computingRun\.value !== null,\s*onAccount: \(\) => page\.value === 'settings' && nav\.section\.value === 'account',\s*openAccount: \(\) => nav\.openSettings\('account'\),\s*\}\);/,
     );
-    expect(app).toContain('watch([computingTab, tab], () => extension.settle());');
-    expect(app.match(/select\('account'\)/g)).toHaveLength(1);
+    expect(app).toContain('watch([computingRun, page, nav.section], () => extension.settle());');
+    expect(app.match(/nav\.openSettings\('account'\)/g)).toHaveLength(1);
     // 계정 화면은 차례를 가져간 뒤에야 같은 「계정 새로 받기」를 돌린다. 쿠키는 화면에 오지 않는다.
     const screen = sources['../src/screens/AccountScreen.vue'];
     expect(screen).toMatch(/const mine = await extension\.claim\(\);\s*busy\.value = '';\s*if \(!mine\) return;/);
@@ -1012,21 +1095,27 @@ describe('화면 자동 추적(Rust)', () => {
   it('언제 보스를 바꾸는지의 규칙은 화면 쪽 순수 함수 하나다 — 화면들은 그 결과만 따른다', () => {
     const rule = sources['../src/lib/screenTrack.ts'];
     expect(rule).toContain('export function followStep(state: FollowState, status: ScreenTrackStatus | null | undefined, switchOn: boolean): FollowStep');
-    // 탭을 옮기는 것은 App.vue, 보스를 고르는 것은 InterceptView.vue — 둘 다 규칙이 따라가라고 할 때만.
+    // 화면을 옮기는 것은 App.vue, 보스를 고르는 것은 결과 그림(views/InterceptResult.vue — 고급의 예전 화면은 InterceptView.vue) —
+    // 둘 다 규칙이 따라가라고 할 때만. (P-027: 요격전 탭은 왼쪽 메뉴의 요격전 화면이 됐다 — 묻는 것과 시키는 것의 이름만 바뀌었다.)
     // 언제 옮기고 언제 미루는지(계산 중)도 규칙(tabMoveStep)이 정한다(P-024): App.vue는 묻는 것에 답하고 시키는 대로 옮긴다.
     expect(rule).toContain('export function tabMoveStep(state: TabMoveState, input: TabMoveInput): TabMoveStep');
     const app = sources['../src/App.vue'];
     expect(app).toMatch(
-      /provideScreenTrack\(\{\s*computing: \(\) => computingTab\.value !== null,\s*onIntercept: \(\) => tab\.value === 'intercept',\s*moveToIntercept: \(\) => select\('intercept'\),\s*\}\);/,
+      /provideScreenTrack\(\{\s*computing: \(\) => computingRun\.value !== null,\s*onIntercept: \(\) => page\.value === 'intercept',\s*moveToIntercept: \(\) => nav\.go\('intercept'\),\s*\}\);/,
     );
-    expect(app).toContain('watch([computingTab, tab], () => track.settle());');
-    // 요격전 탭으로 옮기는 곳은 그 한 줄뿐이고, App.vue는 자동 이동 설정을 직접 읽어 판단하지 않는다.
-    expect(app.match(/select\('intercept'\)/g)).toHaveLength(1);
+    expect(app).toContain('watch([computingRun, page, nav.section], () => track.settle());');
+    // 요격전 화면으로 옮기는 곳은 그 한 줄뿐이고, App.vue는 자동 이동 설정을 직접 읽어 판단하지 않는다.
+    expect(app.match(/nav\.go\('intercept'\)/g)).toHaveLength(1);
     expect(app).not.toMatch(/autoTab|tabMoveStep\(/);
     expect(rule.match(/host\.moveToIntercept\(\)/g)).toHaveLength(1);
     expect(rule).toMatch(/if \(step\.move\) host\.moveToIntercept\(\);/);
-    expect(app).toContain('계산이 끝나면 요격전 탭으로 옮긴다');
+    expect(app).toContain('계산이 끝나면 요격전 화면으로 옮긴다');
     expect(sources['../src/components/InterceptView.vue']).toContain('watch(() => track.target.value?.seq, followTarget);');
+    expect(sources['../src/views/InterceptResult.vue']).toContain('watch(() => track.target.value?.seq, followTarget);');
+    // 오버레이 창은 보기만 한다: 추적을 켜거나 끄지 않는다.
+    expect(sources['../src/Overlay.vue']).toMatch(/provideScreenTrack\(\{ computing: \(\) => false, onIntercept: \(\) => true, moveToIntercept: \(\) => \{\} \}, \{ passive: true \}\)/);
+    const passive = rule.slice(rule.indexOf('async function watchOnly()'), rule.indexOf('return {\n    track:'));
+    expect(passive).not.toMatch(/setScreenTracking|remember\(/);
     for (const [file, text] of Object.entries(sources)) {
       if (file === '../src/lib/screenTrack.ts') continue;
       // 인식 결과(화면 종류·보스)를 직접 읽어 따로 판단하는 화면이 없다.
@@ -1036,6 +1125,10 @@ describe('화면 자동 추적(Rust)', () => {
     const screen = sources['../src/screens/InterceptScreen.vue'];
     expect(screen.match(/@run="run"|@enter="run"/g)).toHaveLength(3);
     expect(screen).not.toMatch(/watch\(|onActivated\(|onMounted\(/);
+    // 데스크톱 앱의 요격전 화면도 같다: 계산은 단추 하나로만 시작한다.
+    const page = sources['../src/pages/InterceptPage.vue'];
+    expect(page.match(/@click="run"/g)).toHaveLength(1);
+    expect(page).not.toMatch(/watch\(|onActivated\(|onMounted\(/);
   });
 });
 
@@ -1055,11 +1148,15 @@ describe('중복 실행 방지(Rust)', () => {
     expect(run.match(/\.plugin\(/g)).toHaveLength(2);
     expect(single).toBeLessThan(run.indexOf('.plugin(tauri_plugin_global_shortcut'));
     expect(single).toBeLessThan(run.indexOf('register_shortcuts('));
-    // 떠 있던 쪽이 하는 일은 하나다. 실행 인자와 작업 폴더는 쓰지 않는다.
-    expect(run).toMatch(/tauri_plugin_single_instance::init\(\|app, _args, _cwd\| \{\s*reveal_overlay\(app\);\s*\}\)/);
+    // 떠 있던 쪽이 하는 일은 하나다: 데스크톱 앱 창을 앞으로 가져온다. 실행 인자와 작업 폴더는 쓰지 않는다.
+    // (P-027: 예전에는 오버레이를 활성화 없이 보였다 — 이제 사용자가 다시 실행한 것은 앱 창을 보려는 것이다. 오버레이 창과 게임 창은 건드리지 않는다.)
+    expect(run).toMatch(/tauri_plugin_single_instance::init\(\|app, _args, _cwd\| \{\s*if let Err\(e\) = focus_app_window\(app\) \{\s*eprintln!\([^)]*\);\s*\}\s*\}\)/);
+    const focus = code(libRs.slice(libRs.indexOf('fn focus_app_window('), libRs.indexOf('fn show_app_window(')));
+    expect(focus).toContain('.get_webview_window(APP_WINDOW)');
+    expect(focus).not.toMatch(/MAIN_WINDOW|game_window|game_win32/);
   });
 
-  it('떠 있던 오버레이는 활성화 없이 보인다 — 포커스를 가져오는 호출이 없다', () => {
+  it('오버레이는 스스로 보일 때(게임 창을 찾았을 때) 활성화하지 않는다 — 포커스를 가져오는 호출이 없다', () => {
     expect(reveal).toContain('state.apply(OverlayAction::Show)');
     expect(reveal).toContain('show_overlay_without_activating(&window)');
     expect(reveal).not.toMatch(/\.show\(\)|set_focus|set_always_on_top|unminimize|request_user_attention/);
@@ -1067,33 +1164,47 @@ describe('중복 실행 방지(Rust)', () => {
   });
 
   it('화면에서 부르는 것이 없어 권한을 더하지 않았다', () => {
-    for (const p of capability.permissions) expect(p).not.toMatch(/single-instance/);
+    for (const p of [...capability.permissions, ...appCapability.permissions]) expect(p).not.toMatch(/single-instance/);
     for (const [file, text] of Object.entries(sources)) expect(text, file).not.toMatch(/single[-_ ]?instance/i);
   });
 });
 
 describe('권한(capability)', () => {
-  it('쓰는 것만 허용한다', () => {
+  const allow = (commands: string[]) => commands.map((c) => `allow-${c.replaceAll('_', '-')}`);
+
+  // P-027: 창이 둘이 되면서 권한도 창마다 나눴다 — 예전에는 오버레이 창 하나가 모든 명령을 가졌다.
+  it('오버레이 창은 쓰는 것만 허용한다 — 결과 읽기와 창 조작뿐이다', () => {
     expect([...capability.permissions].sort()).toEqual(
-      [
-        'core:event:allow-listen',
-        'core:event:allow-unlisten',
-        'core:window:allow-start-dragging',
-        ...COMMANDS.map((c) => `allow-${c.replaceAll('_', '-')}`),
-      ].sort(),
+      ['core:event:allow-listen', 'core:event:allow-unlisten', 'core:window:allow-start-dragging', ...allow(OVERLAY_COMMANDS)].sort(),
     );
     expect(capability.windows).toEqual(['main']);
+    // 계산 실행·계정 받기(쿠키·수집·로그인 창·크롬 확장 연결)·파일 읽기와 고르기·설정 바꾸기·화면 저장은 이 창의 일이 아니다.
+    for (const p of capability.permissions) {
+      expect(p).not.toMatch(/^allow-(engine-run|engine-cancel|engine-version|account-|login-window-|extension-link-|read-json|pick-json|load-report|capture-|recognize-|set-|save-|read-account)/);
+    }
+  });
+
+  it('데스크톱 앱 창은 쓰는 것만 허용한다 — 창 끌기와 끝내기 명령은 없다', () => {
+    const forApp = COMMANDS.filter((c) => !NOT_FOR_APP.includes(c));
+    expect([...appCapability.permissions].sort()).toEqual(['core:event:allow-listen', 'core:event:allow-unlisten', ...allow(forApp)].sort());
+    expect(appCapability.windows).toEqual(['app']);
+    expect(forApp).toHaveLength(38);
+  });
+
+  it('두 창의 권한을 합치면 앱 명령 전부다 — 어느 창도 부르지 못하는 명령이나 목록에 없는 권한이 없다', () => {
+    const granted = new Set([...capability.permissions, ...appCapability.permissions].filter((p) => p.startsWith('allow-')));
+    expect([...granted].sort()).toEqual(allow(COMMANDS).sort());
   });
 
   it('묶음 권한(default)이나 파일·셸·네트워크 권한이 없다', () => {
-    for (const p of capability.permissions) {
+    for (const p of [...capability.permissions, ...appCapability.permissions]) {
       expect(p).not.toMatch(/default$/);
       expect(p).not.toMatch(/^(fs|shell|http|websocket|opener|process|dialog|updater):/);
     }
   });
 
-  it('설정이 이 capability만 쓴다', () => {
-    expect(tauriConf.app.security.capabilities).toEqual([capability.identifier]);
+  it('설정이 이 두 capability만 쓴다', () => {
+    expect(tauriConf.app.security.capabilities).toEqual([capability.identifier, appCapability.identifier]);
   });
 });
 
@@ -1152,8 +1263,20 @@ describe('엔진 호출(Rust)', () => {
     // 크롬 확장 연결(P-025)의 넷이다(수신부를 켜고 끄기·상태·연결 코드 다시 만들기·받은 쿠키로 수집 잇기 — 25 → 29).
     // 게임 이미지(P-026)의 셋: 화면에는 파일 권한이 없어 초상화·보스 이미지·아이콘을 Rust가 읽어 넘긴다(29 → 32).
     // 니케 정보(속성·버스트 단계 등)는 명령을 더하지 않고 이미 있는 engine_catalog에서 읽는다.
-    expect(COMMANDS).toHaveLength(32);
+    // 두 창이 함께 보는 것(P-027)의 여덟: 기본 계정·오버레이를 띄우는 때·마지막 요격전 결과를 디스크(계정 폴더)에 두고 읽는 명령 여섯과,
+    // 앱 창을 앞으로 가져오기·오버레이 보이기/숨기기(32 → 40). 화면은 여전히 폴더·파일 이름을 넘기지 않는다.
+    expect(COMMANDS).toHaveLength(40);
     expect(IMAGE_COMMANDS).toEqual(['nikke_portrait', 'boss_image', 'game_icon']);
+    expect(SHARED_COMMANDS).toEqual([
+      'shared_state',
+      'set_default_account',
+      'set_overlay_launch',
+      'read_account',
+      'save_intercept_result',
+      'load_intercept_result',
+      'show_app_window',
+      'set_overlay_visible',
+    ]);
     expect(COMMANDS.slice(14, 16)).toEqual(['set_screen_tracking', 'screen_track_status']);
     expect(ACCOUNT_COMMANDS).toHaveLength(9);
     for (const cmd of ACCOUNT_COMMANDS) expect(cmd).toMatch(/^(account|login_window)_/);
@@ -1387,8 +1510,13 @@ describe('종료 시 정리(Rust)', () => {
     // 끝내기 단추(quit_app → app.exit)와 창 닫기 모두 앱의 종료 이벤트를 지난다.
     const run = glue.slice(glue.indexOf('pub fn run()'));
     expect(run).toMatch(/if let tauri::RunEvent::Exit = event \{\s*stop_running_work\(app\);\s*\}/);
+    // (P-027: 앱을 끝내는 창이 오버레이 창에서 데스크톱 앱 창으로 바뀌었다 — 앱 창을 닫으면 앱이 끝난다. 트레이가 없어 오버레이만 남기지 않는다.)
     expect(run).toMatch(
-      /if window\.label\(\) == MAIN_WINDOW && matches!\(event, tauri::WindowEvent::Destroyed\) \{\s*window\.app_handle\(\)\.exit\(0\);/,
+      /if window\.label\(\) == APP_WINDOW && matches!\(event, tauri::WindowEvent::Destroyed\) \{\s*window\.app_handle\(\)\.exit\(0\);/,
+    );
+    // 오버레이 창은 닫지 않고 숨긴다 — 닫혀 버리면 앱 창이 떠 있는 동안 다시 띄울 수 없다. 숨기는 길은 단축키와 같다(프로세스를 남기지 않는다).
+    expect(run).toMatch(
+      /if window\.label\(\) == MAIN_WINDOW \{\s*if let tauri::WindowEvent::CloseRequested \{ api, \.\. \} = event \{\s*api\.prevent_close\(\);\s*handle_action\(window\.app_handle\(\), OverlayAction::Hide\);/,
     );
     expect(glue).toMatch(/fn quit_app\(app: AppHandle\) \{\s*app\.exit\(0\);\s*\}/);
     // 프로세스를 곧바로 끝내는 호출(종료 처리를 건너뛴다)은 접착 코드에 없다.
@@ -1396,10 +1524,103 @@ describe('종료 시 정리(Rust)', () => {
   });
 });
 
+describe('두 창이 함께 보는 것(Rust)', () => {
+  /** 주석을 뺀 코드. */
+  const code = (source: string) =>
+    source
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+  const shared = code(sharedStateRs.slice(0, sharedStateRs.indexOf('#[cfg(test)]')));
+  /** lib.rs에서 공유 상태 명령들이 있는 부분. */
+  const glue = code(libRs.slice(libRs.indexOf('// ── 두 창이 함께 보는 것'), libRs.indexOf('/// 현재 오버레이 상태.')));
+
+  it('기본 계정·오버레이 설정·마지막 요격전 결과는 계정 폴더(gitignore)의 두 파일에 둔다 — 화면은 폴더를 정하지 못한다', () => {
+    expect(sharedStateRs).toContain('pub const STATE_FILE: &str = ".companion-state.json";');
+    expect(sharedStateRs).toContain('pub const INTERCEPT_FILE: &str = ".last-intercept.json";');
+    // 계정 폴더는 계정 받기와 같은 곳이다(환경 변수 → 저장소의 data/accounts). 저장소에 올라가지 않는다.
+    expect(glue).toMatch(/fn shared_dir\(\) -> Result<PathBuf, String> \{\s*account_sync::default_accounts_dir\(\)\.map_err\(\|e\| e\.to_string\(\)\)/);
+    expect(gitignore.split(/\r?\n/)).toContain('data/accounts/');
+    // 명령은 폴더·파일 이름을 인자로 받지 않는다.
+    expect(glue).not.toMatch(/path: String|dir: String|file: String/);
+    // 이 모듈이 쓰는 파일은 그 둘(임시 파일을 거쳐)뿐이다.
+    expect(shared.match(/fs::write\(/g)).toHaveLength(1);
+    expect(shared).toMatch(/let temp = dir\.join\(format!\("\{file\}\.tmp"\)\);\s*fs::write\(&temp, format!\("\{text\}\\n"\)\)\.map_err\(io\)\?;\s*if let Err\(e\) = fs::rename\(&temp, &path\)/);
+  });
+
+  it('계정 이름은 경로가 아니라 열쇠다 — 계정 받기와 같은 이름 검사를 거친 `<이름>.json`만 읽는다', () => {
+    expect(shared).toContain('use crate::account_sync::validate_name;');
+    expect(shared).toMatch(/fn account_path\(dir: &Path, name: &str\) -> PathBuf \{\s*dir\.join\(format!\("\{name\}\.json"\)\)/);
+    // 계정을 읽고 기본 계정을 정하는 길 모두 이름을 먼저 검사한다.
+    expect(shared).toMatch(/pub fn set_default_account\(dir: &Path, name: &str\) -> Result<SharedSnapshot, SharedError> \{\s*let name = checked_name\(name\)\?;/);
+    expect(shared).toMatch(/Some\(name\) => checked_name\(name\)\?,/);
+    expect(shared.match(/account_path\(/g)).toHaveLength(3);
+  });
+
+  it('요격전 결과는 종류·판을 확인한 뒤에만 쓴다 — 맞지 않으면 한국어로 거부하고 앞서 저장한 것을 둔다', () => {
+    expect(shared).toMatch(/pub fn save_intercept\(dir: &Path, report: &Value\) -> Result<SharedSnapshot, SharedError> \{\s*check_intercept\(report\)\?;\s*write_json\(/);
+    // 판 번호는 결과를 만드는 루트 모듈의 것과 같다.
+    expect(sharedStateRs).toContain(`pub const INTERCEPT_SCHEMA_VERSION: u64 = ${INTERCEPT_REPORT_SCHEMA_VERSION};`);
+    expect(sharedStateRs).toContain('pub const INTERCEPT_KIND: &str = "intercept_report";');
+    expect(sharedStateRs).toContain('앞서 저장한 결과는 그대로 둔다');
+    // 읽을 때도 같은 검사를 한다.
+    expect(shared).toMatch(/let doc = read_json\(&path, "요격전 추천 결과"\)\?;\s*check_intercept\(&doc\)\?;\s*Ok\(Some\(doc\)\)/);
+  });
+
+  it('바뀌면 모든 창에 상태만 알린다 — 결과 문서와 계정의 내용은 이벤트에 싣지 않는다', () => {
+    expect(glue.match(/\.emit\w*\(/g)).toHaveLength(1);
+    expect(glue).toContain('app.emit(SHARED_STATE_EVENT, snapshot.clone())');
+    expect(glue.match(/emit_shared\(&app, &snapshot\);/g)).toHaveLength(3);
+    // 화면에 가는 상태의 칸은 Rust와 화면이 같다.
+    const fields = ['default_account', 'remembered', 'accounts', 'overlay_launch', 'intercept_saved_at', 'problems'];
+    const rust = sharedStateRs.slice(sharedStateRs.indexOf('pub struct SharedSnapshot {'), sharedStateRs.indexOf('/// 상태 파일의 내용.'));
+    expect(rust.match(/^\s*pub (\w+):/gm)?.map((f) => f.trim())).toEqual(fields.map((f) => `pub ${f}:`));
+    const types = sources['../src/types.ts'];
+    const front = types.slice(types.indexOf('export interface SharedSnapshot {'), types.indexOf('/** 계정 한 명의 육성 칸'));
+    expect(front.match(/^ {2}(\w+):/gm)?.map((f) => f.trim())).toEqual(fields.map((f) => `${f}:`));
+    // 오버레이를 띄우는 때의 낱말도 같다.
+    for (const word of ['with_app', 'with_game', 'manual']) {
+      expect(sharedStateRs).toContain(`"${word}" => Some(`);
+      expect(types).toContain(`'${word}'`);
+    }
+  });
+
+  it('네트워크를 쓰지 않고, 화면이 넘긴 것으로 프로그램을 실행하지 않는다', () => {
+    expect(shared).not.toMatch(/TcpStream|TcpListener|UdpSocket|reqwest|ureq|hyper|Command::new|std::process/);
+    expect(glue).not.toMatch(/Command::new|std::process/);
+  });
+
+  it('오버레이를 언제 띄우는지는 순수 규칙이 정한다 — 게임이 떠 있는 동안 숨긴 것을 다시 띄우지 않는다', () => {
+    expect(sharedStateRs).toMatch(/pub const fn reveals_on_game\(self, was_found: bool, now_found: bool, overlay_visible: bool\) -> bool \{\s*matches!\(self, Self::WithGame\) && !was_found && now_found && !overlay_visible/);
+    const track = code(libRs.slice(libRs.indexOf('fn track_game('), libRs.indexOf('fn wake_game_tracker(')));
+    expect(track).toMatch(/if launch\.reveals_on_game\(game_was_found, game_found, overlay_visible\) \{\s*reveal_overlay\(&app\);\s*\}/);
+    // 시작할 때: 「앱과 함께」면 활성화 없이 보이고, 아니면 숨긴 채로 둔다. 창 라이브러리의 show()로 포커스를 가져오지 않는다.
+    const setup = code(libRs.slice(libRs.indexOf('.setup(|app| {'), libRs.indexOf('.on_window_event(')));
+    expect(setup).toMatch(/if launch\.shows_at_start\(\) \{\s*show_overlay_without_activating\(&window\)\?;\s*\} else \{\s*lock\(&app\.state::<Overlay>\(\)\.state\)\.visible = false;/);
+    expect(setup).not.toMatch(/window\.show\(\)|set_focus/);
+  });
+});
+
 describe('창 설정', () => {
   const win = tauriConf.app.windows[0];
+  const appWin = tauriConf.app.windows[1];
 
-  it('테두리 없음·투명·항상 위·작업 표시줄에 안 보임', () => {
+  it('데스크톱 앱 창은 보통 창이다 — 테두리·제목 표시줄이 있고 작업 표시줄에 보이며 크기를 바꿀 수 있다(기본 1100×720)', () => {
+    expect(appWin.label).toBe('app');
+    expect(appWin.decorations).toBe(true);
+    expect(appWin.transparent).toBe(false);
+    expect(appWin.alwaysOnTop).toBe(false);
+    expect(appWin.skipTaskbar).toBe(false);
+    expect(appWin.resizable).toBe(true);
+    expect(appWin.visible).toBe(true);
+    expect([appWin.width, appWin.height]).toEqual([1100, 720]);
+    // 오버레이는 숨긴 채 만들고 포커스를 가져가지 않는다 — 앱을 켜면 앱 창이 포커스를 갖는다.
+    expect(win.visible).toBe(false);
+    expect(win.focus).toBe(false);
+    expect(appWin.focus).toBe(true);
+  });
+
+  it('오버레이 창: 테두리 없음·투명·항상 위·작업 표시줄에 안 보임', () => {
     expect(win.label).toBe('main');
     expect(win.decorations).toBe(false);
     expect(win.transparent).toBe(true);

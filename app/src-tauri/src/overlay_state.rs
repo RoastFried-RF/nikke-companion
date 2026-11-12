@@ -30,6 +30,8 @@ pub enum OverlayAction {
     ToggleVisibility,
     /// 숨겨져 있으면 보인다(이미 보이면 그대로). 클릭 통과 여부는 건드리지 않는다.
     Show,
+    /// 보이고 있으면 숨긴다(이미 숨겨져 있으면 그대로). 앱 창의 「오버레이 숨기기」와 오버레이 창 닫기가 일으킨다.
+    Hide,
 }
 
 /// 전환 결과. `set_*`가 `Some`인 것만 창에 적용하면 된다(바뀌지 않은 것은 건드리지 않는다).
@@ -99,6 +101,10 @@ impl OverlayState {
             },
             OverlayAction::Show => Self {
                 visible: true,
+                ..self
+            },
+            OverlayAction::Hide => Self {
+                visible: false,
                 ..self
             },
         };
@@ -183,6 +189,20 @@ mod tests {
             assert_eq!(shown.next, state(true, click_through));
             assert_eq!(shown.set_visible, Some(true));
             assert_eq!(shown.set_click_through, None);
+        }
+    }
+
+    #[test]
+    fn hide_hides_a_visible_overlay_and_leaves_a_hidden_one_alone() {
+        for click_through in [false, true] {
+            let hidden = state(true, click_through).apply(OverlayAction::Hide);
+            assert_eq!(hidden.next, state(false, click_through));
+            assert_eq!(hidden.visibility_change(), Some(VisibilityChange::Hide));
+            assert_eq!(hidden.set_click_through, None);
+            // 이미 숨겨져 있으면 아무것도 바꾸지 않는다.
+            assert!(hidden.next.apply(OverlayAction::Hide).is_noop());
+            // 숨겼다 보여도 클릭 통과 여부는 그대로다.
+            assert_eq!(hidden.next.apply(Show).next, state(true, click_through));
         }
     }
 

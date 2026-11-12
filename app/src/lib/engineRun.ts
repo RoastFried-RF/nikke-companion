@@ -25,6 +25,11 @@ export function provideEngineOwner(): Ref<string | null> {
   return owner;
 }
 
+/** 지금 계산을 돌리는 화면의 이름을 읽는다(탭에 "계산 중"을 표시하는 화면이 쓴다). 앱 밖에서는 언제나 null이다. */
+export function useEngineOwner(): Ref<string | null> {
+  return inject(ENGINE_OWNER, () => ref<string | null>(null), true);
+}
+
 export interface RunHandlers<T> {
   /** 계산을 시작했다(입력을 읽기 전). */
   start?: () => void;

@@ -1,28 +1,26 @@
-// 오버레이 화면 전체: 상태 표시, 결과 불러오기, 오류. Rust 쪽은 가짜로 대체한다.
+// 비교 결과 파일 불러오기(데스크톱 앱 창의 설정 > 고급 > 추천·비교)와 게임 창 칸(설정 > 오버레이). Rust 쪽은 가짜로 대체한다.
+//
+// P-027: 이 파일은 예전에 오버레이 화면 전체(상태 표시 + 결과 불러오기)를 봤다. 화면이 둘로 나뉘면서
+//   - 결과 파일 불러오기·게임 창 칸은 앱 창으로 옮겼다 → 여기서 그대로 확인한다(자리만 설정 아래로 바뀌었다),
+//   - 오버레이의 상태 표시·클릭 통과·끝내기·창 끌기는 오버레이 창에 남았다 → Overlay.test.ts가 확인한다.
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../src/App.vue';
 import * as backend from '../src/lib/backend';
-import type { CompareReport, GameSnapshot, OverlaySnapshot } from '../src/types';
+import type { CompareReport, GameSnapshot } from '../src/types';
 import fixture from './fixtures/compare.sample.json';
+import { installShell, openLegacy, openSection } from './helpers/shell';
 
 vi.mock('../src/lib/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/backend')>()),
+  ...(await import('./helpers/shell')).shellMocks(),
   loadReport: vi.fn(),
-  overlayStatus: vi.fn(),
-  startupReportPath: vi.fn(),
   quitApp: vi.fn(),
-  onOverlayState: vi.fn(),
-  gameWindowStatus: vi.fn(),
-  setFollowGame: vi.fn(),
   captureGame: vi.fn(),
-  onGameWindow: vi.fn(),
-  onGameCapture: vi.fn(),
 }));
 
 const sample = fixture as unknown as CompareReport;
 const api = vi.mocked(backend);
-const interactive: OverlaySnapshot = { visible: true, click_through: false, shortcut_problems: [] };
 const noGame: GameSnapshot = {
   state: 'missing',
   window: null,
@@ -30,45 +28,36 @@ const noGame: GameSnapshot = {
   follow: false,
 };
 
-/** Rust가 보내는 상태 이벤트를 흉내 낸다. */
-let emitOverlayState: (state: OverlaySnapshot) => void = () => {};
-const unlisten = vi.fn();
-
+/** 앱 창을 띄우고 설정 > 고급 > 추천·비교를 연다(실행 인자로 결과 파일을 받았으면 앱이 스스로 거기를 연다). */
 async function render() {
   const wrapper = mount(App);
   await flushPromises();
+  if (!wrapper.find('[data-testid="screen-compare"]').exists()) await openLegacy(wrapper, 'compare');
   return wrapper;
 }
 
 beforeEach(() => {
   vi.resetAllMocks();
   localStorage.clear();
-  api.overlayStatus.mockResolvedValue(interactive);
-  api.startupReportPath.mockResolvedValue(null);
+  installShell(api);
   api.loadReport.mockResolvedValue(sample);
-  api.quitApp.mockResolvedValue(undefined);
-  api.onOverlayState.mockImplementation(async (handler) => {
-    emitOverlayState = handler;
-    return unlisten;
-  });
   api.gameWindowStatus.mockResolvedValue(noGame);
   api.setFollowGame.mockResolvedValue(noGame);
-  api.onGameWindow.mockResolvedValue(() => {});
-  api.onGameCapture.mockResolvedValue(() => {});
 });
 
-describe('오버레이 화면', () => {
-  it('시작하면 현재 상태(조작 가능)를 보이고, 불러올 파일이 없으면 안내만 보인다', async () => {
+describe('비교 결과 파일 불러오기(설정 > 고급)', () => {
+  it('불러올 파일이 없으면 안내만 보인다', async () => {
     const w = await render();
-    expect(w.find('[data-testid="click-through-off"]').exists()).toBe(true);
     expect(w.find('[data-testid="hint"]').exists()).toBe(true);
     expect(api.loadReport).not.toHaveBeenCalled();
     expect(w.find('[data-testid="ranking-entry"]').exists()).toBe(false);
   });
 
-  it('실행 인자로 받은 결과 파일을 바로 불러와 순위를 그린다', async () => {
+  it('실행 인자로 받은 결과 파일을 바로 불러와 순위를 그린다 — 메뉴를 누르지 않아도 그 화면이 열려 있다', async () => {
     api.startupReportPath.mockResolvedValue('C:\\결과\\compare.json');
-    const w = await render();
+    const w = mount(App);
+    await flushPromises();
+    expect(w.find('[data-testid="nav-settings"]').attributes('aria-current')).toBe('page');
     expect(api.loadReport).toHaveBeenCalledWith('C:\\결과\\compare.json');
     expect(w.findAll('[data-testid="ranking-entry"]')).toHaveLength(3);
     expect(w.find('[data-testid="total-unit"]').text()).toBe('34.63억');
@@ -134,51 +123,41 @@ describe('오버레이 화면', () => {
     expect(w.find('[data-testid="error"]').text()).toBe('비교 결과 파일 경로를 넣어야 한다.');
   });
 
-  it('단축키로 클릭 통과가 켜지면 눈에 띄게 표시하고, 꺼지면 되돌린다', async () => {
-    const w = await render();
-    expect(w.find('[data-testid="overlay"]').classes()).not.toContain('overlay--passthrough');
-
-    emitOverlayState({ ...interactive, click_through: true });
+  it('불러온 결과는 편성 도구의 비교에도 새 부품으로 보인다', async () => {
+    api.startupReportPath.mockResolvedValue('D:\\ok.json');
+    const w = mount(App);
     await flushPromises();
-    expect(w.find('[data-testid="click-through-on"]').text()).toContain('클릭 통과 중');
-    expect(w.find('[data-testid="overlay"]').classes()).toContain('overlay--passthrough');
-
-    emitOverlayState(interactive);
+    await w.find('[data-testid="nav-tools"]').trigger('click');
+    await w.find('[data-testid="tool-compare"]').trigger('click');
     await flushPromises();
-    expect(w.find('[data-testid="click-through-on"]').exists()).toBe(false);
-    expect(w.find('[data-testid="overlay"]').classes()).not.toContain('overlay--passthrough');
+    expect(w.find('[data-testid="squad-board"]').exists()).toBe(true);
+    expect(w.find('[data-testid="squad-total"]').text()).toBe('34.63억');
+    expect(w.findAll('[data-testid="squad-member"]')).toHaveLength(5);
   });
+});
 
-  it('상태를 확인하지 못하면 오류를 보인다', async () => {
-    api.overlayStatus.mockRejectedValue('명령을 부를 수 없다');
-    const w = await render();
-    expect(w.find('[data-testid="error"]').text()).toContain('오버레이 상태를 확인하지 못했다');
-    expect(w.find('[data-testid="status-unknown"]').exists()).toBe(true);
-  });
-
-  it('닫기 단추가 앱을 끝낸다', async () => {
-    const w = await render();
-    await w.find('[data-testid="quit"]').trigger('click');
-    expect(api.quitApp).toHaveBeenCalledTimes(1);
-  });
-
-  it('화면이 내려가면 상태 구독을 끊는다', async () => {
-    const w = await render();
-    w.unmount();
-    expect(unlisten).toHaveBeenCalledTimes(1);
-  });
-
-  it('게임 창 칸이 있고 게임 창 상태를 보인다', async () => {
-    const w = await render();
+describe('게임 창 칸(설정 > 오버레이)', () => {
+  it('게임 창 상태를 보인다 — 게임이 없다는 것은 오류가 아니다', async () => {
+    const w = mount(App);
+    await flushPromises();
+    await openSection(w, 'overlay');
     expect(w.find('[data-testid="game-panel"]').exists()).toBe(true);
-    expect(api.gameWindowStatus).toHaveBeenCalledTimes(1);
+    expect(api.gameWindowStatus).toHaveBeenCalled();
     expect(w.find('[data-testid="game-state"]').text()).toBe('게임 창: 없음');
-    // 게임이 없다는 것은 오류가 아니다 — 화면 전체의 오류 칸은 비어 있다.
     expect(w.find('[data-testid="error"]').exists()).toBe(false);
+    expect(w.find('[role="alert"]').exists()).toBe(false);
   });
 
-  it('창 끌기 영역이 있다', async () => {
-    const w = await render();
-    expect(w.find('header').attributes('data-tauri-drag-region')).toBeDefined();
+  it('지난번에 붙이기를 켜 두었으면 앱이 켜질 때 다시 켠다 — 설정을 열지 않아도', async () => {
+    localStorage.setItem('nikke-companion.follow-game', '1');
+    mount(App);
+    await flushPromises();
+    expect(api.setFollowGame).toHaveBeenCalledWith(true);
+  });
+
+  it('붙이기를 켠 적이 없으면 Rust에 시키지 않는다', async () => {
+    mount(App);
+    await flushPromises();
+    expect(api.setFollowGame).not.toHaveBeenCalled();
   });
 });

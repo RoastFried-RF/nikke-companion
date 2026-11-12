@@ -4,7 +4,9 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import type {
+  AccountRead,
   CaptureRecord,
   CompareReport,
   CookieSaved,
@@ -21,13 +23,37 @@ import type {
   GameImage,
   GameSnapshot,
   IconKind,
+  InterceptReport,
+  OverlayLaunch,
   OverlaySnapshot,
   SavedAccount,
   ScreenRecognition,
   ScreenTrackStatus,
+  SharedSnapshot,
   SyncFailure,
   SyncStatus,
 } from '../types';
+
+/** 오버레이 창의 이름(src-tauri/tauri.conf.json의 label). 게임 위에 뜨는 작은 창이다. */
+export const OVERLAY_WINDOW = 'main';
+
+/** 데스크톱 앱 창의 이름(src-tauri/tauri.conf.json의 label). */
+export const APP_WINDOW = 'app';
+
+/**
+ * 이 화면이 그려지는 창의 이름('main' 오버레이 · 'app' 데스크톱 앱). 앱 밖(브라우저의 개발 서버, 테스트)에서는 null.
+ * Rust를 부르지 않는다 — 창이 만들어질 때 받은 값을 읽을 뿐이다.
+ */
+export function windowLabel(): string | null {
+  try {
+    return getCurrentWindow().label;
+  } catch {
+    return null;
+  }
+}
+
+/** 두 창이 함께 보는 것이 바뀔 때 Rust가 보내는 이벤트 이름(src-tauri/src/lib.rs의 SHARED_STATE_EVENT). */
+export const SHARED_STATE_EVENT = 'shared-state';
 
 /** 오버레이 상태가 바뀔 때 Rust가 보내는 이벤트 이름(src-tauri/src/lib.rs의 OVERLAY_STATE_EVENT). */
 export const OVERLAY_STATE_EVENT = 'overlay-state';
@@ -242,6 +268,55 @@ export function bossImage(id: string): Promise<GameImage> {
 /** 아이콘(속성·버스트 단계·클래스·기업·무기). 값은 엔진 카탈로그의 낱말 그대로 넘긴다. */
 export function gameIcon(kind: IconKind, key: string): Promise<GameImage> {
   return invoke<GameImage>('game_icon', { kind, key });
+}
+
+// ── 두 창이 함께 보는 것 ──────────────────────────────────────────────────────
+// 기본 계정·오버레이를 띄우는 때·마지막 요격전 추천 결과는 Rust가 계정 폴더에 둔다(src-tauri/src/shared_state.rs).
+// 화면이 넘기는 계정 이름은 경로가 아니다 — Rust가 계정 폴더의 그 이름만 읽는다.
+
+/** 두 창이 함께 보는 것의 지금 상태(기본 계정·계정 목록·오버레이를 띄우는 때·마지막 결과를 저장한 시각). */
+export function sharedState(): Promise<SharedSnapshot> {
+  return invoke<SharedSnapshot>('shared_state');
+}
+
+/** 기본 계정을 정한다. 그 이름의 계정이 없으면 한국어 오류 문장으로 거부된다. */
+export function setDefaultAccount(name: string): Promise<SharedSnapshot> {
+  return invoke<SharedSnapshot>('set_default_account', { name });
+}
+
+/** 오버레이를 언제 띄울지 정한다. */
+export function setOverlayLaunch(mode: OverlayLaunch): Promise<SharedSnapshot> {
+  return invoke<SharedSnapshot>('set_overlay_launch', { mode });
+}
+
+/** 계정 하나를 읽는다. 이름을 주지 않으면 지금 쓰는 계정이다. 없으면 한국어 오류 문장으로 거부된다. */
+export function readAccount(name: string | null = null): Promise<AccountRead> {
+  return invoke<AccountRead>('read_account', { name });
+}
+
+/** 요격전 추천 결과를 저장하고 모든 창에 알린다. 종류·판이 맞지 않으면 거부되고 앞서 저장한 것은 그대로다. */
+export function saveInterceptResult(report: InterceptReport): Promise<SharedSnapshot> {
+  return invoke<SharedSnapshot>('save_intercept_result', { report });
+}
+
+/** 저장해 둔 마지막 요격전 추천 결과. 없으면 null. 읽을 수 없으면 한국어 오류 문장으로 거부된다. */
+export function loadInterceptResult(): Promise<unknown | null> {
+  return invoke<unknown | null>('load_intercept_result');
+}
+
+/** 데스크톱 앱 창을 앞으로 가져온다(오버레이의 「앱 열기」). */
+export function showAppWindow(): Promise<void> {
+  return invoke<void>('show_app_window');
+}
+
+/** 오버레이 창을 보이거나 숨긴다(활성화하지 않는다). 바뀐 오버레이 상태가 온다. */
+export function setOverlayVisible(visible: boolean): Promise<OverlaySnapshot> {
+  return invoke<OverlaySnapshot>('set_overlay_visible', { visible });
+}
+
+/** 두 창이 함께 보는 것이 바뀔 때마다 불린다(다른 창이 바꿨을 때도). 돌려받은 함수로 구독을 끊는다. */
+export function onSharedState(handler: (snapshot: SharedSnapshot) => void): Promise<UnlistenFn> {
+  return listen<SharedSnapshot>(SHARED_STATE_EVENT, (event) => handler(event.payload));
 }
 
 /** 크롬 확장 연결의 상태가 바뀔 때마다 불린다(쿠키를 받았다·코드가 틀린 요청이 왔다). 돌려받은 함수로 구독을 끊는다. */

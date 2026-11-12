@@ -14,6 +14,7 @@ import { runGrowth } from '../lib/compute';
 import { useEngineRun } from '../lib/engineRun';
 import { recall, remember } from '../lib/remember';
 import { checkGrowthReport } from '../lib/reports';
+import { useToolResults } from '../lib/toolResults';
 import { useResultFile } from '../lib/resultFile';
 import type { GrowthReport } from '../types';
 
@@ -38,8 +39,12 @@ onAccountAdopted((path) => {
 const engine = useEngineRun('growth');
 const file = useResultFile<GrowthReport>({ key: 'growth.report-path', label: '성장 비교 결과', check: checkGrowthReport });
 
+// 여기서 계산하거나 불러온 결과는 편성 도구의 성장 화면에도 올린다(새 부품으로 보인다).
+const results = useToolResults();
+
 function show(next: GrowthReport): void {
   report.value = next;
+  if (results) results.growth.value = next;
   error.value = '';
   inputsOpen.value = false;
 }

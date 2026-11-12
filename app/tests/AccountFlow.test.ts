@@ -11,9 +11,11 @@ import * as backend from '../src/lib/backend';
 import accountScreenSource from '../src/screens/AccountScreen.vue?raw';
 import type { FetchLine, FetchOutcome, SyncFailure, SyncStatus } from '../src/types';
 import { catalog } from './helpers/fakeEngine';
+import { FakeDisk, installShell, openLegacy } from './helpers/shell';
 
 vi.mock('../src/lib/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/backend')>()),
+  ...(await import('./helpers/shell')).shellMocks(),
   loadReport: vi.fn(),
   overlayStatus: vi.fn(),
   startupReportPath: vi.fn(),
@@ -108,10 +110,13 @@ const at = (w: Wrapper, testid: string) => w.find(`[data-testid="${testid}"]`);
 const texts = (w: Wrapper, testid: string) => w.findAll(`[data-testid="${testid}"]`).map((el) => el.text());
 const value = (w: Wrapper, testid: string) => (at(w, testid).element as HTMLInputElement).value;
 
+/** 예전 탭에 해당하는 화면을 연다: 계정 → 설정 > 계정 연결, 그 밖 → 설정 > 고급의 탭(P-027). */
 async function openTab(w: Wrapper, key: 'compare' | 'intercept' | 'growth' | 'tier' | 'account'): Promise<void> {
-  await at(w, `tab-${key}`).trigger('click');
-  await flushPromises();
+  await openLegacy(w, key);
 }
+
+/** 계정 폴더를 흉내 내는 가짜 디스크(저장한 계정이 여기에 생기고, 기본 계정이 여기에 기억된다). */
+let disk = new FakeDisk();
 
 async function click(w: Wrapper, testid: string): Promise<void> {
   await at(w, testid).trigger('click');
@@ -153,6 +158,7 @@ beforeEach(() => {
   written = [];
   pendingFetch = null;
   emitLine = () => {};
+  disk = installShell(api);
 
   api.overlayStatus.mockResolvedValue({ visible: true, click_through: false, shortcut_problems: [] });
   api.startupReportPath.mockResolvedValue(null);
@@ -201,6 +207,7 @@ beforeEach(() => {
   api.accountSaveFile.mockImplementation(async (name, account) => {
     const backup = state.accountFile ? `${ACCOUNT_FILE}.bak` : null;
     written.push({ name, account: account as Record<string, unknown> });
+    disk.addAccount(name, account);
     state.accountFile = ACCOUNT_FILE.replace('me.json', `${name}.json`);
     return { path: state.accountFile, backup };
   });
@@ -248,7 +255,9 @@ describe('계정 화면의 모양', () => {
     expect(steps.map((s) => s.find('.step__title').text().replace(/\s+/g, ' '))).toEqual(['1 쿠키 받기 쿠키 없음', '2 계정 새로 받기', '3 변환·저장']);
     // 첫 화면: 쿠키가 없고, 받은 것도 없다.
     expect(at(w, 'cookie-state').text()).toBe('쿠키 없음');
-    expect(at(w, 'import-hint').text()).toContain('data/accounts/me.json');
+    // 저장할 이름과, 받으면 계산에 쓸 계정이 된다는 것을 알린다(파일 경로는 적지 않는다 — P-027의 문구 원칙).
+    expect(at(w, 'import-hint').text()).toContain('me(이)라는 이름으로 저장하고, 계산에 쓸 계정으로 정한다');
+    expect(at(w, 'account-state').text()).toBe('연결 안 됨');
     expect(at(w, 'account-error').exists()).toBe(false);
     expect(api.accountSyncStatus).toHaveBeenCalledWith('me');
   });
@@ -315,7 +324,7 @@ describe('붙여넣기 → 계정 새로 받기 → 변환 → 저장', () => {
     expect(texts(w, 'fetch-line')).toEqual(LINES.map((l) => l.text.trim()));
     expect(texts(w, 'fetch-warning')).toEqual(WARNINGS);
     expect(at(w, 'fetch-warnings').text()).toContain('경고 2건');
-    expect(at(w, 'fetch-log').text()).toContain(`${LINES.length}개`);
+    expect(at(w, 'fetch-log').text()).toContain(`${LINES.length}줄`);
 
     // 3 변환(루트의 실제 코드) → 저장
     expect(api.accountReadProfile).toHaveBeenCalledWith('me');
@@ -328,14 +337,18 @@ describe('붙여넣기 → 계정 새로 받기 → 변환 → 저장', () => {
     expect(account.nikkes.헬름.skill_levels).toEqual([7, 7, 10]);
     const summary = at(w, 'import-summary').text().replace(/\s+/g, ' ');
     expect(summary).toContain('가져온 니케 6명');
-    expect(summary).toContain('프로필 6개 항목');
+    expect(summary).toContain('받은 항목 6개');
     expect(summary).toContain('건너뛴 항목 0개');
     expect(summary).toContain('미확인 칸이 있는 니케 0명');
     expect(summary).toContain('동기화 레벨 412');
     expect(at(w, 'import-kind').text()).toBe('검증용 데이터');
     expect(at(w, 'import-path').text()).toContain(ACCOUNT_FILE);
     expect(at(w, 'import-backup').exists()).toBe(false);
-    expect(at(w, 'import-adopted').text()).toContain('계정 칸에 이 파일을 넣었다');
+    // 받은 계정이 곧바로 계산에 쓸 계정이 된다(요격전·편성 도구·내 니케가 이 계정을 쓴다) — 디스크에 기억된다.
+    expect(at(w, 'import-adopted').text()).toContain('이 계정을 계산에 쓸 계정으로 정했다');
+    expect(api.setDefaultAccount).toHaveBeenCalledWith('me');
+    expect(disk.chosen).toBe('me');
+    expect(at(w, 'account-state').text()).toBe('연결됨 · me');
     // 주의 문구는 루트 모듈의 것 그대로다(미확인 칸은 미육성 값으로 — 낮게 나올 수 있다).
     expect(at(w, 'import-caveats').text()).toContain('실제보다 낮게 나올 수 있다');
     expect(at(w, 'account-error').exists()).toBe(false);
@@ -371,14 +384,16 @@ describe('붙여넣기 → 계정 새로 받기 → 변환 → 저장', () => {
       expectNoCookie(w);
     }
     expect(value(w, 'cookie-input')).toBe('');
-    // 기억해 둔 것은 이름과 경로뿐이다.
+    // 기억해 둔 것은 이름과 경로, 마지막으로 본 화면(메뉴·설정의 구획·고급의 탭)뿐이다.
     const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).sort();
     expect(keys).toEqual([
       'nikke-companion.account.name',
       'nikke-companion.compute.account',
       'nikke-companion.growth.account',
       'nikke-companion.intercept.account',
-      'nikke-companion.tab',
+      'nikke-companion.page',
+      'nikke-companion.settings.advanced',
+      'nikke-companion.settings.section',
     ]);
     expect(localStorage.getItem('nikke-companion.account.name')).toBe('me');
     // Rust에 넘긴 것은 한 번, 저장 명령 하나뿐이다.
@@ -439,7 +454,7 @@ describe('붙여넣기 → 계정 새로 받기 → 변환 → 저장', () => {
 
     const summary = at(w, 'import-summary').text().replace(/\s+/g, ' ');
     expect(summary).toContain('가져온 니케 6명');
-    expect(summary).toContain('프로필 7개 항목');
+    expect(summary).toContain('받은 항목 7개');
     expect(summary).toContain('건너뛴 항목 1개');
     expect(summary).toContain('미확인 칸이 있는 니케 1명');
     expect(at(w, 'import-skipped').text()).toContain('새로 나온 니케: 엔진이 모르는 니케다');

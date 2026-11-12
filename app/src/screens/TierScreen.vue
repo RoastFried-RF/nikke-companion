@@ -8,9 +8,12 @@ import TierView from '../components/TierView.vue';
 import { errorMessage } from '../lib/backend';
 import { checkTierReport } from '../lib/reports';
 import { useResultFile } from '../lib/resultFile';
+import { useToolResults } from '../lib/toolResults';
 import type { TierReport } from '../types';
 
-const report = ref<TierReport | null>(null);
+// 여기서 불러온 표는 티어 화면에도 올린다(등급별 초상화 묶음으로 보인다). 티어 화면이 먼저 열어 둔 표가 있으면 그것부터 보인다.
+const results = useToolResults();
+const report = ref<TierReport | null>(results?.tier.value ?? null);
 /** 지금 보이는 표의 파일 경로. */
 const loadedPath = ref('');
 const error = ref('');
@@ -29,6 +32,7 @@ async function load(): Promise<void> {
     const loaded = await file.load();
     if (!loaded) return;
     report.value = loaded;
+    if (results) results.tier.value = loaded;
     loadedPath.value = target;
     error.value = '';
   } catch (e) {

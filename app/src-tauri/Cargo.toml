@@ -1,10 +1,10 @@
 [package]
 name = "nikke-companion"
 version = "0.1.0"
-description = "니케 컴패니언 오버레이"
+description = "니케 컴패니언 — 데스크톱 앱과 오버레이"
 edition = "2021"
 publish = false
-# 실행 파일이 둘이다(오버레이 + 명령줄 캡처 도구 src/bin/nikke-capture.rs). `cargo run`·`tauri dev`는 오버레이를 띄운다.
+# 실행 파일이 둘이다(앱 + 명령줄 캡처 도구 src/bin/nikke-capture.rs). `cargo run`·`tauri dev`는 앱(데스크톱 앱 창 + 오버레이 창)을 띄운다.
 default-run = "nikke-companion"
 
 # 라이브러리와 실행 파일의 이름이 같으면 Windows에서 .pdb가 겹친다.
@@ -17,7 +17,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-global-shortcut = "2"
-# 중복 실행 방지: 이미 떠 있으면 두 번째 실행은 창을 만들기 전에 끝나고, 떠 있던 쪽에 알린다(src/lib.rs의 reveal_overlay).
+# 중복 실행 방지: 이미 떠 있으면 두 번째 실행은 창을 만들기 전에 끝나고, 떠 있던 쪽에 알린다(src/lib.rs의 focus_app_window).
 # 화면에서 부르는 명령이 없어 capability에 더할 권한도 없다. 이 앱의 두 실행끼리만 신호를 주고받는다.
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }

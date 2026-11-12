@@ -14,9 +14,11 @@ import { arrivalStep, NO_ARRIVAL, type ArrivalInput } from '../src/lib/extension
 import { simCache } from '../src/lib/runtime';
 import type { ExtensionLinkStatus, FetchLine, FetchOutcome, SyncFailure, SyncStatus } from '../src/types';
 import { ACCOUNT_PATH, catalog, CONDITION_PATH, documents, FAKE_EVALUATOR, fakeRow } from './helpers/fakeEngine';
+import { currentPage, FakeDisk, installShell, openLegacy } from './helpers/shell';
 
 vi.mock('../src/lib/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/backend')>()),
+  ...(await import('./helpers/shell')).shellMocks(),
   loadReport: vi.fn(),
   overlayStatus: vi.fn(),
   startupReportPath: vi.fn(),
@@ -102,9 +104,18 @@ const syncStatus = (name: string | null): SyncStatus => ({
   problems: [],
 });
 
+/** 계정 폴더를 흉내 내는 가짜 디스크(저장한 계정이 여기에 생긴다). */
+let disk = new FakeDisk();
+
+/**
+ * 앱 창을 띄운다. 기억해 둔 화면이 없으면 예전의 첫 탭(추천·비교 — 지금은 설정 > 고급의 탭)을 연다.
+ * (P-027: 예전 탭 다섯은 설정 아래로 옮겼다 — 계정 → 설정 > 계정 연결, 나머지 → 설정 > 고급의 탭.)
+ */
 async function render() {
+  const remembered = localStorage.getItem('nikke-companion.page') !== null;
   const wrapper = mount(App, { attachTo: document.body });
   await flushPromises();
+  if (!remembered && currentPage(wrapper) === 'home') await openLegacy(wrapper, 'compare');
   return wrapper;
 }
 type Wrapper = Awaited<ReturnType<typeof render>>;
@@ -112,11 +123,15 @@ type TabKey = 'compare' | 'intercept' | 'growth' | 'tier' | 'account';
 
 const at = (w: Wrapper, testid: string) => w.find(`[data-testid="${testid}"]`);
 const value = (w: Wrapper, testid: string) => (at(w, testid).element as HTMLInputElement).value;
-const selectedTab = (w: Wrapper) => w.findAll('[role="tab"][data-testid^="tab-"]').find((t) => t.attributes('aria-selected') === 'true')?.attributes('data-testid');
+/** 지금 보이는 화면을 예전 탭의 이름으로: 설정 > 계정 연결은 'tab-account', 설정 > 고급의 탭은 'tab-<이름>'. */
+function selectedTab(w: Wrapper): string | undefined {
+  if (currentPage(w) !== 'settings') return `page-${currentPage(w)}`;
+  if (at(w, 'screen-account').exists()) return 'tab-account';
+  return w.findAll('[role="tab"][data-testid^="tab-"]').find((t) => t.attributes('aria-selected') === 'true')?.attributes('data-testid');
+}
 
 async function openTab(w: Wrapper, key: TabKey): Promise<void> {
-  await at(w, `tab-${key}`).trigger('click');
-  await flushPromises();
+  await openLegacy(w, key);
 }
 
 async function click(w: Wrapper, testid: string): Promise<void> {
@@ -129,9 +144,11 @@ async function setSwitch(w: Wrapper, on: boolean): Promise<void> {
   await flushPromises();
 }
 
-/** 기억해 둔 탭으로 앱을 연다. */
+/** 기억해 둔 화면으로 앱을 연다(설정 > 계정 연결, 또는 설정 > 고급의 그 탭). */
 async function renderOn(tab: TabKey): Promise<Wrapper> {
-  localStorage.setItem('nikke-companion.tab', tab);
+  localStorage.setItem('nikke-companion.page', 'settings');
+  localStorage.setItem('nikke-companion.settings.section', tab === 'account' ? 'account' : 'advanced');
+  if (tab !== 'account') localStorage.setItem('nikke-companion.settings.advanced', tab);
   return render();
 }
 
@@ -160,6 +177,7 @@ beforeEach(() => {
   cookieSaved = false;
   written = [];
   pendingFetch = null;
+  disk = installShell(api);
 
   api.overlayStatus.mockResolvedValue({ visible: true, click_through: false, shortcut_problems: [] });
   api.startupReportPath.mockResolvedValue(null);
@@ -192,6 +210,7 @@ beforeEach(() => {
   api.accountReadProfile.mockResolvedValue({ path: PROFILE_PATH, profile: structuredClone(sampleProfile), option_table: optionTable });
   api.accountSaveFile.mockImplementation(async (name, account) => {
     written.push({ name, account: account as Record<string, unknown> });
+    disk.addAccount(name, account);
     return { path: ACCOUNT_FILE.replace('me.json', `${name}.json`), backup: null };
   });
 
@@ -517,7 +536,8 @@ describe('계산 중에는 탭을 옮기지 않는다', () => {
     engine.release();
     await vi.waitFor(
       () => {
-        if (at(w, 'tab-busy').exists()) throw new Error('아직 계산 중이다');
+        // 메뉴의 「계산 중」 표시는 어느 화면을 보고 있든 보인다(고급의 탭 표시는 그 화면을 볼 때만 보인다).
+        if (at(w, 'nav-busy').exists()) throw new Error('아직 계산 중이다');
       },
       { timeout: 5000 },
     );
@@ -530,11 +550,12 @@ describe('계산 중에는 탭을 옮기지 않는다', () => {
     const w = await renderOn('compare');
     await startCompare(w);
     expect(at(w, 'tab-busy').exists()).toBe(true);
+    expect(at(w, 'nav-busy').exists()).toBe(true);
     expect(at(w, 'link-pending-move').exists()).toBe(false);
 
     await extensionSends();
     expect(selectedTab(w)).toBe('tab-compare');
-    expect(at(w, 'link-pending-move').text()).toContain('계산이 끝나면 계정 탭으로 옮겨 계정을 새로 받는다');
+    expect(at(w, 'link-pending-move').text()).toContain('계산이 끝나면 설정의 계정 연결로 옮겨 계정을 새로 받는다');
     // 계정 화면을 아직 연 적이 없다 — 수집은 탭을 열 때 시작한다.
     expect(api.extensionLinkTakePending).not.toHaveBeenCalled();
     expect(api.accountFetchProfile).not.toHaveBeenCalled();

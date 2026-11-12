@@ -1616,9 +1616,19 @@
         "처음 쓰는 사람이 홈의 안내만 보고 계정 연결부터 요격전 추천까지 갈 수 있다"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 2
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 3,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261112T111332-P-027-a1",
+        "verified_tree": "eb01a5cb2ff3dd6cf61112c917b216e3d007c4cf",
+        "verified_at": "2026-11-12T11:18:36.182Z",
+        "commit": null
+      }
     },
     {
       "id": "P-028",

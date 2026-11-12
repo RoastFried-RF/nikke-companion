@@ -1,0 +1,205 @@
+/*
+ * 데스크톱 앱 창의 화면들이 함께 쓰는 모양(docs/ui-redesign.md). 색·간격·모서리·글자 크기는 디자인 토큰(tokens.css)만 쓴다.
+ * 이름은 모두 `nk-`로 시작한다 — 예전 화면(style.css)의 이름과 겹치지 않는다.
+ */
+
+/* 화면 하나. 내용만큼 길어지고 창의 본문(App.vue의 .app__main)이 스크롤한다 — 안에서 따로 스크롤하는 화면(내 니케·설정)만 높이를 채운다. */
+.nk-page {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--nk-space-5);
+  color: var(--nk-text);
+  font-family: var(--nk-font-family);
+  font-size: var(--nk-font-md);
+  line-height: var(--nk-line-normal);
+}
+
+.nk-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--nk-space-3) var(--nk-space-4);
+}
+
+.nk-title {
+  margin: 0;
+  font-size: var(--nk-font-xl);
+  font-weight: var(--nk-weight-heavy);
+  line-height: var(--nk-line-tight);
+}
+
+.nk-subtitle {
+  margin: 0;
+  font-size: var(--nk-font-lg);
+  font-weight: var(--nk-weight-bold);
+}
+
+.nk-muted {
+  margin: 0;
+  color: var(--nk-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.nk-spacer {
+  flex: 1;
+}
+
+.nk-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nk-space-4);
+  padding: var(--nk-space-5);
+  border: var(--nk-border-width) solid var(--nk-border);
+  border-radius: var(--nk-radius-lg);
+  background: var(--nk-surface);
+}
+
+.nk-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--nk-space-3);
+  min-width: 0;
+}
+
+.nk-row--top {
+  align-items: flex-start;
+}
+
+.nk-btn {
+  padding: var(--nk-space-3) var(--nk-space-5);
+  border: var(--nk-border-width) solid var(--nk-border-strong);
+  border-radius: var(--nk-radius-md);
+  background: var(--nk-surface-raised);
+  color: var(--nk-text);
+  font: inherit;
+  font-weight: var(--nk-weight-bold);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.nk-btn:hover:not(:disabled) {
+  border-color: var(--nk-accent);
+}
+
+.nk-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.nk-btn--primary {
+  border-color: var(--nk-accent);
+  background: var(--nk-accent);
+  color: var(--nk-text-on-accent);
+}
+
+.nk-btn--primary:hover:not(:disabled) {
+  background: var(--nk-accent-strong);
+}
+
+.nk-btn--quiet {
+  padding: var(--nk-space-2) var(--nk-space-3);
+  border-color: transparent;
+  background: transparent;
+  color: var(--nk-text-muted);
+  font-weight: var(--nk-weight-regular);
+  text-decoration: underline;
+}
+
+/* 고르기 단추 묶음(정밀도·탭·거르기). */
+.nk-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--nk-space-2);
+}
+
+.nk-seg__item {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: var(--nk-space-2) var(--nk-space-4);
+  border: var(--nk-border-width) solid var(--nk-border);
+  border-radius: var(--nk-radius-md);
+  background: transparent;
+  color: var(--nk-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.nk-seg__item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.nk-seg__item--on {
+  border-color: var(--nk-accent);
+  background: var(--nk-accent-soft);
+  color: var(--nk-text);
+  font-weight: var(--nk-weight-bold);
+}
+
+.nk-seg__sub {
+  color: var(--nk-text-faint);
+  font-size: var(--nk-font-sm);
+  font-weight: var(--nk-weight-regular);
+}
+
+.nk-hero {
+  font-size: var(--nk-font-hero);
+  font-weight: var(--nk-weight-heavy);
+  line-height: var(--nk-line-tight);
+}
+
+.nk-error {
+  margin: 0;
+  padding: var(--nk-space-3) var(--nk-space-4);
+  border: var(--nk-border-width) solid var(--nk-error);
+  border-radius: var(--nk-radius-md);
+  color: var(--nk-error);
+  overflow-wrap: anywhere;
+}
+
+.nk-note {
+  margin: 0;
+  padding: var(--nk-space-3) var(--nk-space-4);
+  border: var(--nk-border-width) solid var(--nk-border);
+  border-radius: var(--nk-radius-md);
+  background: var(--nk-surface-sunken);
+  color: var(--nk-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.nk-input {
+  min-width: 0;
+  padding: var(--nk-space-3) var(--nk-space-4);
+  border: var(--nk-border-width) solid var(--nk-border-strong);
+  border-radius: var(--nk-radius-md);
+  background: var(--nk-surface-sunken);
+  color: var(--nk-text);
+  font: inherit;
+}
+
+.nk-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nk-space-2);
+  margin: 0;
+  padding: 0 0 0 var(--nk-space-5);
+  list-style: disc;
+  color: var(--nk-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.nk-list__head {
+  margin: var(--nk-space-3) 0 var(--nk-space-2);
+  color: var(--nk-text);
+  font-weight: var(--nk-weight-bold);
+}
+
+.nk-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--nk-space-4);
+}

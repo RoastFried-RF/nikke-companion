@@ -745,6 +745,9 @@ fn while_an_account_is_being_fetched_the_cookie_is_left_alone() {
     let link = Link::on(&sandbox);
     let code = link.code();
     assert_eq!(post(&link, &code, &fake_cookie()).status, 200);
+    // 수신부는 답을 다 쓴 뒤에 「받았다」를 적는다 — 알림이 올 때까지 기다린 뒤에 본다(기다리지 않으면 답을 읽은 직후의
+    // 짧은 틈에 아직 적히지 않은 것을 볼 수 있다).
+    assert_eq!(link.wait_events(1).len(), 1);
     assert!(link.hub.take_pending());
     let before = fs::read_to_string(sandbox.cookie_file()).expect("쿠키 파일");
 
@@ -758,6 +761,11 @@ fn while_an_account_is_being_fetched_the_cookie_is_left_alone() {
 
     link.busy.store(false, Ordering::Release);
     assert_eq!(post(&link, &code, &other).status, 200);
+    // 여기서도 「받았다」가 적힐 때까지 잠깐 기다린 뒤에 본다.
+    let started = Instant::now();
+    while !link.hub.status().pending && started.elapsed() < Duration::from_secs(3) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
     assert!(link.hub.take_pending());
 }
 

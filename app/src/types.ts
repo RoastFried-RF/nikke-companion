@@ -615,6 +615,63 @@ export interface ImportReport {
   caveats: string[];
 }
 
+// ── 두 창이 함께 보는 것(src-tauri/src/shared_state.rs) ────────────────────────
+
+/** 오버레이 창을 언제 띄우는가: 앱과 함께 · 게임을 찾았을 때 · 스스로 띄우지 않음. */
+export type OverlayLaunch = 'with_app' | 'with_game' | 'manual';
+
+/** 계정 폴더의 계정 하나(shared_state.rs의 AccountEntry). 내용은 없다. */
+export interface AccountEntry {
+  name: string;
+  /** 마지막으로 저장한 시각(ISO, UTC). 모르면 null. */
+  modified_at: string | null;
+}
+
+/** 두 창이 함께 보는 상태(shared_state.rs의 SharedSnapshot). 계정의 내용과 결과 문서는 싣지 않는다. */
+export interface SharedSnapshot {
+  /** 지금 계산에 쓰는 계정의 이름. 없으면 null. */
+  default_account: string | null;
+  /** 사용자가 고른 것인가(아니면 계정이 하나뿐이라 그것을 쓴다). */
+  remembered: boolean;
+  accounts: AccountEntry[];
+  overlay_launch: OverlayLaunch;
+  /** 마지막 요격전 결과를 저장한 시각(ISO, UTC). 없으면 null. */
+  intercept_saved_at: string | null;
+  /** 읽다가 만난 문제(한국어 문장). */
+  problems: string[];
+}
+
+/** 계정 한 명의 육성 칸(정본은 docs/data-model.md §계정 상태와 src/core/account.mjs). 적지 않은 칸은 없다. */
+export interface AccountNikke {
+  skill_levels?: number[];
+  breakthrough?: number;
+  core_enhancement?: number;
+  /** 옵션 → 줄 수(손으로 적은 계정) 또는 줄별 레벨 목록(가져온 계정). */
+  overload?: Record<string, number | number[]>;
+  /** 가져오지 못해 모르는 칸의 이름. */
+  unknown?: string[];
+  [key: string]: unknown;
+}
+
+/** 계정 상태 문서. 화면은 보여 주기만 한다 — 형식 확인과 계산은 src/core가 한다. */
+export interface AccountDoc {
+  schema_version: number;
+  is_test_data?: boolean;
+  name?: string | null;
+  source?: string | null;
+  updated_at?: string | null;
+  account?: { synchro_level?: number | null; [key: string]: unknown };
+  nikkes: Record<string, AccountNikke>;
+  [key: string]: unknown;
+}
+
+/** 읽은 계정(shared_state.rs의 read_account). */
+export interface AccountRead {
+  name: string;
+  modified_at: string | null;
+  account: AccountDoc;
+}
+
 // ── 디자인 기반(UI 개편 — docs/ui-redesign.md) ────────────────────────────────
 
 /** 이미지를 어디서 읽었나(src-tauri/src/assets.rs의 ImageSource): 엔진 폴더 · 받아 둔 리소스 · 사용자의 캡처 조각. */

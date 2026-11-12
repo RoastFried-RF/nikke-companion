@@ -1,11 +1,12 @@
 <script setup lang="ts">
 // 추천·비교 화면: 계산 실행(추천·비교), 비교 결과 파일 불러오기, 순위.
 // 계산은 루트의 src/core가 하고(ComputePanel → lib/compute.ts), 이미 만든 비교 결과 파일도 읽어 보여 준다.
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import ComputePanel from '../components/ComputePanel.vue';
 import ReportView from '../components/ReportView.vue';
 import { errorMessage, loadReport } from '../lib/backend';
 import { recall, remember } from '../lib/remember';
+import { useToolResults } from '../lib/toolResults';
 import type { CompareReport } from '../types';
 
 const props = defineProps<{
@@ -18,6 +19,11 @@ const LAST_PATH = 'report-path';
 
 const path = ref('');
 const report = ref<CompareReport | null>(null);
+// 여기서 계산하거나 불러온 결과는 편성 도구의 비교 화면에도 올린다(새 부품으로 보인다). 치운 것은 올리지 않는다.
+const results = useToolResults();
+watch(report, (next) => {
+  if (next && results) results.compare.value = next;
+});
 const loadedPath = ref('');
 const error = ref('');
 const loading = ref(false);
