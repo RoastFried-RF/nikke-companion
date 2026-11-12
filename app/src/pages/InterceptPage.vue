@@ -5,6 +5,7 @@
 // 결과는 두 창이 함께 보는 자리(lib/shared.ts)에 올린다 — 디스크에 저장되고 오버레이 창이 받는다. 앱을 다시 켜도 보인다.
 // 계산 중에는 진행 패널이 보이고 이전 결과는 그대로 남는다. 계정이 없으면 계산 단추 대신 「계정 연결」 안내가 보인다.
 import { computed, ref } from 'vue';
+import { announceWhile } from '../lib/activity';
 import { ANOMALY_BUNDLE } from '../lib/builtin';
 import { runInterceptWith } from '../lib/compute';
 import { useEngineRun } from '../lib/engineRun';
@@ -55,6 +56,15 @@ const progress = computed(() => {
     total: boss.total * boss.budget,
   };
 });
+
+// 계산의 진행을 오버레이 창에도 알린다(오버레이가 작게 보여 준다 — 거기서는 계산을 시작하거나 멈추지 못한다).
+announceWhile(() => ({
+  running: engine.computing,
+  label: progress.value.title,
+  done: progress.value.done,
+  total: progress.value.total,
+  elapsed_ms: engine.elapsed * 1000,
+}));
 
 /**
  * 자동 추적이 따라간 보스의 추천을 보일 수 없을 때의 안내: 결과가 아직 없거나('none'), 결과에 그 보스가 없다('absent').

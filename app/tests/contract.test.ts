@@ -10,8 +10,11 @@ import {
   accountSaveCookie,
   accountSaveFile,
   accountSyncStatus,
+  announceActivity,
   bossImage,
   captureGame,
+  COMPUTE_ACTIVITY_EVENT,
+  computeActivity,
   ENGINE_PROGRESS_EVENT,
   engineCancel,
   engineCatalog,
@@ -32,19 +35,26 @@ import {
   loginWindowOpen,
   loginWindowTakeCookie,
   nikkePortrait,
+  overlayFit,
+  overlayHide,
+  overlayPin,
+  overlayShape,
   overlayStatus,
+  overlayWidget,
   OVERLAY_STATE_EVENT,
+  OVERLAY_WIDGET_EVENT,
   pickJsonFile,
-  quitApp,
   readAccount,
   readJsonFile,
   recognizeGameScreen,
+  resetOverlayPosition,
   saveInterceptResult,
   SCREEN_TRACK_EVENT,
   screenTrackStatus,
   setDefaultAccount,
   setFollowGame,
   setOverlayLaunch,
+  setOverlayPrefs,
   setOverlayVisible,
   setScreenTracking,
   SHARED_STATE_EVENT,
@@ -71,6 +81,8 @@ import gameWindowRs from '../src-tauri/src/game_window.rs?raw';
 import libRs from '../src-tauri/src/lib.rs?raw';
 import loginWindowRs from '../src-tauri/src/login_window.rs?raw';
 import overlayStateRs from '../src-tauri/src/overlay_state.rs?raw';
+import overlayStoreRs from '../src-tauri/src/overlay_store.rs?raw';
+import overlayWidgetRs from '../src-tauri/src/overlay_widget.rs?raw';
 import overlayWin32Rs from '../src-tauri/src/overlay_win32.rs?raw';
 import recognizeRs from '../src-tauri/src/recognize.rs?raw';
 import screenTrackRs from '../src-tauri/src/screen_track.rs?raw';
@@ -94,12 +106,16 @@ const allRust = import.meta.glob<string>('../src-tauri/src/**/*.rs', {
 
 afterEach(() => clearMocks());
 
-/** 화면이 부르는 앱 명령. */
+/**
+ * 화면이 부르는 앱 명령.
+ * P-028: 넷째 자리에 있던 끝내기(`quit_app`)를 없앴다 — 오버레이 위젯에는 끝내기가 없고(숨기기만 있다) 앱은 앱 창을 닫아 끝낸다.
+ * 그 자리에는 위젯 상태 읽기(`overlay_widget`)를 두었고, 위젯의 나머지 명령 여덟은 끝에 더했다.
+ */
 const COMMANDS = [
   'load_report',
   'overlay_status',
   'startup_report_path',
-  'quit_app',
+  'overlay_widget',
   'engine_catalog',
   'engine_version',
   'engine_run_batch',
@@ -136,23 +152,42 @@ const COMMANDS = [
   'load_intercept_result',
   'show_app_window',
   'set_overlay_visible',
+  'overlay_shape',
+  'overlay_pin',
+  'overlay_fit',
+  'overlay_hide',
+  'set_overlay_prefs',
+  'reset_overlay_position',
+  'announce_activity',
+  'compute_activity',
 ];
 
-/** 오버레이 창(main)이 부를 수 있는 명령 — 결과 읽기와 창 조작뿐이다(P-027). 나머지는 데스크톱 앱 창(app)의 것이다. */
+/**
+ * 오버레이 창(main)이 부를 수 있는 명령 — 결과·상태 읽기와 자기 창의 조작뿐이다(P-027·P-028). 나머지는 데스크톱 앱 창(app)의 것이다.
+ * 읽기: 오버레이 상태·위젯 상태·공유 상태·마지막 요격전 결과·추적 상태·계산 진행·니케 정보·이미지 셋.
+ * 창 조작: 앱 창 열기·위젯 모양·핀·창 크기 맞춤·숨기기.
+ */
 const OVERLAY_COMMANDS = [
   'overlay_status',
-  'quit_app',
+  'overlay_widget',
+  'overlay_shape',
+  'overlay_pin',
+  'overlay_fit',
+  'overlay_hide',
   'show_app_window',
   'shared_state',
   'load_intercept_result',
   'screen_track_status',
+  'compute_activity',
   'engine_catalog',
   'nikke_portrait',
   'boss_image',
   'game_icon',
 ];
-/** 데스크톱 앱 창이 부르지 않는 명령: 끝내기(창의 닫기 단추로 끝낸다)와 앱 창 열기(자기 자신이다). */
-const NOT_FOR_APP = ['quit_app', 'show_app_window'];
+/** 데스크톱 앱 창이 부르지 않는 명령: 앱 창 열기(자기 자신이다)와 오버레이 창의 것(위젯의 모양·핀·창 크기 맞춤·숨기기, 계산 진행 읽기). */
+const NOT_FOR_APP = ['show_app_window', 'overlay_shape', 'overlay_pin', 'overlay_fit', 'overlay_hide', 'compute_activity'];
+/** 오버레이 창이 부르지 못하는 위젯 명령: 설정 바꾸기·자리 초기화·계산 진행 알리기는 데스크톱 앱 창의 일이다. */
+const WIDGET_APP_ONLY = ['set_overlay_prefs', 'reset_overlay_position', 'announce_activity'];
 
 /** 계정 받기(P-022)에서 더한 명령 아홉 개. */
 const ACCOUNT_COMMANDS = COMMANDS.slice(16, 25);
@@ -161,7 +196,18 @@ const EXTENSION_COMMANDS = COMMANDS.slice(25, 29);
 /** 게임 이미지(P-026)에서 더한 명령 세 개. */
 const IMAGE_COMMANDS = COMMANDS.slice(29, 32);
 /** 두 창이 함께 보는 것·창 열기와 보이기(P-027)에서 더한 명령 여덟 개. */
-const SHARED_COMMANDS = COMMANDS.slice(32);
+const SHARED_COMMANDS = COMMANDS.slice(32, 40);
+/** 오버레이 위젯(P-028)에서 더한 명령 아홉 개. */
+const WIDGET_COMMANDS = [COMMANDS[3], ...COMMANDS.slice(40)];
+/** 위젯 상태·계산 진행(지어낸 값). */
+const widgetSnapshot = {
+  shape: 'card',
+  pinned: false,
+  resting: false,
+  prefs: { scale_percent: 100, opacity_percent: 100, leave: 'collapse', leave_after_sec: 8, default_shape: 'card', click_through: false },
+  problem: null,
+};
+const activity = { running: true, label: '크라켄 추천 편성을 찾는 중', done: 12, total: 60, elapsed_ms: 15000 };
 /** 공유 상태(지어낸 값). 계정의 내용과 결과 문서는 싣지 않는다. */
 const sharedSnapshot = {
   default_account: 'me',
@@ -276,13 +322,15 @@ describe('Rust 명령 호출', () => {
       if (cmd === 'nikke_portrait' || cmd === 'boss_image' || cmd === 'game_icon') return missingImage;
       if (['shared_state', 'set_default_account', 'set_overlay_launch', 'save_intercept_result'].includes(cmd)) return sharedSnapshot;
       if (cmd === 'read_account') return { name: 'me', modified_at: null, account: { schema_version: 1, nikkes: {} } };
-      if (cmd === 'set_overlay_visible') return { visible: false, click_through: false, shortcut_problems: [] };
+      if (cmd === 'set_overlay_visible' || cmd === 'overlay_hide') return { visible: false, click_through: false, shortcut_problems: [] };
+      if (['overlay_widget', 'overlay_shape', 'overlay_pin', 'set_overlay_prefs', 'reset_overlay_position'].includes(cmd)) return widgetSnapshot;
+      if (cmd === 'announce_activity' || cmd === 'compute_activity') return activity;
       return null;
     });
     await expect(loadReport('D:\\r.json')).resolves.toEqual({ schema_version: 1 });
     await expect(overlayStatus()).resolves.toEqual({ visible: true, click_through: false, shortcut_problems: [] });
     await expect(startupReportPath()).resolves.toBeNull();
-    await quitApp();
+    await expect(overlayWidget()).resolves.toEqual(widgetSnapshot);
     await expect(engineCatalog()).resolves.toEqual({ nikkes: {}, bosses: [] });
     await expect(engineVersion()).resolves.toEqual({ repo: 'Jgaram/nikke-calc', commit: null });
     await expect(engineRunBatch([{ squad: ['크라운'] }])).resolves.toEqual([{ id: 0, total_damage: 1 }]);
@@ -319,7 +367,16 @@ describe('Rust 명령 호출', () => {
     await expect(loadInterceptResult()).resolves.toBeNull();
     await expect(showAppWindow()).resolves.toBeNull();
     await expect(setOverlayVisible(false)).resolves.toEqual({ visible: false, click_through: false, shortcut_problems: [] });
+    await expect(overlayShape('next')).resolves.toEqual(widgetSnapshot);
+    await expect(overlayPin(true)).resolves.toEqual(widgetSnapshot);
+    await expect(overlayFit(440, 86)).resolves.toBeNull();
+    await expect(overlayHide()).resolves.toEqual({ visible: false, click_through: false, shortcut_problems: [] });
+    await expect(setOverlayPrefs({ scale_percent: 125, leave: 'hide' })).resolves.toEqual(widgetSnapshot);
+    await expect(resetOverlayPosition()).resolves.toEqual(widgetSnapshot);
+    await expect(announceActivity(activity)).resolves.toEqual(activity);
+    await expect(computeActivity()).resolves.toEqual(activity);
     expect(calls.map((c) => c.cmd)).toEqual(COMMANDS);
+    expect(WIDGET_COMMANDS).toHaveLength(9);
     expect(calls[0].args).toEqual({ path: 'D:\\r.json' });
     expect(calls[6].args).toEqual({ requests: [{ squad: ['크라운'] }] });
     expect(calls[7].args).toEqual({ path: 'D:\\a.json' });
@@ -360,6 +417,16 @@ describe('Rust 명령 호출', () => {
     expect(calls[37].args).toEqual({});
     expect(calls[38].args).toEqual({});
     expect(calls[39].args).toEqual({ visible: false });
+    // 오버레이 위젯: 화면이 넘기는 것은 모양의 낱말·핀·잰 크기(자리는 없다)·바꿀 설정 칸·계산 진행뿐이다. 읽기와 숨기기·자리 초기화는 인자가 없다.
+    expect(calls[3].args).toEqual({});
+    expect(calls[40].args).toEqual({ shape: 'next' });
+    expect(calls[41].args).toEqual({ pinned: true });
+    expect(calls[42].args).toEqual({ width: 440, height: 86 });
+    expect(calls[43].args).toEqual({});
+    expect(calls[44].args).toEqual({ prefs: { scale_percent: 125, leave: 'hide' } });
+    expect(calls[45].args).toEqual({});
+    expect(calls[46].args).toEqual({ activity });
+    expect(calls[47].args).toEqual({});
   });
 
   it('자동 추적의 주기를 주지 않으면 null을 넘긴다 — Rust가 기본값(2초)을 쓴다', async () => {
@@ -410,6 +477,16 @@ describe('Rust 명령 호출', () => {
     expect(libRs).toMatch(/async fn load_intercept_result\(\) -> Result<Option<Value>, String>/);
     expect(libRs).toMatch(/fn show_app_window\(app: AppHandle\) -> Result<\(\), String>/);
     expect(libRs).toMatch(/fn set_overlay_visible\(app: AppHandle, visible: bool\) -> OverlaySnapshot/);
+    // 오버레이 위젯(P-028). 창 크기 맞춤은 크기 둘만 받는다 — 자리·창 이름은 인자에 없다.
+    expect(libRs).toMatch(/fn overlay_widget\(overlay: State<'_, Overlay>\) -> WidgetSnapshot/);
+    expect(libRs).toMatch(/fn overlay_shape\(app: AppHandle, shape: String\) -> Result<WidgetSnapshot, String>/);
+    expect(libRs).toMatch(/fn overlay_pin\(app: AppHandle, pinned: bool\) -> WidgetSnapshot/);
+    expect(libRs).toMatch(/fn overlay_fit\(app: AppHandle, width: f64, height: f64\) -> Result<\(\), String>/);
+    expect(libRs).toMatch(/fn overlay_hide\(app: AppHandle\) -> OverlaySnapshot/);
+    expect(libRs).toMatch(/fn set_overlay_prefs\(app: AppHandle, prefs: Value\) -> Result<WidgetSnapshot, String>/);
+    expect(libRs).toMatch(/fn reset_overlay_position\(app: AppHandle\) -> Result<WidgetSnapshot, String>/);
+    expect(libRs).toMatch(/fn announce_activity\(app: AppHandle, activity: Activity\) -> Activity/);
+    expect(libRs).toMatch(/fn compute_activity\(activity: State<'_, ComputeActivity>\) -> Activity/);
   });
 
   it('Rust가 거부한 한국어 문장을 그대로 넘긴다', async () => {
@@ -463,6 +540,8 @@ describe('Rust 명령 호출', () => {
     expect(libRs).toContain(`ACCOUNT_FETCH_EVENT: &str = "${ACCOUNT_FETCH_EVENT}"`);
     expect(libRs).toContain(`EXTENSION_LINK_EVENT: &str = "${EXTENSION_LINK_EVENT}"`);
     expect(libRs).toContain(`SHARED_STATE_EVENT: &str = "${SHARED_STATE_EVENT}"`);
+    expect(libRs).toContain(`OVERLAY_WIDGET_EVENT: &str = "${OVERLAY_WIDGET_EVENT}"`);
+    expect(libRs).toContain(`COMPUTE_ACTIVITY_EVENT: &str = "${COMPUTE_ACTIVITY_EVENT}"`);
   });
 });
 
@@ -1173,6 +1252,8 @@ describe('권한(capability)', () => {
   const allow = (commands: string[]) => commands.map((c) => `allow-${c.replaceAll('_', '-')}`);
 
   // P-027: 창이 둘이 되면서 권한도 창마다 나눴다 — 예전에는 오버레이 창 하나가 모든 명령을 가졌다.
+  // P-028: 오버레이가 위젯이 되면서 끝내기 권한이 빠지고(명령 자체를 없앴다), 위젯 상태·계산 진행 읽기와 자기 창의 조작
+  // (모양·핀·창 크기 맞춤·숨기기)이 들어왔다. 설정 바꾸기·자리 초기화·계산 진행 알리기는 여전히 이 창의 일이 아니다.
   it('오버레이 창은 쓰는 것만 허용한다 — 결과 읽기와 창 조작뿐이다', () => {
     expect([...capability.permissions].sort()).toEqual(
       ['core:event:allow-listen', 'core:event:allow-unlisten', 'core:window:allow-start-dragging', ...allow(OVERLAY_COMMANDS)].sort(),
@@ -1180,15 +1261,25 @@ describe('권한(capability)', () => {
     expect(capability.windows).toEqual(['main']);
     // 계산 실행·계정 받기(쿠키·수집·로그인 창·크롬 확장 연결)·파일 읽기와 고르기·설정 바꾸기·화면 저장은 이 창의 일이 아니다.
     for (const p of capability.permissions) {
-      expect(p).not.toMatch(/^allow-(engine-run|engine-cancel|engine-version|account-|login-window-|extension-link-|read-json|pick-json|load-report|capture-|recognize-|set-|save-|read-account)/);
+      expect(p).not.toMatch(/^allow-(engine-run|engine-cancel|engine-version|account-|login-window-|extension-link-|read-json|pick-json|load-report|capture-|recognize-|set-|save-|read-account|reset-|announce-|quit)/);
     }
+    for (const cmd of WIDGET_APP_ONLY) {
+      expect(capability.permissions, cmd).not.toContain(allow([cmd])[0]);
+      expect(appCapability.permissions, cmd).toContain(allow([cmd])[0]);
+    }
+    expect(OVERLAY_COMMANDS).toHaveLength(15);
   });
 
   it('데스크톱 앱 창은 쓰는 것만 허용한다 — 창 끌기와 끝내기 명령은 없다', () => {
     const forApp = COMMANDS.filter((c) => !NOT_FOR_APP.includes(c));
     expect([...appCapability.permissions].sort()).toEqual(['core:event:allow-listen', 'core:event:allow-unlisten', ...allow(forApp)].sort());
     expect(appCapability.windows).toEqual(['app']);
-    expect(forApp).toHaveLength(38);
+    // P-028: 38 → 42(위젯 상태 읽기·오버레이 설정 바꾸기·자리 초기화·계산 진행 알리기).
+    expect(forApp).toHaveLength(42);
+    // 끝내기 명령은 어느 창에도 없다 — 앱에 그런 명령이 없다.
+    for (const p of [...capability.permissions, ...appCapability.permissions]) expect(p).not.toMatch(/quit|exit/);
+    expect(COMMANDS).not.toContain('quit_app');
+    expect(buildRs).not.toContain('"quit_app"');
   });
 
   it('두 창의 권한을 합치면 앱 명령 전부다 — 어느 창도 부르지 못하는 명령이나 목록에 없는 권한이 없다', () => {
@@ -1265,7 +1356,20 @@ describe('엔진 호출(Rust)', () => {
     // 니케 정보(속성·버스트 단계 등)는 명령을 더하지 않고 이미 있는 engine_catalog에서 읽는다.
     // 두 창이 함께 보는 것(P-027)의 여덟: 기본 계정·오버레이를 띄우는 때·마지막 요격전 결과를 디스크(계정 폴더)에 두고 읽는 명령 여섯과,
     // 앱 창을 앞으로 가져오기·오버레이 보이기/숨기기(32 → 40). 화면은 여전히 폴더·파일 이름을 넘기지 않는다.
-    expect(COMMANDS).toHaveLength(40);
+    // 오버레이 위젯(P-028)의 아홉에서 끝내기 하나를 뺐다(40 − 1 + 9 = 48): 위젯 상태 읽기, 자기 창의 조작 넷(모양·핀·창 크기 맞춤·숨기기),
+    // 앱 창의 것 셋(설정 바꾸기·자리 초기화·계산 진행 알리기), 계산 진행 읽기. 화면은 여전히 폴더·파일 이름도 창의 자리도 넘기지 않는다.
+    expect(COMMANDS).toHaveLength(48);
+    expect(WIDGET_COMMANDS).toEqual([
+      'overlay_widget',
+      'overlay_shape',
+      'overlay_pin',
+      'overlay_fit',
+      'overlay_hide',
+      'set_overlay_prefs',
+      'reset_overlay_position',
+      'announce_activity',
+      'compute_activity',
+    ]);
     expect(IMAGE_COMMANDS).toEqual(['nikke_portrait', 'boss_image', 'game_icon']);
     expect(SHARED_COMMANDS).toEqual([
       'shared_state',
@@ -1507,7 +1611,7 @@ describe('종료 시 정리(Rust)', () => {
     expect(glue).toMatch(
       /fn stop_running_work\(app: &AppHandle\) \{\s*let engine_run = app\.state::<EngineRun>\(\);\s*let fetch_run = app\.state::<FetchRun>\(\);\s*if !engine::stop_all_and_wait\(&\[&engine_run\.0, &fetch_run\.0\], engine::EXIT_GRACE\)/,
     );
-    // 끝내기 단추(quit_app → app.exit)와 창 닫기 모두 앱의 종료 이벤트를 지난다.
+    // 앱 창을 닫는 길이 앱의 종료 이벤트를 지난다.
     const run = glue.slice(glue.indexOf('pub fn run()'));
     expect(run).toMatch(/if let tauri::RunEvent::Exit = event \{\s*stop_running_work\(app\);\s*\}/);
     // (P-027: 앱을 끝내는 창이 오버레이 창에서 데스크톱 앱 창으로 바뀌었다 — 앱 창을 닫으면 앱이 끝난다. 트레이가 없어 오버레이만 남기지 않는다.)
@@ -1518,7 +1622,11 @@ describe('종료 시 정리(Rust)', () => {
     expect(run).toMatch(
       /if window\.label\(\) == MAIN_WINDOW \{\s*if let tauri::WindowEvent::CloseRequested \{ api, \.\. \} = event \{\s*api\.prevent_close\(\);\s*handle_action\(window\.app_handle\(\), OverlayAction::Hide\);/,
     );
-    expect(glue).toMatch(/fn quit_app\(app: AppHandle\) \{\s*app\.exit\(0\);\s*\}/);
+    // P-028: 끝내기 명령(quit_app)을 없앴다 — 오버레이 위젯의 단추는 숨기기이고(overlay_hide → 단축키와 같은 길), 앱을 끝내는
+    // 길은 앱 창을 닫는 것 하나다. 앱을 끝내는 호출은 그 한 곳뿐이다.
+    expect(glue).not.toMatch(/quit_app/);
+    expect(glue.match(/\.exit\(0\)/g)).toHaveLength(1);
+    expect(glue).toMatch(/fn overlay_hide\(app: AppHandle\) -> OverlaySnapshot \{\s*handle_action\(&app, OverlayAction::Hide\);/);
     // 프로세스를 곧바로 끝내는 호출(종료 처리를 건너뛴다)은 접착 코드에 없다.
     expect(glue).not.toMatch(/std::process::exit|process::abort/);
   });
@@ -1601,6 +1709,176 @@ describe('두 창이 함께 보는 것(Rust)', () => {
   });
 });
 
+describe('오버레이 위젯(Rust) — P-028', () => {
+  /** 주석을 뺀 코드. */
+  const code = (source: string) =>
+    source
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+  const beforeTests = (source: string) => source.slice(0, source.indexOf('#[cfg(test)]'));
+  const rule = code(beforeTests(overlayWidgetRs));
+  const store = code(beforeTests(overlayStoreRs));
+  const glue = code(libRs);
+  const section = (from: string, to: string) => glue.slice(glue.indexOf(from), glue.indexOf(to));
+
+  it('규칙 모듈은 순수하다 — 창·파일·스레드·시계에 닿지 않는다', () => {
+    expect(rule).not.toMatch(/windows::|HWND|std::fs|std::io|std::path|std::process|std::net|std::env|std::thread|std::time|Instant|SystemTime|tauri|game_win32|overlay_win32/);
+    expect(rule).toContain('pub fn step(&mut self, input: AutoInput) -> AutoAction');
+    expect(rule).toContain('pub fn seen(status: &TrackStatus) -> Seen');
+    expect(rule).toContain('pub fn fit_size(width: f64, height: f64, scale_factor: f64) -> Option<(u32, u32)>');
+    expect(rule).toContain('pub fn clamp_into(position: (i32, i32), size: (u32, u32), areas: &[ScreenRect]) -> (i32, i32)');
+    expect(rule).toContain('pub fn merged(self, patch: &Value) -> Result<Self, String>');
+  });
+
+  it('자동 표시: 추적 스레드가 읽을 때마다 규칙을 돌리고, 규칙이 시킨 것만 창에 반영한다 — 보일 때 활성화하지 않는다', () => {
+    const loop = section('fn track_screen(', 'fn start_screen_tracker(');
+    expect(loop).toContain('overlay_widget::seen(log.status())');
+    expect(loop).toContain('auto_show(&app, seen, since);');
+    const auto = section('fn auto_show(', 'fn release_auto_show(');
+    expect(auto).toContain('let action = widget.auto.step(input);');
+    expect(auto).toMatch(/\(AutoAction::Rest, Some\(window\)\) => hide_overlay\(&window\),\s*\(AutoAction::Wake, Some\(window\)\) => show_overlay_without_activating\(&window\),/);
+    // 사용자가 숨긴 오버레이는 건드리지 않는다.
+    expect(auto).toMatch(/if !lock\(&overlay\.state\)\.visible \{\s*return;\s*\}/);
+    expect(auto).not.toMatch(/\.show\(\)|set_focus|set_always_on_top|unminimize|request_user_attention/);
+    // 떠났을 때 하는 일·기다리는 시간·핀은 위젯의 설정과 상태에서 읽는다 — 화면이 그때그때 정하지 않는다.
+    expect(auto).toContain('leave: widget.prefs.leave,');
+    expect(auto).toContain('after_ms: widget.prefs.leave_after_ms(),');
+    expect(auto).toContain('pinned: widget.pinned,');
+    // 추적을 끄면 쉬게 해 둔 창을 다시 보인다(숨은 채로 남지 않는다).
+    expect(section('fn set_screen_tracking(', 'fn screen_track_status(')).toMatch(/if !enabled \{\s*release_auto_show\(&app\);\s*\}/);
+    // 「쉬는 중」은 사용자가 정한 보임(논리 상태)과 따로다 — 쉬는 동안에도 추적은 계속 읽는다(그래야 다시 뜬다).
+    expect(rule).toContain('pub fn is_resting(&self) -> bool');
+    const handle = section('fn handle_action(', 'fn reveal_overlay(');
+    expect(handle).toMatch(/OverlayAction::ToggleVisibility \| OverlayAction::Show => \{\s*if let Err\(e\) = show_overlay_without_activating\(&window\)/);
+  });
+
+  it('창 크기 맞춤: 바꾸는 것은 오버레이 자기 창뿐이고, 화면은 크기만 넘긴다', () => {
+    const fit = section('fn overlay_fit(', 'fn fitted_position(');
+    expect(fit).toContain('.get_webview_window(MAIN_WINDOW)');
+    expect(fit).toContain('overlay_widget::fit_size(width, height, scale)');
+    expect(glue.match(/\.set_size\(/g)).toHaveLength(1);
+    expect(fit).toContain('.set_size(PhysicalSize::new(size.0, size.1))');
+    // 창을 옮기는 호출은 셋뿐이다: 붙이기, 이 앱이 옮기는 한 곳(move_overlay), 처음 자리(오른쪽 위). 모두 오버레이 창이다.
+    expect(glue.match(/\.set_position\(/g)).toHaveLength(3);
+    expect(glue.match(/get_webview_window\(APP_WINDOW\)/g)).toHaveLength(2);
+    const focus = section('fn focus_app_window(', 'fn show_app_window(');
+    expect(focus).not.toMatch(/set_position|set_size/);
+    // 붙어 있는 모서리를 제자리에 두고 화면 안으로 되돌린다.
+    const fitted = section('fn fitted_position(', 'fn overlay_hide(');
+    expect(fitted).toContain('overlay_widget::clamp_into(raw, size, &work_areas(app, window))');
+  });
+
+  it('자리: 끌어 둔 자리를 기억하고(이 앱이 옮긴 것은 가린다), 붙이기는 P-024의 가장자리 규칙 그대로, 화면 밖이면 안쪽으로 되돌린다', () => {
+    const moved = section('fn overlay_moved(', 'fn settle_overlay_place(');
+    expect(moved).toMatch(/if lock\(&overlay\.widget\)\.programmatic\.contains\(&\(x, y\)\) \{\s*return;\s*\}/);
+    expect(moved).toContain('Some(client) => widget.anchor = Some(Anchor::of(client, rect)),');
+    expect(moved).toContain('None => widget.spot = Some(Spot::of(area, rect)),');
+    // 게임 창은 다시 찾지 않는다 — 추적 스레드가 적어 둔 게임 화면을 읽을 뿐이다.
+    expect(moved).not.toMatch(/game_window::locate|find_game_window|game_win32/);
+    const run = glue.slice(glue.indexOf('pub fn run()'));
+    expect(run).toMatch(/if let tauri::WindowEvent::Moved\(position\) = event \{\s*overlay_moved\(window\.app_handle\(\), position\.x, position\.y\);/);
+    // 붙이기: 최소화·화면 밖·게임 없음이면 기다린다(follow_client) — 그 뒤에 게임 창 기준의 자리를 화면 안으로 되돌린다.
+    const target = section('fn anchored_target(', 'fn overlay_moved(');
+    expect(target).toContain('let client = follow_client(follow, status)?;');
+    expect(target).toContain('overlay_widget::clamp_into(');
+    expect(gameWindowRs).toContain('pub fn follow_client(follow: bool, status: &GameWindowStatus) -> Option<ScreenRect>');
+    // 끄는 동안에는 당기지 않는다.
+    expect(section('fn follow_game(', 'type OverlayOnTop')).toMatch(/if follow && overlay_being_dragged\(app\) \{\s*return applied;\s*\}/);
+    // 끌기가 끝나면 화면 안으로 되돌리고 디스크에 쓴다.
+    const settle = section('fn settle_overlay_place(', 'fn save_widget(');
+    expect(settle).toMatch(/if !widget\.dirty \|\| widget\.being_dragged\(\) \{\s*return;\s*\}/);
+    expect(settle).toContain('overlay_widget::clamp_into((rect.x, rect.y), size, &work_areas(app, &window));');
+    expect(settle).toContain('save_widget(app);');
+    // 자리 초기화(앱 창의 설정).
+    expect(section('fn reset_overlay_position(', 'fn announce_activity(')).toMatch(/widget\.spot = None;\s*widget\.anchor = None;/);
+  });
+
+  it('기억: 계정 폴더(gitignore)의 파일 하나 — 설정·핀·자리뿐이고, 쓰는 길은 공유 상태와 같다', () => {
+    expect(overlayStoreRs).toContain('pub const WIDGET_FILE: &str = ".overlay-widget.json";');
+    expect(store).toContain('write_json(dir, WIDGET_FILE, &stored.to_value(), WHAT)');
+    expect(store).not.toMatch(/fs::write|File::create|TcpStream|TcpListener|Command::new|std::process|std::net/);
+    expect(section('fn save_widget(', 'fn widget_snapshot(')).toContain('shared_dir().and_then(|dir| {');
+    expect(gitignore.split(/\r?\n/)).toContain('data/accounts/');
+    const stored = rule.slice(rule.indexOf('pub struct Stored {'), rule.indexOf('fn int('));
+    expect(stored.match(/^\s*pub (\w+):/gm)?.map((f) => f.trim())).toEqual(['pub prefs:', 'pub pinned:', 'pub spot:', 'pub anchor:']);
+    // 화면에는 위젯 명령으로 폴더·파일 이름이 가지 않는다.
+    expect(section('fn overlay_widget(', 'fn stop_running_work(')).not.toMatch(/path: String|dir: String|file: String/);
+  });
+
+  it('화면에 가는 상태의 칸과 낱말·범위가 Rust와 화면에서 같다', () => {
+    const types = sources['../src/types.ts'];
+    const rust = (name: string) => {
+      const start = rule.indexOf(`pub struct ${name} {`);
+      return rule
+        .slice(start, rule.indexOf('\n}', start))
+        .match(/^\s*pub (\w+):/gm)
+        ?.map((f) => f.trim().replace('pub ', ''));
+    };
+    const front = (name: string) => {
+      const start = types.indexOf(`export interface ${name} {`);
+      return types
+        .slice(start, types.indexOf('\n}', start))
+        .match(/^ {2}(\w+):/gm)
+        ?.map((f) => f.trim());
+    };
+    const pairs: [string, string, string[]][] = [
+      ['WidgetSnapshot', 'WidgetSnapshot', ['shape:', 'pinned:', 'resting:', 'prefs:', 'problem:']],
+      ['Prefs', 'OverlayPrefs', ['scale_percent:', 'opacity_percent:', 'leave:', 'leave_after_sec:', 'default_shape:', 'click_through:']],
+      ['Activity', 'ComputeActivity', ['running:', 'label:', 'done:', 'total:', 'elapsed_ms:']],
+    ];
+    for (const [rustName, frontName, fields] of pairs) {
+      expect(rust(rustName), rustName).toEqual(fields);
+      expect(front(frontName), frontName).toEqual(fields);
+    }
+    for (const word of ['collapsed', 'card', 'expanded', 'stay', 'collapse', 'hide']) {
+      expect(rule, word).toContain(`"${word}" => Some(`);
+      expect(types, word).toContain(`'${word}'`);
+    }
+    // 설정의 범위와 기본값.
+    const widgetLib = sources['../src/lib/widget.ts'];
+    const constant = (name: string) => Number(rule.match(new RegExp(`pub const ${name}: u32 = (\\d+);`))?.[1]);
+    expect(widgetLib).toContain(`SCALE_RANGE = { min: ${constant('SCALE_MIN')}, max: ${constant('SCALE_MAX')}, step: 5, fallback: ${constant('SCALE_DEFAULT')} }`);
+    expect(widgetLib).toContain(`OPACITY_RANGE = { min: ${constant('OPACITY_MIN')}, max: ${constant('OPACITY_MAX')}, step: 5, fallback: ${constant('OPACITY_DEFAULT')} }`);
+    expect(widgetLib).toContain(`LEAVE_AFTER_RANGE = { min: ${constant('LEAVE_AFTER_MIN')}, max: ${constant('LEAVE_AFTER_MAX')}, step: 1, fallback: ${constant('LEAVE_AFTER_DEFAULT')} }`);
+    // 정보 영역은 기본이 불투명이다.
+    expect(constant('OPACITY_DEFAULT')).toBe(100);
+  });
+
+  it('단축키: 모양 바꾸기(Alt+Shift+M)가 있고, 오버레이에 안내하는 셋이 Rust에 등록돼 있다', () => {
+    expect(glue).toMatch(/keys: "Alt\+Shift\+M",\s*what: "오버레이 모양 바꾸기",\s*code: Code::KeyM,\s*action: ShortcutAction::CycleShape,/);
+    expect(glue).toMatch(/ShortcutAction::CycleShape => \{\s*change_shape\(app, None\);\s*\}/);
+    const widgetLib = sources['../src/lib/widget.ts'];
+    for (const keys of ['Alt+Shift+O', 'Alt+Shift+C', 'Alt+Shift+M']) {
+      expect(glue, keys).toContain(`keys: "${keys}"`);
+      expect(widgetLib, keys).toContain(`keys: '${keys}'`);
+    }
+    // 접힘 → 한 줄 카드 → 펼침 → 접힘.
+    expect(rule).toMatch(/pub const fn next\(self\) -> Self \{\s*match self \{\s*Self::Collapsed => Self::Card,\s*Self::Card => Self::Expanded,\s*Self::Expanded => Self::Collapsed,/);
+  });
+
+  it('오버레이는 계산을 시작하지 않는다 — 계산 진행은 앱 창이 알리고 오버레이는 읽기만 한다', () => {
+    const announce = section('fn announce_activity(', 'fn compute_activity(');
+    expect(announce).not.toMatch(/engine::|EngineRun|run_batch|Command::new/);
+    expect(announce).toContain('app.emit(COMPUTE_ACTIVITY_EVENT, activity.clone())');
+    // 오버레이 창의 화면 코드는 계산·계정 모듈을 가져오지 않는다.
+    for (const file of ['../src/Overlay.vue', '../src/views/OverlayWidget.vue', '../src/views/BossFace.vue', '../src/lib/widget.ts', '../src/lib/bossView.ts']) {
+      expect(sources[file], file).not.toMatch(/lib\/(compute|engineRun|accountSync|accountLink|extensionLink)'|engineRunBatch|engineCancel|runInterceptWith/);
+    }
+    // 앱 창: 요격전 화면이 진행을 알린다. 알리는 모듈은 계산을 시작하지 않는다.
+    expect(sources['../src/pages/InterceptPage.vue']).toContain('announceWhile(() => ({');
+    expect(sources['../src/lib/activity.ts']).not.toMatch(/engineRunBatch|useEngineRun|runInterceptWith/);
+  });
+
+  it('클릭 통과를 바꾼 뒤 창이 숨지 않게 활성화 없이 한 번 더 보인다 — 숨긴 동안에는 설정으로도 바꾸지 못한다', () => {
+    const apply = section('fn apply_transition(', 'fn handle_action(');
+    expect(apply).toMatch(/if t\.next\.visible && t\.set_visible\.is_none\(\) \{\s*show_overlay_without_activating\(window\)\?;\s*\}/);
+    const prefs = section('fn set_overlay_prefs(', 'fn reset_overlay_position(');
+    expect(prefs).toContain('오버레이가 숨겨져 있어 클릭 통과를 바꾸지 못했다');
+    expect(prefs).toContain('handle_action(&app, OverlayAction::ToggleClickThrough);');
+  });
+});
+
 describe('창 설정', () => {
   const win = tauriConf.app.windows[0];
   const appWin = tauriConf.app.windows[1];
@@ -1626,6 +1904,18 @@ describe('창 설정', () => {
     expect(win.transparent).toBe(true);
     expect(win.alwaysOnTop).toBe(true);
     expect(win.skipTaskbar).toBe(true);
+  });
+
+  it('오버레이 창은 위젯만큼만 크다(P-028) — 손으로 크기를 바꿀 수 없고, 접힌 알약만큼 작아질 수 있다', () => {
+    // 창 크기는 위젯에 맞춰 Rust가 정한다(overlay_fit). 가장자리를 끌어 키우면 빈 투명 영역이 게임 클릭을 가로막는다.
+    expect(win.resizable).toBe(false);
+    expect(win.maximizable).toBe(false);
+    expect(win.minWidth).toBeLessThanOrEqual(64);
+    expect(win.minHeight).toBeLessThanOrEqual(24);
+    // 시작할 때의 크기는 한 줄 카드 한 장쯤이다(화면이 그려지면 곧바로 잰 크기로 맞춘다).
+    expect(win.width).toBeLessThanOrEqual(480);
+    expect(win.height).toBeLessThanOrEqual(120);
+    expect(win.shadow).toBe(false);
   });
 
   it('CSP가 외부 연결을 막는다(IPC만 허용)', () => {

@@ -15,16 +15,16 @@
       {
         "label": "main",
         "title": "니케 컴패니언 오버레이",
-        "width": 440,
-        "height": 660,
-        "minWidth": 320,
-        "minHeight": 160,
+        "width": 392,
+        "height": 72,
+        "minWidth": 64,
+        "minHeight": 24,
         "decorations": false,
         "transparent": true,
         "shadow": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
-        "resizable": true,
+        "resizable": false,
         "maximizable": false,
         "minimizable": false,
         "visible": false,
@@ -52,11 +52,16 @@
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'",
       "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420",
-      "capabilities": ["overlay", "app"]
+      "capabilities": [
+        "overlay",
+        "app"
+      ]
     }
   },
   "bundle": {
     "active": false,
-    "icon": ["icons/icon.ico"]
+    "icon": [
+      "icons/icon.ico"
+    ]
   }
 }

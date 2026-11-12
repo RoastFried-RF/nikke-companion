@@ -75,8 +75,14 @@
   /* ── 부품 크기. ── */
   --nk-tile-lg: 92px;
   --nk-tile-sm: 52px;
+  --nk-tile-mini: 36px;
   --nk-tile-xs: 28px;
   --nk-boss-image: 56px;
+  /* 오버레이 위젯: 보스 얼굴(한 줄 카드·접힌 알약), 카드의 폭, 알약이 넘지 않는 폭. */
+  --nk-boss-face: 44px;
+  --nk-boss-face-sm: 26px;
+  --nk-widget-width: 480px;
+  --nk-widget-pill-max: 420px;
   --nk-icon-sm: 14px;
   --nk-icon-md: 18px;
   --nk-icon-lg: 24px;

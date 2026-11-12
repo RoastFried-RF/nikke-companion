@@ -1684,9 +1684,19 @@
         "접힘·한 줄·펼침 모양이 실제 게임 위에서 읽힌다"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261112T111836-P-028-a1",
+        "verified_tree": "da3b6cce94bac11dce0ae91ce8fab062e57b1d9a",
+        "verified_at": "2026-11-12T12:12:51.964Z",
+        "commit": null
+      }
     },
     {
       "id": "P-029",

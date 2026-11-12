@@ -16,7 +16,7 @@ import growthFixture from './fixtures/growth.sample.json';
 import interceptFixture from './fixtures/intercept.sample.json';
 import tierFixture from './fixtures/tier.sample.json';
 import { ACCOUNT_PATH, catalog, CONDITION_PATH, documents, FAKE_EVALUATOR, fakeRow, sampleAccount, SQUADS_PATH, UPGRADES_PATH } from './helpers/fakeEngine';
-import { currentPage, FakeDisk, installShell, openLegacy, openPage, openSection } from './helpers/shell';
+import { currentPage, FakeDisk, installShell, openLegacy, openPage, openSection, widgetOf } from './helpers/shell';
 
 vi.mock('../src/lib/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/backend')>()),
@@ -729,9 +729,133 @@ describe('설정 화면', () => {
     expect(at(w, 'track-switch').exists()).toBe(true);
     expect(at(w, 'track-auto-tab').exists()).toBe(true);
     expect(at(w, 'game-panel').exists()).toBe(true);
-    expect(w.findAll('[data-testid="shortcut"]').map((s) => s.find('kbd').text())).toEqual(['Alt+Shift+O', 'Alt+Shift+C', 'Alt+Shift+S']);
+    // P-028: 오버레이 모양 바꾸기(Alt+Shift+M)가 더해졌다.
+    expect(w.findAll('[data-testid="shortcut"]').map((s) => s.find('kbd').text())).toEqual(['Alt+Shift+O', 'Alt+Shift+C', 'Alt+Shift+M', 'Alt+Shift+S']);
     expect(at(w, 'overlay-passthrough').text()).toBe('클릭 통과 중');
     expect(at(w, 'shortcut-problems').text()).toContain('등록하지 못했다');
+  });
+
+  // ── P-028: 오버레이 위젯의 설정(크기 배율·불투명도·자동 숨김·기본 모양·클릭 통과·자리 초기화) ──
+
+  it('오버레이 설정: 기본 모양 셋 중 하나를 고른다 — 지금 모양과 고정 여부도 보인다', async () => {
+    const w = await render();
+    await openSection(w, 'overlay');
+    expect(w.findAll('[data-testid^="shape-"]').map((c) => c.attributes('aria-checked'))).toEqual(['false', 'true', 'false']);
+    expect(texts(w, 'widget-shape-now')).toEqual(['지금 한 줄 카드']);
+    expect(at(w, 'widget-pinned').exists()).toBe(false);
+
+    await at(w, 'shape-expanded').trigger('click');
+    await flushPromises();
+    expect(api.setOverlayPrefs).toHaveBeenLastCalledWith({ default_shape: 'expanded' });
+    expect(w.findAll('[data-testid^="shape-"]').map((c) => c.attributes('aria-checked'))).toEqual(['false', 'false', 'true']);
+    // 기본 모양을 바꿔도 지금 모양은 그대로다(다음에 켤 때의 모양이다).
+    expect(texts(w, 'widget-shape-now')).toEqual(['지금 한 줄 카드']);
+
+    // 오버레이에서 모양을 바꾸거나(누르기·Alt+Shift+M) 고정하면 여기에도 보인다.
+    widgetOf(disk).set({ shape: 'collapsed', pinned: true });
+    await flushPromises();
+    expect(texts(w, 'widget-shape-now')).toEqual(['지금 접힘']);
+    expect(at(w, 'widget-pinned').text()).toBe('고정됨');
+  });
+
+  it('오버레이 설정: 크기 배율과 불투명도 — 기본은 100%·불투명이고, 범위 밖의 값은 범위 안으로 맞춘다', async () => {
+    const w = await render();
+    await openSection(w, 'overlay');
+    expect(at(w, 'scale-now').text()).toBe('100%');
+    expect(at(w, 'opacity-now').text()).toBe('100%');
+    const scale = at(w, 'scale-range');
+    expect([scale.attributes('min'), scale.attributes('max')]).toEqual(['80', '150']);
+    expect([at(w, 'opacity-range').attributes('min'), at(w, 'opacity-range').attributes('max')]).toEqual(['40', '100']);
+
+    await scale.setValue('125');
+    await flushPromises();
+    expect(api.setOverlayPrefs).toHaveBeenLastCalledWith({ scale_percent: 125 });
+    expect(at(w, 'scale-now').text()).toBe('125%');
+
+    await at(w, 'opacity-range').setValue('70');
+    await flushPromises();
+    expect(api.setOverlayPrefs).toHaveBeenLastCalledWith({ opacity_percent: 70 });
+    expect(at(w, 'opacity-now').text()).toBe('70%');
+    // 다른 칸은 건드리지 않는다(바꿀 칸만 넘긴다).
+    expect(widgetOf(disk).state.prefs).toMatchObject({ scale_percent: 125, opacity_percent: 70, leave: 'collapse', default_shape: 'card' });
+  });
+
+  it('오버레이 설정: 자동 숨김 — 그대로 두기·접기·숨기기와 기다리는 시간', async () => {
+    const w = await render();
+    await openSection(w, 'overlay');
+    expect(w.findAll('[data-testid^="leave-"][role="radio"]').map((c) => c.attributes('aria-checked'))).toEqual(['false', 'true', 'false']);
+    const after = at(w, 'leave-after');
+    expect((after.element as HTMLInputElement).value).toBe('8');
+    expect(at(w, 'leave-settings').text()).toContain('핀으로 고정해 두면 그대로 둔다');
+    expect(at(w, 'leave-settings').text()).toContain('화면을 알아보지 못하는 동안에는 바꾸지 않는다');
+
+    await at(w, 'leave-hide').trigger('click');
+    await flushPromises();
+    expect(api.setOverlayPrefs).toHaveBeenLastCalledWith({ leave: 'hide' });
+    expect(w.findAll('[data-testid^="leave-"][role="radio"]').map((c) => c.attributes('aria-checked'))).toEqual(['false', 'false', 'true']);
+
+    // 범위(2~120초) 밖의 값은 범위 안으로 맞춰 알리고, 칸에는 실제로 쓰는 값을 보인다.
+    await after.setValue('999');
+    await flushPromises();
+    expect(api.setOverlayPrefs).toHaveBeenLastCalledWith({ leave_after_sec: 120 });
+    expect((after.element as HTMLInputElement).value).toBe('120');
+    await after.setValue('글자');
+    await flushPromises();
+    expect(api.setOverlayPrefs).toHaveBeenLastCalledWith({ leave_after_sec: 8 });
+
+    // 그대로 두기로 하면 시간 칸은 쓰지 않는다.
+    await at(w, 'leave-stay').trigger('click');
+    await flushPromises();
+    expect(at(w, 'leave-after').attributes('disabled')).toBeDefined();
+  });
+
+  it('오버레이 설정: 클릭 통과를 켜고 끈다 — 바꾸지 못하면 이유를 알리고 스위치를 되돌린다', async () => {
+    const w = await render();
+    await openSection(w, 'overlay');
+    const box = at(w, 'click-through-switch');
+    expect((box.element as HTMLInputElement).checked).toBe(false);
+    await box.setValue(true);
+    await flushPromises();
+    expect(api.setOverlayPrefs).toHaveBeenLastCalledWith({ click_through: true });
+    expect((box.element as HTMLInputElement).checked).toBe(true);
+    expect(at(w, 'widget-problem').exists()).toBe(false);
+
+    // 오버레이를 숨긴 동안에는 바꾸지 못한다(Rust가 거부한다).
+    await at(w, 'overlay-toggle').trigger('click');
+    await flushPromises();
+    await box.setValue(false);
+    await flushPromises();
+    expect(at(w, 'widget-problem').text()).toBe('오버레이 설정을 바꾸지 못했다: 오버레이가 숨겨져 있어 클릭 통과를 바꾸지 못했다. 오버레이를 띄운 뒤에 바꾼다');
+    expect(at(w, 'widget-problem').attributes('role')).toBe('alert');
+    expect((box.element as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('오버레이 설정: 자리 초기화 단추가 있고, 쉬는 중(자동으로 숨겨 둠)이면 그렇게 알리고 깨울 수 있다', async () => {
+    const w = await render();
+    await openSection(w, 'overlay');
+    await at(w, 'reset-position').trigger('click');
+    await flushPromises();
+    expect(api.resetOverlayPosition).toHaveBeenCalledTimes(1);
+    expect(widgetOf(disk).resets).toBe(1);
+    expect(at(w, 'widget-settings').text()).toContain('끌어서 옮긴 자리는 기억한다. 화면 밖으로 나가면 안쪽으로 되돌린다.');
+
+    expect(at(w, 'overlay-resting').exists()).toBe(false);
+    widgetOf(disk).set({ resting: true });
+    await flushPromises();
+    // 숨긴 것이 아니다: 「떠 있음」 옆에 「쉬는 중」이 붙는다.
+    expect(at(w, 'overlay-state').text()).toBe('떠 있음');
+    expect(at(w, 'overlay-resting').text()).toBe('쉬는 중');
+    await at(w, 'overlay-wake').trigger('click');
+    await flushPromises();
+    expect(api.setOverlayVisible).toHaveBeenLastCalledWith(true);
+  });
+
+  it('오버레이 설정: 설정을 기억하다 난 문제(Rust가 알린 것)를 그대로 보인다', async () => {
+    const w = await render();
+    await openSection(w, 'overlay');
+    widgetOf(disk).set({ problem: '오버레이 설정을(를) 저장하지 못했다 (디스크가 가득 찼다)' });
+    await flushPromises();
+    expect(at(w, 'widget-problem').text()).toContain('저장하지 못했다');
   });
 
   it('계산 도구: 판과 계산할 수 있는 니케 수를 보이고, 문제가 있으면 그대로 알린다', async () => {

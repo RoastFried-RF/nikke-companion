@@ -6,7 +6,6 @@ fn main() {
             "load_report",
             "overlay_status",
             "startup_report_path",
-            "quit_app",
             "engine_catalog",
             "engine_version",
             "engine_run_batch",
@@ -43,6 +42,15 @@ fn main() {
             "load_intercept_result",
             "show_app_window",
             "set_overlay_visible",
+            "overlay_widget",
+            "overlay_shape",
+            "overlay_pin",
+            "overlay_fit",
+            "overlay_hide",
+            "set_overlay_prefs",
+            "reset_overlay_position",
+            "announce_activity",
+            "compute_activity",
         ]),
     );
     tauri_build::try_build(attributes).expect("tauri-build 실패");

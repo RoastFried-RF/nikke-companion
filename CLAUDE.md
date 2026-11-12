@@ -65,15 +65,31 @@ npm --prefix app run fixture                              # 컴포넌트 테스�
 
 **창이 둘이다**(P-027 — `app/README.md` §창 둘 — 데스크톱 앱과 오버레이): **데스크톱 앱 창**(`app` — 테두리가 있는 보통 창, 1100×720,
 `app/src/App.vue`)이 전부 한다 — 왼쪽 메뉴의 홈 · 요격전 · 내 니케 · 편성 도구 · 티어 · 설정(계정 연결 · 오버레이 · 계산 도구 ·
-고급). **오버레이 창**(`main` — 게임 위의 작은 창, `app/src/Overlay.vue`)은 마지막 요격전 추천만 보여 준다. 권한도 창마다 따로다
-(`src-tauri/capabilities/app.json` 명령 38개 / `overlay.json` 명령 10개 — 결과 읽기·창 조작). 앱을 실행하면 앱 창이 뜨고 오버레이는
-설정대로 뜬다(앱과 함께 — 기본 · 게임을 찾았을 때 · 직접). **앱 창을 닫으면 앱이 끝난다**(오버레이 창은 닫히지 않고 숨는다).
+고급). **오버레이 창**(`main` — 게임 위의 작은 위젯, `app/src/Overlay.vue`)은 마지막 요격전 추천만 보여 준다. 권한도 창마다 따로다
+(`src-tauri/capabilities/app.json` 명령 42개 / `overlay.json` 명령 15개 — 결과·상태 읽기와 자기 창의 조작). 앱을 실행하면 앱 창이 뜨고 오버레이는
+설정대로 뜬다(앱과 함께 — 기본 · 게임을 찾았을 때 · 직접). **앱 창을 닫으면 앱이 끝난다**(오버레이 창은 닫히지 않고 숨는다. 끝내기
+명령은 없다 — 오버레이 위젯의 `×`는 숨기기다).
 화면은 파일 경로를 묻지 않는다: 계정은 기본 계정(이름 — 경로가 아니다), 보스 값은 내장한 `data/intercept/anomaly.json`.
 **파일을 직접 고르는 길은 설정 > 고급에만 있다**(예전 오버레이의 탭 넷이 거기에 예전 모양으로 있다). 두 창이 같은 것을 보게
 기본 계정·오버레이 설정·마지막 요격전 결과를 계정 폴더의 `.companion-state.json`·`.last-intercept.json`에 둔다
 (Rust `src-tauri/src/shared_state.rs`, 화면 `app/src/lib/shared.ts` — 앱 창이 저장하면 `shared-state` 이벤트로 오버레이가 다시 읽는다).
 화면의 글에는 개발 용어(파일·JSON·시뮬·예산·경로)를 쓰지 않고(고급 제외), 숨기면 안 되는 표시(추정·미확인 값·미지원 효과·
 검증용 데이터·임시 규칙)는 접힌 구획 밖의 배지로 둔다 — `app/tests/Wording.test.ts`가 본다.
+
+**오버레이는 작은 위젯이다**(P-028 — `app/README.md` §오버레이 위젯): 모양 셋 — 접힘(알약: 보스 얼굴·이름·총딜) · 한 줄 카드(기본:
++ 「약점 ○○」·작은 초상화 다섯) · 펼침(+ 한 줄 요약·2·3위·자리 순서). 누르거나 `Alt+Shift+M`으로 오가고, **창은 위젯만큼만 크다**
+(화면이 잰 크기를 `overlay_fit`으로 알린다 — 빈 투명 영역이 게임 클릭을 가로막지 않게). 그림은 `app/src/views/OverlayWidget.vue`(받은
+값을 그리기만 한다), 규칙은 Rust `src-tauri/src/overlay_widget.rs`(순수): 자동 표시 `AutoShow::step`(이상 개체 화면을 떠나면 설정한
+시간 뒤 접거나 쉬고 돌아오면 되돌린다 — 핀이면 그대로, 인식이 unknown인 동안에는 바꾸지 않는다), 끌어 둔 자리(`Spot`·`Anchor` —
+붙이기를 켜면 게임 화면 기준)와 화면 안으로 되돌리기(`clamp_into`). 설정(크기 배율·불투명도·자동 숨김·기본 모양·클릭 통과·자리
+초기화)은 앱 창의 설정 > 오버레이에 있고 계정 폴더의 `.overlay-widget.json`에 기억한다(`overlay_store.rs`). **오버레이는 계산을
+시작하지 않는다** — 결과가 없으면 한 줄과 「앱 열기」뿐이고, 계산 진행은 앱 창이 알린 것을 작게 보인다(`app/src/lib/activity.ts`).
+
+```bash
+cargo test --manifest-path app/src-tauri/Cargo.toml --lib overlay_                                              # 위젯의 규칙: 모양·설정·자동 표시·창 크기·자리, 설정 파일 읽고 쓰기(평소 cargo test에도 들어 있다)
+npm --prefix app test -- OverlayWidget Overlay WidgetLib                                                        # 위젯의 그림(세 모양·결과 없음·계산 중·오류·긴 이름·이미지 없음), 오버레이 창의 틀, 작은 규칙들
+cargo test --manifest-path app/src-tauri/Cargo.toml --test live_widget -- --ignored --nocapture --test-threads=1   # 앱을 실제로 띄운다: 창이 모양에 맞게 줄고 늘어남·모서리·자리 기억(먼저 다른 터미널에서 `npm --prefix app run dev`. 떠 있는 앱은 끄고 돌린다. 계정 폴더는 임시 폴더)
+```
 
 설정 > 오버레이에 **자동 추적** 스위치가 있다(기본 꺼짐): 켜 두면 2초마다 게임 화면을 읽어(읽기만 — 이미지는 저장하지도
 화면에 넘기지도 않는다) 게임에서 보고 있는 이상 개체 보스의 추천을 요격전 화면과 오버레이에 스스로 보여 준다. 규칙은 Rust
@@ -128,9 +144,9 @@ node --test extension/                                                          
 cargo test --manifest-path app/src-tauri/Cargo.toml --test extension_link                                  # 수신부를 실제로 열고(빈 포트) 가짜 요청을 보낸다: 루프백 전용·연결 코드·거부·쿠키 비노출(평소 cargo test에도 들어 있다)
 ```
 
-**UI 개편**(데스크톱 앱 + 오버레이 — 기준 문서 `docs/ui-redesign.md`. UI 작업이면 먼저 읽는다): 디자인 기반(P-026)과 데스크톱 앱 창
-(P-027 — 위의 「창이 둘이다」, 화면 `app/src/pages/`, 결과 그림 `app/src/views/`, 함께 쓰는 모양 `app/src/styles/app.css`)까지 만들었다.
-오버레이를 작은 위젯으로 줄이는 것은 P-028이다. 디자인 기반:
+**UI 개편**(데스크톱 앱 + 오버레이 — 기준 문서 `docs/ui-redesign.md`. UI 작업이면 먼저 읽는다): 디자인 기반(P-026), 데스크톱 앱 창
+(P-027 — 위의 「창이 둘이다」, 화면 `app/src/pages/`, 결과 그림 `app/src/views/`, 함께 쓰는 모양 `app/src/styles/app.css`), 오버레이 위젯
+(P-028 — 위의 「오버레이는 작은 위젯이다」)까지 만들었다. 디자인 기반:
 디자인 토큰 `app/src/styles/tokens.css`, 공통 부품 `app/src/ui/`(색·크기는 토큰만 쓴다 — 새 화면도 그렇다), 게임 이미지 명령(Rust `src-tauri/src/assets.rs` —
 니케 이름·보스 id·아이콘 종류는 경로가 아니라 열쇠다: 엔진 카탈로그·내장 보스 묶음·아이콘 표에 있을 때만 정해진 폴더에서 읽고,
 없는 이미지는 오류가 아니라 「없음」), 한 줄 요약 `src/core/summary.mjs`, 남은 시간 어림 `src/core/eta.mjs`. **게임 이미지를 저장소에 넣지 않는다** — `data/assets/`·`data/captures/`는 gitignore이고 테스트는

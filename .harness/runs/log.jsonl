@@ -160,3 +160,5 @@
 {"at":"2026-11-12T10:12:49.492Z","event":"session_end","stop_reason":"모델 호출이 2회 연속 실패했다. 다른 모델로 바꾸지 않고 중단한다.","tasks":{"done":["H-001","P-001","P-002","P-003","P-004","H-002","P-005","P-006","P-007","P-008","P-009","P-010","P-011","P-012","P-013","P-016","P-015","P-018","P-019","P-017","P-020","P-021","P-023","P-022","P-024","P-025","P-026"],"pending":["P-027","P-028","P-029","P-030","P-031","P-032","P-033","P-034","P-014"]}}
 {"at":"2026-11-12T10:13:32.283Z","event":"session_start","model":"claude-fable-5-2","head":"615db180a710c5aed5e1ce387a9dbc7767b9c72f","git_status":[]}
 {"at":"2026-11-12T11:13:32.363Z","event":"agent_error","task":"P-027","error":"시간 초과(60분)","run":".harness/runs/20261112T101332-P-027-a1"}
+{"at":"2026-11-12T11:18:36.398Z","event":"checkpoint","task":"P-027","commit":"4a67ed43a25f7b3a7c6d480ea2cf9dc0456a6f18","tree":"eb01a5cb2ff3dd6cf61112c917b216e3d007c4cf"}
+{"at":"2026-11-12T11:18:36.423Z","event":"verified","task":"P-027","attempt":1,"run":".harness/runs/20261112T111332-P-027-a1","tree":"eb01a5cb2ff3dd6cf61112c917b216e3d007c4cf","reason":null}

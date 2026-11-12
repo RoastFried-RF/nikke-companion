@@ -2,7 +2,8 @@
 // 니케 타일: 세로로 긴 초상화, 왼쪽 위 버스트 단계 배지, 오른쪽 위 속성 점, 이름(길면 말줄임), 딜 비중 막대와 %.
 // 보스의 약점 속성 니케면 속성 색 테두리로 강조한다.
 //
-// 크기 셋: lg(데스크톱 앱의 추천 1위) · sm(오버레이 위젯의 한 줄) · xs(순위 줄의 얼굴만 — 이름·막대·배지 없음).
+// 크기 넷: lg(데스크톱 앱의 추천 1위) · sm(오버레이 위젯의 자리 순서 줄) · mini(오버레이 위젯의 한 줄 카드 — 얼굴과 버스트 배지만,
+// 이름은 풍선 도움말) · xs(순위 줄의 얼굴만 — 이름·막대·배지 없음).
 // 초상화가 없으면(그림이 없는 니케·엔진 카탈로그에 없는 이름) 이름의 첫 글자로 대신한다.
 import { computed } from 'vue';
 import { portraitUrl } from '../lib/images';
@@ -14,7 +15,7 @@ import { useImage } from './useImage';
 const props = withDefaults(
   defineProps<{
     name: string;
-    size?: 'lg' | 'sm' | 'xs';
+    size?: 'lg' | 'sm' | 'mini' | 'xs';
     /** 속성. 모르면 null(속성 점이 「모름」으로 그려진다). */
     element?: string | null;
     /** 버스트 단계('1'·'2'·'3'·'A'). 모르면 null. */
@@ -37,6 +38,8 @@ const url = useImage(
 
 /** 초상화 대신 그리는 첫 글자. */
 const initial = computed(() => Array.from(props.name.trim())[0] ?? '?');
+/** 이름과 딜 비중 막대까지 그리는 크기인가(mini·xs는 얼굴만). */
+const labelled = computed(() => props.size === 'lg' || props.size === 'sm');
 const title = computed(() => {
   const parts = [props.name];
   if (props.weak && props.element) parts.push(`약점 속성(${props.element})`);
@@ -59,11 +62,11 @@ const title = computed(() => {
       <span v-else class="tile__initial" aria-hidden="true" data-testid="nikke-tile-initial">{{ initial }}</span>
       <template v-if="size !== 'xs'">
         <BurstBadge class="tile__burst" :stage="burst" :size="size === 'lg' ? 'md' : 'sm'" />
-        <ElementChip class="tile__element" :element="element" dot />
+        <ElementChip v-if="labelled" class="tile__element" :element="element" dot />
       </template>
     </div>
-    <figcaption v-if="size !== 'xs'" class="tile__name" data-testid="nikke-tile-name">{{ name }}</figcaption>
-    <DamageBar v-if="size !== 'xs' && share !== undefined" class="tile__share" :share="share" :tone="weak ? 'element' : 'accent'" :thin="size === 'sm'" />
+    <figcaption v-if="labelled" class="tile__name" data-testid="nikke-tile-name">{{ name }}</figcaption>
+    <DamageBar v-if="labelled && share !== undefined" class="tile__share" :share="share" :tone="weak ? 'element' : 'accent'" :thin="size === 'sm'" />
   </figure>
 </template>
 
@@ -86,6 +89,11 @@ const title = computed(() => {
 .tile--sm {
   --tile-width: var(--nk-tile-sm);
   --tile-ratio: 4 / 5;
+}
+
+.tile--mini {
+  --tile-width: var(--nk-tile-mini);
+  --tile-ratio: 1 / 1;
 }
 
 .tile--xs {
@@ -134,7 +142,8 @@ const title = computed(() => {
   font-weight: var(--nk-weight-heavy);
 }
 
-.tile--sm .tile__initial {
+.tile--sm .tile__initial,
+.tile--mini .tile__initial {
   font-size: var(--nk-font-lg);
 }
 
@@ -154,7 +163,8 @@ const title = computed(() => {
   right: var(--nk-space-2);
 }
 
-.tile--sm .tile__burst {
+.tile--sm .tile__burst,
+.tile--mini .tile__burst {
   top: var(--nk-space-1);
   left: var(--nk-space-1);
 }

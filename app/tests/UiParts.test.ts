@@ -246,6 +246,22 @@ describe('NikkeTile — 니케 타일', () => {
     expect(at(noShare, 'damage-bar-percent').text()).toBe('–');
   });
 
+  it('한 줄 카드용 타일(mini — 오버레이 위젯)은 얼굴과 버스트 배지만 보인다 — 약점 속성 강조와 이름(풍선 도움말)은 갖는다', async () => {
+    mockImages({ portraits: ['크라운'] });
+    const mini = mount(NikkeTile, { props: { name: '크라운', size: 'mini', element: '철갑', burst: '2', share: 0.21, weak: true } });
+    await flushPromises();
+    expect(at(mini, 'nikke-tile').classes()).toContain('tile--mini');
+    expect(at(mini, 'nikke-tile-image').exists()).toBe(true);
+    expect(at(mini, 'burst-badge').attributes('data-stage')).toBe('2');
+    for (const part of ['nikke-tile-name', 'element-chip', 'damage-bar']) expect(at(mini, part).exists(), part).toBe(false);
+    expect(at(mini, 'nikke-tile').classes()).toContain('tile--weak');
+    expect(at(mini, 'nikke-tile').attributes('title')).toBe('크라운 — 약점 속성(철갑)');
+    // 그림이 없으면 이름 첫 글자, 버스트 단계를 모르면 「?」.
+    const blank = mount(NikkeTile, { props: { name: '이름만 있는 니케', size: 'mini', src: null } });
+    expect(at(blank, 'nikke-tile-initial').text()).toBe('이');
+    expect(at(blank, 'burst-badge').attributes('data-stage')).toBe('');
+  });
+
   it('작은 타일(오버레이용)은 같은 정보를 작게, 얼굴만 타일(순위 줄)은 그림만 보인다', async () => {
     mockImages({ portraits: ['크라운'] });
     const small = mount(NikkeTile, { props: { name: '크라운', size: 'sm', element: '철갑', burst: '2', share: 0.21 } });

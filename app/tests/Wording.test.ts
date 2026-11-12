@@ -77,6 +77,8 @@ describe('문구 — 개발 용어를 쓰지 않는다', () => {
         '../src/pages/settings/OverlaySection.vue',
         '../src/pages/settings/EngineSection.vue',
         '../src/views/InterceptResult.vue',
+        '../src/views/OverlayWidget.vue',
+        '../src/views/BossFace.vue',
         '../src/views/SquadPanel.vue',
         '../src/views/SquadBoard.vue',
         '../src/views/GrowthBoard.vue',
@@ -114,7 +116,8 @@ describe('문구 — 개발 용어를 쓰지 않는다', () => {
     const tier = sources['../src/pages/TierPage.vue'];
     expect(tier).toContain('<strong>마지막으로 불러온 티어표를 열지 못했다.</strong> {{ error }} 설정의 고급에서 티어표를 다시 불러온다.');
     // 빈 상태는 한마디 + 무엇을 하면 되는지 한 줄 + 단추 하나다.
-    for (const file of ['../src/pages/InterceptPage.vue', '../src/pages/RosterPage.vue', '../src/pages/ToolsPage.vue', '../src/pages/TierPage.vue', '../src/Overlay.vue']) {
+    // (P-028: 오버레이는 작은 위젯이 됐다 — 빈 상태 부품 대신 한 줄 알림을 쓴다. 아래에서 따로 본다.)
+    for (const file of ['../src/pages/InterceptPage.vue', '../src/pages/RosterPage.vue', '../src/pages/ToolsPage.vue', '../src/pages/TierPage.vue']) {
       const states = sources[file].match(/<EmptyState[\s\S]*?\/>/g) ?? [];
       expect(states.length, file).toBeGreaterThan(0);
       for (const state of states) {
@@ -123,6 +126,13 @@ describe('문구 — 개발 용어를 쓰지 않는다', () => {
         expect(state, file).toMatch(/action=/);
       }
     }
+    // 오버레이 위젯의 한 줄 알림도 같다: 무슨 일인지와 무엇을 하면 되는지를 한 줄에 말하고, 단추는 「앱 열기」 하나다.
+    const widget = sources['../src/views/OverlayWidget.vue'];
+    for (const line of ['연결된 계정이 없다 — 앱에서 계정을 연결한다', '아직 요격전 추천이 없다 — 앱에서 계산한다', '추천이 아직 없다 — 앱에서 계산한다']) expect(widget).toContain(line);
+    const notice = widget.slice(widget.indexOf('<div v-if="kind !== \'result\'" class="notice"'), widget.indexOf('<!-- ── 접힘(알약)'));
+    expect(notice.match(/<button/g)).toHaveLength(2);
+    expect(notice).toContain('data-testid="open-app"');
+    expect(notice).toContain('data-testid="widget-hide"');
   });
 });
 

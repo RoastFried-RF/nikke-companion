@@ -187,8 +187,8 @@ fn checked_name(name: &str) -> Result<String, SharedError> {
     })
 }
 
-/// 크기 한도 안의 JSON 파일을 읽는다.
-fn read_json(path: &Path, what: &'static str) -> Result<Value, SharedError> {
+/// 크기 한도 안의 JSON 파일을 읽는다. (오버레이 위젯의 설정 파일도 이 길로 읽는다 — `overlay_store`.)
+pub(crate) fn read_json(path: &Path, what: &'static str) -> Result<Value, SharedError> {
     let meta = fs::metadata(path).map_err(|e| SharedError::Unreadable {
         what,
         detail: e.to_string(),
@@ -205,7 +205,7 @@ fn read_json(path: &Path, what: &'static str) -> Result<Value, SharedError> {
 }
 
 /// 임시 파일에 다 쓴 뒤 이름을 바꾼다 — 쓰다가 죽어도 앞의 내용이 반쪽이 되지 않는다.
-fn write_json(dir: &Path, file: &str, value: &Value, what: &'static str) -> Result<(), SharedError> {
+pub(crate) fn write_json(dir: &Path, file: &str, value: &Value, what: &'static str) -> Result<(), SharedError> {
     let io = |e: std::io::Error| SharedError::Write {
         what,
         detail: e.to_string(),

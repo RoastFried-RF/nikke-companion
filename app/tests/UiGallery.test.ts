@@ -236,7 +236,11 @@ describe('개발 실행에서만 뜬다', () => {
   it('새 부품은 새 화면(앱 창의 틀·pages·views·오버레이)이 쓴다 — 고급으로 옮긴 예전 화면(components·screens)은 예전 모양 그대로다', () => {
     // P-027에서 화면을 옮겼다: 데스크톱 앱 창의 화면들과 결과 그림(views)이 부품을 쓴다.
     const users = Object.entries(sources).filter(([, text]) => /from '(\.\.?\/)+ui\/[A-Z]/.test(text)).map(([file]) => file);
-    expect(users).toEqual(expect.arrayContaining(['../src/App.vue', '../src/Overlay.vue', '../src/pages/InterceptPage.vue', '../src/views/InterceptResult.vue', '../src/views/TierBoard.vue']));
+    // P-028: 오버레이는 틀(Overlay.vue)과 그림(views/OverlayWidget.vue)으로 나뉘었다 — 부품을 쓰는 것은 그림 쪽이다.
+    expect(users).toEqual(
+      expect.arrayContaining(['../src/App.vue', '../src/views/OverlayWidget.vue', '../src/pages/InterceptPage.vue', '../src/views/InterceptResult.vue', '../src/views/TierBoard.vue']),
+    );
+    expect(sources['../src/Overlay.vue']).toContain("import OverlayWidget from './views/OverlayWidget.vue';");
     // 예전 화면은 설정 > 고급(파일 직접 고르기)에 예전 모양으로 남았다 — 부품을 섞어 쓰지 않는다.
     for (const [file, text] of Object.entries(sources)) {
       if (!/\/(components|screens)\//.test(file)) continue;

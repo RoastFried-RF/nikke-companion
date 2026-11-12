@@ -368,18 +368,27 @@ describe('흐름: 계정 없음 → 연결 → 계산 → 결과 → 다시 켜�
     expect(at(again, 'first-run').exists()).toBe(false);
     expect(at(again, 'home-bosses').findAll('[data-testid="boss-card"]')).toHaveLength(5);
 
-    // 7) 오버레이 창도 같은 결과를 본다(같은 디스크).
+    // 7) 오버레이 창도 같은 결과를 본다(같은 디스크). P-028: 오버레이는 위젯이다 — 보스 하나의 한 줄 카드(앱 창에서 보던 보스)를
+    //    보이고, 펼치면 보스 다섯을 고를 수 있다. (예전에는 앱 창과 같은 그림 — 보스 카드 다섯과 큰 총딜 — 을 그렸다.)
     const overlay = mount(Overlay);
     await flushPromises();
-    expect(overlay.findAll('[data-testid="boss-card"]').map((c) => c.attributes('data-boss'))).toEqual(BOSS_IDS);
-    expect(overlay.find('[data-testid="squad-total"]').text()).toBe(shown.total);
+    expect(overlay.find('[data-testid="widget"]').attributes('data-shape')).toBe('card');
+    expect(overlay.find('[data-testid="widget-boss"]').text()).toBe(shown.boss);
+    expect(overlay.find('[data-testid="widget-total"]').text()).toBe(shown.total);
+    expect(overlay.findAll('[data-testid="widget-member"]').map((m) => (m.attributes('title') ?? '').split(' — ')[0])).toEqual(shown.members);
+    expect(overlay.find('[data-testid="estimate-pill"]').text()).toBe('추정');
+    await overlay.find('[data-testid="widget-toggle"]').trigger('click');
+    await flushPromises();
+    expect(overlay.findAll('[data-testid="widget-boss-pick"]').map((c) => c.attributes('data-boss'))).toEqual(BOSS_IDS);
   });
 
   it('앱 창이 계산을 끝내면 떠 있던 오버레이 창이 새 결과를 받는다', async () => {
     disk.addAccount('me', documents[ACCOUNT_PATH]);
     const overlay = mount(Overlay);
     await flushPromises();
-    expect(overlay.find('[data-testid="overlay-empty"]').exists()).toBe(true);
+    // P-028: 빈 상태는 한 줄 알림이다(「아직 요격전 추천이 없다 — 앱에서 계산한다」와 「앱 열기」).
+    expect(overlay.find('[data-testid="widget-notice"]').attributes('data-kind')).toBe('empty');
+    expect(overlay.find('[data-testid="open-app"]').exists()).toBe(true);
 
     const w = await render();
     await openPage(w, 'intercept');
@@ -388,9 +397,15 @@ describe('흐름: 계정 없음 → 연결 → 계산 → 결과 → 다시 켜�
     await idle(w);
     await flushPromises();
 
-    expect(overlay.find('[data-testid="overlay-empty"]').exists()).toBe(false);
-    expect(overlay.findAll('[data-testid="boss-card"]').map((c) => c.attributes('data-boss'))).toEqual(BOSS_IDS);
-    expect(overlay.find('[data-testid="squad-total"]').text()).toBe(at(w, 'squad-total').text());
+    expect(overlay.find('[data-testid="widget-notice"]').exists()).toBe(false);
+    expect(overlay.find('[data-testid="widget"]').attributes('data-state')).toBe('result');
+    expect(overlay.find('[data-testid="widget-boss"]').text()).toBe(at(w, 'boss-name').text());
+    expect(overlay.find('[data-testid="widget-total"]').text()).toBe(at(w, 'squad-total').text());
+    // 계산하는 동안 앱 창이 진행을 알렸고(오버레이가 작게 보인다), 끝나면 「돌고 있지 않다」로 되돌렸다.
+    const announced = api.announceActivity.mock.calls.map(([a]) => a);
+    expect(announced.some((a) => a.running && a.total > 0)).toBe(true);
+    expect(announced[announced.length - 1].running).toBe(false);
+    expect(overlay.find('[data-testid="widget-activity"]').exists()).toBe(false);
   });
 
   it('결과를 저장하지 못해도 화면에는 보이고, 저장하지 못했다고 알린다', async () => {

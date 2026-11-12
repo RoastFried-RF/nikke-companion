@@ -5,7 +5,7 @@
 // 실제 계정 폴더·실제 계정은 쓰지 않는다 — 전부 지어낸 값이다.
 import { flushPromises, type VueWrapper } from '@vue/test-utils';
 import { vi, type MockedObject } from 'vitest';
-import type { OverlayLaunch, OverlaySnapshot, SharedSnapshot } from '../../src/types';
+import type { ComputeActivity, OverlayLaunch, OverlayPrefs, OverlayShape, OverlaySnapshot, SharedSnapshot, WidgetSnapshot } from '../../src/types';
 
 type Backend = typeof import('../../src/lib/backend');
 type Api = MockedObject<Backend>;
@@ -30,8 +30,69 @@ export function shellMocks(): Record<string, ReturnType<typeof vi.fn>> {
     'onGameWindow',
     'onGameCapture',
     'setFollowGame',
+    // 오버레이 위젯(P-028): 상태 읽기·모양·핀·창 크기 맞춤·숨기기·끌기, 설정·자리 초기화, 계산 진행.
+    'overlayWidget',
+    'onOverlayWidget',
+    'overlayShape',
+    'overlayPin',
+    'overlayFit',
+    'overlayHide',
+    'startOverlayDrag',
+    'setOverlayPrefs',
+    'resetOverlayPosition',
+    'announceActivity',
+    'computeActivity',
+    'onComputeActivity',
   ];
   return Object.fromEntries(names.map((name) => [name, vi.fn()]));
+}
+
+/** 오버레이 위젯의 기본 설정(Rust의 기본값과 같다). */
+export const WIDGET_PREFS: OverlayPrefs = { scale_percent: 100, opacity_percent: 100, leave: 'collapse', leave_after_sec: 8, default_shape: 'card', click_through: false };
+
+/** Rust가 쥐고 있는 위젯 상태와 계산 진행을 흉내 낸다(src-tauri/src/lib.rs의 위젯 명령들 — 모양·핀·설정이 바뀌면 모든 창에 알린다). */
+export class FakeWidget {
+  state: WidgetSnapshot = { shape: 'card', pinned: false, resting: false, prefs: { ...WIDGET_PREFS }, problem: null };
+  activity: ComputeActivity = { running: false, label: '', done: 0, total: 0, elapsed_ms: 0 };
+  /** `overlay-widget`·`compute-activity` 이벤트를 듣는 창들. */
+  listeners = new Set<(snapshot: WidgetSnapshot) => void>();
+  activityListeners = new Set<(activity: ComputeActivity) => void>();
+  /** 자리 초기화를 부른 횟수. */
+  resets = 0;
+
+  snapshot(): WidgetSnapshot {
+    return { ...this.state, prefs: { ...this.state.prefs } };
+  }
+
+  /** 모든 창에 알린다(Rust의 emit). */
+  emit(): WidgetSnapshot {
+    const snapshot = this.snapshot();
+    for (const listener of [...this.listeners]) listener(snapshot);
+    return snapshot;
+  }
+
+  /** Rust 쪽에서 상태가 바뀐 것처럼(단축키·자동 표시) 바꾸고 알린다. */
+  set(patch: Partial<WidgetSnapshot>): WidgetSnapshot {
+    this.state = { ...this.state, ...patch };
+    return this.emit();
+  }
+
+  /** 앱 창이 진행을 알린 것처럼 바꾸고 알린다. */
+  announce(activity: ComputeActivity): ComputeActivity {
+    this.activity = activity.running ? { ...activity } : { running: false, label: '', done: 0, total: 0, elapsed_ms: 0 };
+    for (const listener of [...this.activityListeners]) listener({ ...this.activity });
+    return { ...this.activity };
+  }
+}
+
+const NEXT_SHAPE: Record<OverlayShape, OverlayShape> = { collapsed: 'card', card: 'expanded', expanded: 'collapsed' };
+
+/** 가짜 디스크에 딸린 가짜 위젯(테스트가 `widgetOf(disk)`로 꺼낸다). */
+const widgets = new WeakMap<FakeDisk, FakeWidget>();
+export function widgetOf(disk: FakeDisk): FakeWidget {
+  const found = widgets.get(disk);
+  if (!found) throw new Error('installShell로 만든 디스크가 아니다');
+  return found;
 }
 
 /** 계정 폴더를 흉내 낸다. */
@@ -140,6 +201,38 @@ export function installShell(api: Api, disk: FakeDisk = new FakeDisk()): FakeDis
     return disk.emit();
   });
   api.loadInterceptResult.mockImplementation(async () => (disk.intercept === null ? null : structuredClone(disk.intercept)));
+
+  // 오버레이 위젯: Rust가 쥔 상태를 흉내 낸다. 창 크기 맞춤·끌기·숨기기는 불린 것만 적는다.
+  const widget = new FakeWidget();
+  widgets.set(disk, widget);
+  api.overlayWidget.mockImplementation(async () => widget.snapshot());
+  api.onOverlayWidget.mockImplementation(async (handler) => {
+    widget.listeners.add(handler);
+    return () => widget.listeners.delete(handler);
+  });
+  api.overlayShape.mockImplementation(async (shape: OverlayShape | 'next') => widget.set({ shape: shape === 'next' ? NEXT_SHAPE[widget.state.shape] : shape }));
+  api.overlayPin.mockImplementation(async (pinned: boolean) => widget.set({ pinned }));
+  api.overlayFit.mockResolvedValue(undefined);
+  api.startOverlayDrag.mockResolvedValue(undefined);
+  api.overlayHide.mockImplementation(async () => {
+    overlay.visible = false;
+    return { ...overlay };
+  });
+  api.setOverlayPrefs.mockImplementation(async (patch: Partial<OverlayPrefs>) => {
+    if (patch.click_through !== undefined && !overlay.visible) throw '오버레이가 숨겨져 있어 클릭 통과를 바꾸지 못했다. 오버레이를 띄운 뒤에 바꾼다';
+    if (patch.click_through !== undefined) overlay.click_through = patch.click_through;
+    return widget.set({ prefs: { ...widget.state.prefs, ...patch } });
+  });
+  api.resetOverlayPosition.mockImplementation(async () => {
+    widget.resets += 1;
+    return widget.snapshot();
+  });
+  api.announceActivity.mockImplementation(async (activity: ComputeActivity) => widget.announce(activity));
+  api.computeActivity.mockImplementation(async () => ({ ...widget.activity }));
+  api.onComputeActivity.mockImplementation(async (handler) => {
+    widget.activityListeners.add(handler);
+    return () => widget.activityListeners.delete(handler);
+  });
   return disk;
 }
 

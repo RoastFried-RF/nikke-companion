@@ -9,6 +9,7 @@ import type {
   AccountRead,
   CaptureRecord,
   CompareReport,
+  ComputeActivity,
   CookieSaved,
   EngineCatalog,
   EngineProgress,
@@ -25,6 +26,8 @@ import type {
   IconKind,
   InterceptReport,
   OverlayLaunch,
+  OverlayPrefs,
+  OverlayShape,
   OverlaySnapshot,
   SavedAccount,
   ScreenRecognition,
@@ -32,6 +35,7 @@ import type {
   SharedSnapshot,
   SyncFailure,
   SyncStatus,
+  WidgetSnapshot,
 } from '../types';
 
 /** 오버레이 창의 이름(src-tauri/tauri.conf.json의 label). 게임 위에 뜨는 작은 창이다. */
@@ -76,6 +80,12 @@ export const ACCOUNT_FETCH_EVENT = 'account-fetch';
 /** 크롬 확장 연결의 상태가 바뀔 때 Rust가 보내는 이벤트 이름(src-tauri/src/lib.rs의 EXTENSION_LINK_EVENT). */
 export const EXTENSION_LINK_EVENT = 'extension-link';
 
+/** 오버레이 위젯의 상태(모양·핀·쉬는 중·설정)가 바뀔 때 Rust가 보내는 이벤트 이름(src-tauri/src/lib.rs의 OVERLAY_WIDGET_EVENT). */
+export const OVERLAY_WIDGET_EVENT = 'overlay-widget';
+
+/** 앱 창이 알린 계산 진행이 바뀔 때 Rust가 보내는 이벤트 이름(src-tauri/src/lib.rs의 COMPUTE_ACTIVITY_EVENT). */
+export const COMPUTE_ACTIVITY_EVENT = 'compute-activity';
+
 /** 비교 결과 파일을 읽는다. 실패하면 한국어 오류 문장으로 거부된다. */
 export function loadReport(path: string): Promise<CompareReport> {
   return invoke<CompareReport>('load_report', { path });
@@ -89,11 +99,6 @@ export function overlayStatus(): Promise<OverlaySnapshot> {
 /** 실행할 때 인자로 받은 결과 파일 경로. 없으면 null. */
 export function startupReportPath(): Promise<string | null> {
   return invoke<string | null>('startup_report_path');
-}
-
-/** 앱을 끝낸다. */
-export function quitApp(): Promise<void> {
-  return invoke<void>('quit_app');
 }
 
 /** 엔진이 아는 니케와 보스 프리셋. */
@@ -312,6 +317,73 @@ export function showAppWindow(): Promise<void> {
 /** 오버레이 창을 보이거나 숨긴다(활성화하지 않는다). 바뀐 오버레이 상태가 온다. */
 export function setOverlayVisible(visible: boolean): Promise<OverlaySnapshot> {
   return invoke<OverlaySnapshot>('set_overlay_visible', { visible });
+}
+
+// ── 오버레이 위젯(P-028) ──────────────────────────────────────────────────────
+// 오버레이 창이 부르는 것은 읽기(위젯 상태·계산 진행)와 자기 창의 조작(모양·핀·창 크기 맞춤·숨기기·끌기)뿐이다.
+// 설정을 바꾸고 자리를 초기화하고 계산 진행을 알리는 것은 데스크톱 앱 창의 일이다 — 권한(capabilities)이 그렇게 나뉘어 있다.
+
+/** 위젯의 지금 상태(모양·핀·쉬는 중·설정). */
+export function overlayWidget(): Promise<WidgetSnapshot> {
+  return invoke<WidgetSnapshot>('overlay_widget');
+}
+
+/** 위젯의 모양을 정한다. 'next'면 다음 모양으로(접힘 → 한 줄 카드 → 펼침 → 접힘). */
+export function overlayShape(shape: OverlayShape | 'next'): Promise<WidgetSnapshot> {
+  return invoke<WidgetSnapshot>('overlay_shape', { shape });
+}
+
+/** 핀으로 고정하거나 푼다. 고정해 두면 이상 개체 화면을 떠나도 접히거나 쉬지 않는다. */
+export function overlayPin(pinned: boolean): Promise<WidgetSnapshot> {
+  return invoke<WidgetSnapshot>('overlay_pin', { pinned });
+}
+
+/**
+ * 오버레이 창의 크기를 위젯에 맞춘다(화면이 잰 위젯의 크기 — 논리 픽셀). 창이 위젯보다 크면 빈 투명 영역이
+ * 게임 클릭을 가로막는다. 화면이 정하는 것은 크기뿐이다 — 자리는 Rust가 정한다(붙어 있는 모서리를 제자리에 둔다).
+ */
+export function overlayFit(width: number, height: number): Promise<void> {
+  return invoke<void>('overlay_fit', { width, height });
+}
+
+/** 오버레이를 숨긴다(앱은 끝나지 않는다 — 앱 창이나 단축키로 다시 띄운다). 바뀐 오버레이 상태가 온다. */
+export function overlayHide(): Promise<OverlaySnapshot> {
+  return invoke<OverlaySnapshot>('overlay_hide');
+}
+
+/** 오버레이 창을 끌기 시작한다(마우스 단추를 누른 채 움직였을 때). 옮기는 것은 이 창뿐이다. */
+export function startOverlayDrag(): Promise<void> {
+  return getCurrentWindow().startDragging();
+}
+
+/** 오버레이 설정을 바꾼다(바꿀 칸만 넘긴다). 수는 Rust가 범위 안으로 맞추고, 모르는 낱말은 한국어로 거부한다. */
+export function setOverlayPrefs(prefs: Partial<OverlayPrefs>): Promise<WidgetSnapshot> {
+  return invoke<WidgetSnapshot>('set_overlay_prefs', { prefs });
+}
+
+/** 끌어 둔 자리를 잊고 기본 자리로 되돌린다. */
+export function resetOverlayPosition(): Promise<WidgetSnapshot> {
+  return invoke<WidgetSnapshot>('reset_overlay_position');
+}
+
+/** 요격전 추천 계산의 진행을 알린다(오버레이가 작게 보여 준다). 계산을 시작하거나 멈추는 명령이 아니다. */
+export function announceActivity(activity: ComputeActivity): Promise<ComputeActivity> {
+  return invoke<ComputeActivity>('announce_activity', { activity });
+}
+
+/** 앱 창이 마지막으로 알린 계산 진행. */
+export function computeActivity(): Promise<ComputeActivity> {
+  return invoke<ComputeActivity>('compute_activity');
+}
+
+/** 위젯 상태가 바뀔 때마다 불린다(단축키·자동 표시·설정 변경). 돌려받은 함수로 구독을 끊는다. */
+export function onOverlayWidget(handler: (snapshot: WidgetSnapshot) => void): Promise<UnlistenFn> {
+  return listen<WidgetSnapshot>(OVERLAY_WIDGET_EVENT, (event) => handler(event.payload));
+}
+
+/** 앱 창이 알린 계산 진행이 바뀔 때마다 불린다. 돌려받은 함수로 구독을 끊는다. */
+export function onComputeActivity(handler: (activity: ComputeActivity) => void): Promise<UnlistenFn> {
+  return listen<ComputeActivity>(COMPUTE_ACTIVITY_EVENT, (event) => handler(event.payload));
 }
 
 /** 두 창이 함께 보는 것이 바뀔 때마다 불린다(다른 창이 바꿨을 때도). 돌려받은 함수로 구독을 끊는다. */

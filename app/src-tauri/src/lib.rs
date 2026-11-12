@@ -28,6 +28,12 @@
 //!   (이름·id·종류는 경로가 아니라 열쇠다. 네트워크를 쓰지 않는다)
 //! - `shared_state`: 두 창이 함께 보는 것 — 기본 계정의 이름, 오버레이를 띄우는 때, 마지막 요격전 추천 결과를 계정 폴더의
 //!   파일에 두고 읽는다(계정 이름은 경로가 아니라 열쇠다. 결과는 종류·판을 확인한 뒤에만 쓴다)
+//! - `overlay_widget`: 오버레이 위젯의 규칙(P-028) — 모양 셋(접힘·한 줄 카드·펼침), 설정, 자동 표시(이상 개체 화면을
+//!   떠나면 잠시 뒤 접거나 쉬고 돌아오면 되돌린다), 위젯에 맞춘 창 크기, 끌어 둔 자리와 화면 안으로 되돌리기(순수)
+//! - `overlay_store`: 위젯의 설정·자리를 계정 폴더의 파일 하나에 기억한다
+//!
+//! 오버레이 창은 위젯만큼만 크다: 화면이 잰 위젯의 크기를 `overlay_fit`으로 알려 주면 창 크기를 거기에 맞춘다 —
+//! 빈 투명 영역이 게임 클릭을 가로막지 않는다. 옮기고 크기를 바꾸는 것은 오버레이 **자기 창**뿐이다.
 //!
 //! 편성 비교·추천의 계산은 화면 쪽의 `src/core`(JS)가 하고, 여기서는 엔진 프로세스만 대신 띄운다.
 //! 이 앱의 Rust 코드는 네트워크 요청을 하지 않는다. 밖으로 나가는 요청은 둘뿐이다: 사용자가 연 로그인 창이
@@ -42,7 +48,7 @@
 //! 게임은 읽기만 한다: 게임 창을 옮기거나 크기를 바꾸거나 앞으로 가져오지 않고, 입력을 보내지 않는다.
 //! 붙이기가 옮기는 것도, 게임 위에 머물기가 창 순서를 올리는 것도 오버레이 창뿐이다.
 //!
-//! 앱이 끝날 때(앱 창 닫기, 오버레이의 끝내기 단추) 돌던 엔진 계산과 계정 수집을 멈추고 그 프로세스가 끝나기를 잠깐
+//! 앱이 끝날 때(앱 창 닫기 — 오버레이 위젯에는 끝내기가 없다) 돌던 엔진 계산과 계정 수집을 멈추고 그 프로세스가 끝나기를 잠깐
 //! 기다린다(`stop_running_work`). 앱이 정리할 틈 없이 죽어도 프로세스 묶음(Job Object)이 함께 닫히며 끝낸다.
 //!
 //! 스레드는 둘이다: 게임 창 추적(`track_game` — 창 상태·붙이기·게임 위에 머물기)과 화면 추적(`track_screen` — 켜 둔 동안 주기적으로
@@ -66,6 +72,8 @@ mod game_win32;
 pub mod game_window;
 pub mod login_window;
 pub mod overlay_state;
+pub mod overlay_store;
+pub mod overlay_widget;
 #[cfg(windows)]
 pub mod overlay_win32;
 pub mod recognize;
@@ -74,6 +82,7 @@ pub mod screen_track;
 pub mod shared_state;
 pub mod stay_on_top;
 
+use std::collections::VecDeque;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -83,7 +92,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 use account_sync::{
@@ -93,11 +102,14 @@ use account_sync::{
 use capture::CaptureRecord;
 use extension_link::{LinkHub, LinkStatus, Stored};
 use game_window::{
-    follow_step, follow_target, FollowStep, GameError, GameWindowInfo, GameWindowState,
-    GameWindowStatus,
+    follow_client, follow_step, FollowStep, GameError, GameWindowInfo, GameWindowState,
+    GameWindowStatus, ScreenRect,
 };
 use overlay_state::{
     top_right_position, OverlayAction, OverlayState, Transition, VisibilityChange,
+};
+use overlay_widget::{
+    Activity, Anchor, AutoAction, AutoInput, AutoShow, Prefs, Shape, Spot, WidgetSnapshot,
 };
 use recognize::Recognition;
 use screen_track::{Reading, TrackSettings, TrackStatus};
@@ -141,8 +153,26 @@ pub const EXTENSION_LINK_EVENT: &str = "extension-link";
 /// 프런트의 `SHARED_STATE_EVENT`와 같아야 한다.
 pub const SHARED_STATE_EVENT: &str = "shared-state";
 
+/// 오버레이 위젯의 상태(모양·핀·쉬는 중·설정)가 바뀔 때 모든 창으로 보내는 이벤트. 싣는 것은 `WidgetSnapshot`이다.
+/// 프런트의 `OVERLAY_WIDGET_EVENT`와 같아야 한다.
+pub const OVERLAY_WIDGET_EVENT: &str = "overlay-widget";
+
+/// 데스크톱 앱 창이 알린 계산 진행이 바뀔 때 모든 창으로 보내는 이벤트(오버레이가 작게 보여 준다). 싣는 것은 진행뿐이다.
+/// 프런트의 `COMPUTE_ACTIVITY_EVENT`와 같아야 한다.
+pub const COMPUTE_ACTIVITY_EVENT: &str = "compute-activity";
+
 /// 엔진 설정 파일 이름. 앱 설정 폴더(`%APPDATA%/<identifier>`)에 둔다.
 const SETTINGS_FILE: &str = "settings.json";
+
+/// 사용자가 오버레이를 끄는 동안으로 보는 시간: 마지막으로 옮겨진 뒤 이만큼은 자리를 고쳐 주지 않는다
+/// (끄는 도중에 화면 안으로 되돌리거나 게임 창 기준의 자리로 당기면 창이 손에서 튄다).
+const DRAG_SETTLE: Duration = Duration::from_millis(400);
+
+/// 모니터 목록을 다시 읽는 간격(그 사이에는 읽어 둔 것을 쓴다).
+const MONITOR_RESCAN: Duration = Duration::from_millis(2000);
+
+/// 이 앱이 오버레이를 옮긴 자리를 몇 개까지 기억하는가(창이 옮겨졌다는 알림이 사용자가 끈 것인지 가리는 데 쓴다).
+const PROGRAMMATIC_MOVES: usize = 8;
 
 /// 시작할 때 화면 가장자리에서 띄우는 거리(논리 픽셀).
 const SCREEN_MARGIN: f64 = 24.0;
@@ -155,7 +185,7 @@ const ATTACH_MARGIN: f64 = 12.0;
 const RESCAN_INTERVAL: Duration = Duration::from_millis(1000);
 
 /// 전역 단축키. 모두 Alt+Shift 조합이다.
-const SHORTCUTS: [ShortcutDef; 3] = [
+const SHORTCUTS: [ShortcutDef; 4] = [
     ShortcutDef {
         keys: "Alt+Shift+C",
         what: "클릭 통과 전환",
@@ -167,6 +197,12 @@ const SHORTCUTS: [ShortcutDef; 3] = [
         what: "창 숨김/보임",
         code: Code::KeyO,
         action: ShortcutAction::Overlay(OverlayAction::ToggleVisibility),
+    },
+    ShortcutDef {
+        keys: "Alt+Shift+M",
+        what: "오버레이 모양 바꾸기",
+        code: Code::KeyM,
+        action: ShortcutAction::CycleShape,
     },
     ShortcutDef {
         keys: "Alt+Shift+S",
@@ -190,6 +226,8 @@ enum ShortcutAction {
     Overlay(OverlayAction),
     /// 지금 게임 화면을 저장한다.
     CaptureGame,
+    /// 오버레이 위젯의 모양을 다음 것으로 바꾼다(접힘 → 한 줄 카드 → 펼침).
+    CycleShape,
 }
 
 /// 앱이 들고 있는 오버레이 상태.
@@ -198,7 +236,62 @@ struct Overlay {
     state: Mutex<OverlayState>,
     /// 등록하지 못한 단축키의 설명. 화면에 그대로 보인다.
     shortcut_problems: Mutex<Vec<String>>,
+    /// 위젯의 모양·핀·설정·자리. `state`와 함께 잠그지 않는다(하나씩 잠갔다 푼다).
+    widget: Mutex<Widget>,
 }
+
+/// 오버레이 위젯의 상태. 규칙은 `overlay_widget`에 있다.
+#[derive(Default)]
+struct Widget {
+    shape: Shape,
+    /// 핀으로 고정했는가(자동 표시가 접거나 쉬게 하지 않는다).
+    pinned: bool,
+    prefs: Prefs,
+    /// 자동 표시의 상태(이상 개체 화면을 떠난 시각, 접거나 쉬게 해 둔 것).
+    auto: AutoShow,
+    /// 끌어 둔 화면 위의 자리. 없으면 기본 자리.
+    spot: Option<Spot>,
+    /// 끌어 둔 게임 창 기준의 자리(붙이기). 없으면 게임 화면의 오른쪽 위 안쪽.
+    anchor: Option<Anchor>,
+    /// 설정·자리를 읽거나 저장하다 난 문제.
+    problem: Option<String>,
+    /// 사용자가 창을 마지막으로 끈 때.
+    moved_at: Option<Instant>,
+    /// 끌어 둔 자리를 아직 디스크에 쓰지 않았다(끌기가 끝나면 쓴다).
+    dirty: bool,
+    /// 이 앱이 창을 옮긴 자리들(최근 것부터).
+    programmatic: VecDeque<(i32, i32)>,
+}
+
+impl Widget {
+    /// 사용자가 창을 끄는 중으로 보는가.
+    fn being_dragged(&self) -> bool {
+        self.moved_at.is_some_and(|at| at.elapsed() < DRAG_SETTLE)
+    }
+
+    fn snapshot(&self) -> WidgetSnapshot {
+        WidgetSnapshot {
+            shape: self.shape,
+            pinned: self.pinned,
+            resting: self.auto.is_resting(),
+            prefs: self.prefs,
+            problem: self.problem.clone(),
+        }
+    }
+
+    fn stored(&self) -> overlay_widget::Stored {
+        overlay_widget::Stored {
+            prefs: self.prefs,
+            pinned: self.pinned,
+            spot: self.spot,
+            anchor: self.anchor,
+        }
+    }
+}
+
+/// 데스크톱 앱 창이 알린 계산 진행(오버레이가 작게 보여 준다).
+#[derive(Default)]
+struct ComputeActivity(Mutex<Activity>);
 
 /// 엔진 배치의 자리. 화면이 두 번 눌러도 엔진 프로세스를 겹쳐 띄우지 않고, 중단 명령이 도는 배치를 멈춘다.
 #[derive(Default)]
@@ -238,6 +331,11 @@ struct GameTracker {
     capturing: AtomicBool,
     /// 추적 스레드. 붙이기를 바꾸면 깨워서 바로 반영한다.
     thread: Mutex<Option<thread::Thread>>,
+    /// 붙이기의 기준이 되는 게임 화면(추적 스레드가 주기마다 적는다). 붙일 수 없으면 `None`.
+    /// 오버레이가 옮겨졌을 때 게임 창 기준의 자리를 계산하는 데 쓴다 — 게임 창을 다시 찾지 않는다.
+    client: Mutex<Option<ScreenRect>>,
+    /// 모니터들의 작업 영역과 읽은 때(가끔만 다시 읽는다).
+    areas: Mutex<(Option<Instant>, Vec<ScreenRect>)>,
 }
 
 /// 요격전 화면 자동 추적. 규칙과 상태의 모양은 `screen_track`에 있다.
@@ -686,11 +784,220 @@ fn capture_from_shortcut(app: &AppHandle) {
     });
 }
 
-/// 오버레이 창의 바깥 너비와 붙이기 여백(물리 픽셀). 창을 읽지 못하면 `None`.
-fn overlay_metrics(window: &WebviewWindow) -> Option<(u32, u32)> {
-    let width = window.outer_size().ok()?.width;
-    let scale = window.scale_factor().ok()?;
-    Some((width, (ATTACH_MARGIN * scale).round().max(0.0) as u32))
+// ── 오버레이의 자리 ───────────────────────────────────────────────────────────
+//
+// 오버레이를 끌어 둔 자리를 기억한다(`overlay_widget`의 `Spot`·`Anchor`): 붙이기를 켜지 않았으면 화면 위의 자리,
+// 켰으면 게임 화면의 가까운 모서리에서 잰 거리. 위젯의 모양이 바뀌어 창 크기가 달라져도 그 모서리는 제자리다.
+// 화면 밖으로 나간 자리는 안쪽으로 되돌린다. 옮기는 것은 오버레이 창뿐이다 — 게임 창은 읽기만 한다.
+
+/// 오버레이 창의 지금 사각형(물리 픽셀). 읽지 못하면 `None`.
+fn overlay_rect(window: &WebviewWindow) -> Option<ScreenRect> {
+    let position = window.outer_position().ok()?;
+    let size = window.outer_size().ok()?;
+    Some(ScreenRect {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+    })
+}
+
+/// 붙이기를 처음 켰을 때 게임 화면 가장자리에서 띄우는 거리(물리 픽셀).
+fn attach_margin(window: &WebviewWindow) -> u32 {
+    let scale = window.scale_factor().unwrap_or(1.0);
+    (ATTACH_MARGIN * scale).round().max(0.0) as u32
+}
+
+/// 모니터들의 작업 영역(물리 픽셀). 가끔만 다시 읽는다 — 붙이기는 초당 스무 번 자리를 본다.
+fn work_areas(app: &AppHandle, window: &WebviewWindow) -> Vec<ScreenRect> {
+    let tracker = app.state::<GameTracker>();
+    {
+        let cached = lock(&tracker.areas);
+        if cached.0.is_some_and(|at| at.elapsed() < MONITOR_RESCAN) {
+            return cached.1.clone();
+        }
+    }
+    // 읽는 동안에는 잠그지 않는다(창 스레드에 묻고 기다린다).
+    let areas: Vec<ScreenRect> = window
+        .available_monitors()
+        .unwrap_or_default()
+        .iter()
+        .map(|monitor| {
+            let area = monitor.work_area();
+            ScreenRect {
+                x: area.position.x,
+                y: area.position.y,
+                width: area.size.width,
+                height: area.size.height,
+            }
+        })
+        .collect();
+    *lock(&tracker.areas) = (Some(Instant::now()), areas.clone());
+    areas
+}
+
+/// 이 앱이 오버레이를 이 자리로 옮긴다고 적어 둔다 — 곧 올 「창이 옮겨졌다」는 알림을 사용자가 끈 것으로 보지 않게.
+fn note_programmatic_move(app: &AppHandle, position: (i32, i32)) {
+    let overlay = app.state::<Overlay>();
+    let mut widget = lock(&overlay.widget);
+    widget.programmatic.push_front(position);
+    widget.programmatic.truncate(PROGRAMMATIC_MOVES);
+}
+
+/// 오버레이 창을 옮긴다(이 앱이 옮긴 것으로 적어 두고). 옮기는 것은 오버레이 창뿐이다.
+fn move_overlay(app: &AppHandle, window: &WebviewWindow, position: (i32, i32)) {
+    note_programmatic_move(app, position);
+    if let Err(e) = window.set_position(PhysicalPosition::new(position.0, position.1)) {
+        eprintln!("오버레이를 옮기지 못했다: {e}");
+    }
+}
+
+/// 사용자가 오버레이를 끄는 중인가(마지막으로 옮겨진 지 얼마 안 됐다).
+fn overlay_being_dragged(app: &AppHandle) -> bool {
+    lock(&app.state::<Overlay>().widget).being_dragged()
+}
+
+/// 붙이기가 켜져 있을 때 오버레이가 있어야 할 자리: 게임 화면 기준의 기억해 둔 자리(없으면 오른쪽 위 안쪽)를
+/// 화면 안으로 되돌린 것. 붙일 수 없으면(`follow_client`의 가장자리 규칙 — 꺼짐·게임 없음·최소화) `None`.
+fn anchored_target(
+    app: &AppHandle,
+    window: &WebviewWindow,
+    follow: bool,
+    status: &GameWindowStatus,
+) -> Option<(i32, i32)> {
+    let client = follow_client(follow, status)?;
+    let size = window.outer_size().ok()?;
+    let size = (size.width, size.height);
+    let anchor = lock(&app.state::<Overlay>().widget)
+        .anchor
+        .unwrap_or_else(|| Anchor::inside_top_right(attach_margin(window)));
+    Some(overlay_widget::clamp_into(
+        anchor.position(client, size),
+        size,
+        &work_areas(app, window),
+    ))
+}
+
+/// 오버레이 창이 옮겨졌다(창 이벤트). 이 앱이 옮긴 것이 아니면 사용자가 끈 것이다 — 그 자리를 기억한다:
+/// 붙이기가 켜져 있고 게임 화면을 알면 게임 창 기준의 자리로, 아니면 화면 위의 자리로. 디스크에는 끌기가 끝난 뒤에 쓴다.
+fn overlay_moved(app: &AppHandle, x: i32, y: i32) {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        return;
+    };
+    let overlay = app.state::<Overlay>();
+    if lock(&overlay.widget).programmatic.contains(&(x, y)) {
+        return;
+    }
+    let Ok(size) = window.outer_size() else {
+        return;
+    };
+    let rect = ScreenRect {
+        x,
+        y,
+        width: size.width,
+        height: size.height,
+    };
+    // 화면 밖으로 치워진 자리(최소화)나 크기 없는 창은 자리가 아니다.
+    if rect.is_empty() || game_window::is_parked(rect) {
+        return;
+    }
+    let tracker = app.state::<GameTracker>();
+    let client = tracker
+        .follow
+        .load(Ordering::Acquire)
+        .then(|| *lock(&tracker.client))
+        .flatten();
+    // 어느 모서리에 붙일지는 위젯이 있는 모니터 안의 자리로 정한다.
+    let area = window.current_monitor().ok().flatten().map(|monitor| {
+        let area = monitor.work_area();
+        ScreenRect {
+            x: area.position.x,
+            y: area.position.y,
+            width: area.size.width,
+            height: area.size.height,
+        }
+    });
+    let mut widget = lock(&overlay.widget);
+    match client {
+        Some(client) => widget.anchor = Some(Anchor::of(client, rect)),
+        None => widget.spot = Some(Spot::of(area, rect)),
+    }
+    widget.moved_at = Some(Instant::now());
+    widget.dirty = true;
+}
+
+/// 끌기가 끝난 뒤의 뒷정리(게임 창 추적 스레드가 주기마다 부른다): 화면 밖에 놓았으면 안쪽으로 되돌리고,
+/// 자리를 디스크에 기억한다. 끄는 동안과 기억할 것이 없을 때는 아무것도 하지 않는다.
+fn settle_overlay_place(app: &AppHandle, attached: bool) {
+    let overlay = app.state::<Overlay>();
+    {
+        let widget = lock(&overlay.widget);
+        if !widget.dirty || widget.being_dragged() {
+            return;
+        }
+    }
+    // 붙어 있는 동안에는 붙이기가 화면 안의 자리로 옮겨 준다(`anchored_target`). 그렇지 않으면 여기서 되돌린다.
+    if !attached {
+        if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+            if let Some(rect) = overlay_rect(&window) {
+                let size = (rect.width, rect.height);
+                let inside =
+                    overlay_widget::clamp_into((rect.x, rect.y), size, &work_areas(app, &window));
+                if inside != (rect.x, rect.y) {
+                    move_overlay(app, &window, inside);
+                    // 되돌린 자리를 기억한다(붙어 있던 모서리는 그대로).
+                    let mut widget = lock(&overlay.widget);
+                    let corner = widget.spot.map(|spot| spot.corner).unwrap_or_default();
+                    let (x, y) = overlay_widget::corner_point(
+                        ScreenRect {
+                            x: inside.0,
+                            y: inside.1,
+                            width: size.0,
+                            height: size.1,
+                        },
+                        corner,
+                    );
+                    widget.spot = Some(Spot { corner, x, y });
+                }
+            }
+        }
+    }
+    lock(&overlay.widget).dirty = false;
+    save_widget(app);
+}
+
+/// 위젯의 설정·핀·자리를 디스크(계정 폴더)에 기억한다. 못 쓰면 그 사실을 위젯 상태에 남긴다(화면에 보인다).
+fn save_widget(app: &AppHandle) {
+    let overlay = app.state::<Overlay>();
+    let stored = lock(&overlay.widget).stored();
+    let outcome = shared_dir().and_then(|dir| {
+        overlay_store::save(&dir, &stored).map_err(|e| e.to_string())
+    });
+    let problem = outcome.err();
+    let changed = {
+        let mut widget = lock(&overlay.widget);
+        let changed = widget.problem != problem;
+        widget.problem = problem;
+        changed
+    };
+    if changed {
+        emit_widget(app);
+    }
+}
+
+/// 위젯의 지금 상태.
+fn widget_snapshot(app: &AppHandle) -> WidgetSnapshot {
+    let overlay = app.state::<Overlay>();
+    let widget = lock(&overlay.widget);
+    widget.snapshot()
+}
+
+/// 위젯 상태를 모든 창에 알린다(오버레이 창이 모양을 바꾸고, 앱 창의 설정 화면이 따라 그린다).
+fn emit_widget(app: &AppHandle) {
+    let snapshot = widget_snapshot(app);
+    if let Err(e) = app.emit(OVERLAY_WIDGET_EVENT, snapshot) {
+        eprintln!("오버레이 위젯 상태를 화면에 알리지 못했다: {e}");
+    }
 }
 
 /// 붙이기의 한 주기: 오버레이가 있어야 할 자리를 구해, 규칙(`follow_step`)이 옮기라고 하면 옮긴다.
@@ -705,12 +1012,16 @@ fn follow_game(
     let window = follow
         .then(|| app.get_webview_window(MAIN_WINDOW))
         .flatten();
+    // 사용자가 오버레이를 끄는 동안에는 당기지 않는다 — 끌기가 끝나면 그 자리가 새 기준이다.
+    if follow && overlay_being_dragged(app) {
+        return applied;
+    }
     let target = window
         .as_ref()
-        .and_then(overlay_metrics)
-        .and_then(|(width, margin)| follow_target(follow, status, width, margin));
+        .and_then(|window| anchored_target(app, window, follow, status));
     match (follow_step(target, applied), window) {
         (FollowStep::MoveTo(x, y), Some(window)) => {
+            note_programmatic_move(app, (x, y));
             match window.set_position(PhysicalPosition::new(x, y)) {
                 Ok(()) => Some((x, y)),
                 Err(e) => {
@@ -806,7 +1117,12 @@ fn track_game(app: AppHandle) {
         }
         game_was_found = game_found;
 
+        // 붙이기의 기준이 되는 게임 화면을 적어 둔다(오버레이를 끌어 둔 자리를 게임 창 기준으로 기억할 때 쓴다).
+        let client = follow_client(follow, &status);
+        *lock(&tracker.client) = client;
         applied = follow_game(&app, follow, &status, applied);
+        // 사용자가 오버레이를 끌어 뒀으면: 화면 밖이면 안쪽으로 되돌리고 자리를 기억한다.
+        settle_overlay_place(&app, client.is_some());
         // 붙이기로 옮긴 뒤에 본다 — 붙이기를 켜지 않았어도 본다.
         keep_overlay_on_top(&app, &mut on_top, &mut overlay_window, overlay_visible, &status);
 
@@ -888,10 +1204,70 @@ fn wake_screen_tracker(app: &AppHandle) {
     }
 }
 
+/// 자동 표시의 한 주기(화면 추적 스레드가 읽을 때마다 부른다): 방금 본 것에 따라 위젯을 접거나 쉬게 하고(창을 숨긴다),
+/// 이상 개체 화면으로 돌아왔으면 되돌린다. 언제 무엇을 하는지는 `overlay_widget::AutoShow`의 규칙이 정한다.
+/// 사용자가 숨긴 오버레이는 건드리지 않는다. 보일 때는 활성화하지 않는다 — 게임의 키보드 포커스는 그대로다.
+fn auto_show(app: &AppHandle, seen: overlay_widget::Seen, since: Instant) {
+    let overlay = app.state::<Overlay>();
+    if !lock(&overlay.state).visible {
+        return;
+    }
+    let action = {
+        let mut widget = lock(&overlay.widget);
+        let input = AutoInput {
+            seen,
+            now_ms: u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX),
+            pinned: widget.pinned,
+            shape: widget.shape,
+            leave: widget.prefs.leave,
+            after_ms: widget.prefs.leave_after_ms(),
+        };
+        let action = widget.auto.step(input);
+        match action {
+            AutoAction::Collapse => widget.shape = Shape::Collapsed,
+            AutoAction::Restore(shape) => widget.shape = shape,
+            AutoAction::Keep | AutoAction::Rest | AutoAction::Wake => {}
+        }
+        action
+    };
+    let window = app.get_webview_window(MAIN_WINDOW);
+    let applied = match (action, window) {
+        (AutoAction::Keep, _) => return,
+        (AutoAction::Rest, Some(window)) => hide_overlay(&window),
+        (AutoAction::Wake, Some(window)) => show_overlay_without_activating(&window),
+        _ => Ok(()),
+    };
+    if let Err(e) = applied {
+        eprintln!("자동 표시를 창에 반영하지 못했다: {e}");
+    }
+    emit_widget(app);
+    // 다시 보인 창이 게임 아래에 있으면 곧바로 올린다.
+    wake_game_tracker(app);
+}
+
+/// 자동 추적이 꺼졌다: 자동 표시가 쉬게 해 둔 창이 있으면 다시 보인다(이제 다시 띄워 줄 것이 없다).
+fn release_auto_show(app: &AppHandle) {
+    let overlay = app.state::<Overlay>();
+    if !lock(&overlay.widget).auto.release() {
+        return;
+    }
+    if lock(&overlay.state).visible {
+        if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+            if let Err(e) = show_overlay_without_activating(&window) {
+                eprintln!("쉬던 오버레이를 다시 보이지 못했다: {e}");
+            }
+        }
+    }
+    emit_widget(app);
+    wake_game_tracker(app);
+}
+
 /// 켜 둔 동안 주기마다 게임 화면을 읽어 인식하고, 결과가 바뀔 때만 화면에 알린다. 꺼져 있으면 깨울 때까지 잔다.
 /// 어떤 실패도 상태로만 남기고 다음 주기에 다시 본다 — 이 스레드는 끝나지 않는다.
 fn track_screen(app: AppHandle) {
     let tracker = app.state::<ScreenTracker>();
+    // 자동 표시가 시간을 재는 기준(이상 개체 화면을 떠난 뒤 얼마나 지났는가).
+    let since = Instant::now();
     loop {
         let settings = *lock(&tracker.settings);
         if !settings.enabled {
@@ -905,14 +1281,17 @@ fn track_screen(app: AppHandle) {
                 message: "게임 화면을 읽다가 예기치 못한 오류가 났다".to_string(),
             });
         let (utc, _local) = capture::now_stamps();
-        let changed = {
+        let (changed, seen) = {
             let mut log = lock(&tracker.log);
-            log.observe(reading, &utc.iso_utc())
-                .then(|| log.status().clone())
+            let changed = log.observe(reading, &utc.iso_utc())
+                .then(|| log.status().clone());
+            (changed, overlay_widget::seen(log.status()))
         };
         if let Some(status) = changed {
             emit_screen_track(&app, status);
         }
+        // 자동 표시: 이상 개체 화면을 떠났으면 잠시 뒤 접거나 쉬고, 돌아왔으면 되돌린다(모르는 동안에는 그대로).
+        auto_show(&app, seen, since);
         thread::park_timeout(Duration::from_millis(settings.interval_ms));
     }
 }
@@ -944,6 +1323,10 @@ fn set_screen_tracking(app: AppHandle, enabled: bool, interval_ms: Option<u64>) 
     };
     if changed {
         emit_screen_track(&app, status.clone());
+    }
+    if !enabled {
+        // 추적을 끄면 자동 표시도 쉰다 — 쉬게 해 둔 오버레이가 숨은 채로 남지 않게 다시 보인다.
+        release_auto_show(&app);
     }
     wake_screen_tracker(&app);
     status
@@ -1137,22 +1520,229 @@ fn overlay_status(overlay: State<'_, Overlay>) -> OverlaySnapshot {
     overlay.snapshot()
 }
 
+// ── 오버레이 위젯 ─────────────────────────────────────────────────────────────
+//
+// 오버레이 창이 부르는 것은 읽기(`overlay_widget`·`compute_activity`)와 자기 창의 조작(모양·핀·창 크기 맞춤·숨기기)뿐이다.
+// 설정을 바꾸고 자리를 초기화하고 계산 진행을 알리는 것은 데스크톱 앱 창의 일이다(권한이 그렇게 나뉘어 있다).
+
+/// 위젯의 지금 상태: `{shape, pinned, resting, prefs, problem}`.
+#[tauri::command]
+fn overlay_widget(overlay: State<'_, Overlay>) -> WidgetSnapshot {
+    lock(&overlay.widget).snapshot()
+}
+
+/// 위젯의 모양을 바꾼다. `to`가 없으면 다음 모양으로(접힘 → 한 줄 카드 → 펼침 → 접힘).
+/// 사용자가 한 일이다 — 자동 표시가 접어 둔 것이었다면 되돌릴 것을 잊는다.
+fn change_shape(app: &AppHandle, to: Option<Shape>) -> WidgetSnapshot {
+    let overlay = app.state::<Overlay>();
+    let snapshot = {
+        let mut widget = lock(&overlay.widget);
+        widget.shape = to.unwrap_or_else(|| widget.shape.next());
+        // 쉬는 동안(창이 숨겨져 있다)에는 쉬는 것을 그대로 둔다 — 이상 개체 화면으로 돌아오면 새 모양으로 뜬다.
+        if !widget.auto.is_resting() {
+            widget.auto.touched();
+        }
+        widget.snapshot()
+    };
+    emit_widget(app);
+    snapshot
+}
+
+/// 위젯의 모양을 정한다(`collapsed`·`card`·`expanded`, 또는 `next` — 다음 모양). 모르는 낱말은 한국어로 거부한다.
+/// 창 크기는 화면이 새 모양을 그린 뒤 `overlay_fit`으로 맞춘다.
+#[tauri::command]
+fn overlay_shape(app: AppHandle, shape: String) -> Result<WidgetSnapshot, String> {
+    let to = match shape.as_str() {
+        "next" => None,
+        word => Some(Shape::parse(word).ok_or("모르는 오버레이 모양이다")?),
+    };
+    Ok(change_shape(&app, to))
+}
+
+/// 핀으로 고정하거나 푼다. 고정해 두면 이상 개체 화면을 떠나도 위젯이 접히거나 쉬지 않는다. 기억해 둔다.
+#[tauri::command]
+fn overlay_pin(app: AppHandle, pinned: bool) -> WidgetSnapshot {
+    lock(&app.state::<Overlay>().widget).pinned = pinned;
+    save_widget(&app);
+    emit_widget(&app);
+    widget_snapshot(&app)
+}
+
+/// 오버레이 창의 크기를 위젯에 맞춘다. `width`·`height`는 화면이 잰 위젯의 크기(논리 픽셀)다.
+/// 창이 위젯보다 크면 빈 투명 영역이 게임 클릭을 가로막는다 — 그래서 모양이 바뀔 때마다 창을 줄이고 늘린다.
+/// 붙어 있는 모서리는 제자리에 두고(오른쪽 위에 둔 위젯은 왼쪽·아래로 자란다), 화면 밖으로 나가면 안쪽으로 되돌린다.
+/// 화면이 정하는 것은 크기뿐이다(범위 안으로 맞춘다) — 자리는 정하지 못한다. 바꾸는 것은 오버레이 자기 창뿐이다.
+#[tauri::command]
+fn overlay_fit(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+    let window = app
+        .get_webview_window(MAIN_WINDOW)
+        .ok_or("오버레이 창을 찾을 수 없다")?;
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let Some(size) = overlay_widget::fit_size(width, height, scale) else {
+        return Ok(());
+    };
+    let old = overlay_rect(&window).ok_or("오버레이 창의 크기를 읽지 못했다")?;
+    if (old.width, old.height) == size {
+        return Ok(());
+    }
+    let position = fitted_position(&app, &window, old, size);
+    let resize = || {
+        window
+            .set_size(PhysicalSize::new(size.0, size.1))
+            .map_err(|e| e.to_string())
+    };
+    // 커질 때는 먼저 옮기고 줄어들 때는 먼저 줄인다 — 잠깐이라도 창이 있던 자리 밖을 덮지 않게.
+    let growing = size.0 > old.width || size.1 > old.height;
+    if !growing {
+        resize()?;
+    }
+    if position != (old.x, old.y) {
+        move_overlay(&app, &window, position);
+    }
+    if growing {
+        resize()?;
+    }
+    wake_game_tracker(&app);
+    Ok(())
+}
+
+/// 창 크기가 `size`로 바뀔 때의 왼쪽 위 좌표: 붙어 있는 모서리를 제자리에 두고, 화면 밖이면 안쪽으로 되돌린다.
+fn fitted_position(
+    app: &AppHandle,
+    window: &WebviewWindow,
+    old: ScreenRect,
+    size: (u32, u32),
+) -> (i32, i32) {
+    let tracker = app.state::<GameTracker>();
+    let client = tracker
+        .follow
+        .load(Ordering::Acquire)
+        .then(|| *lock(&tracker.client))
+        .flatten();
+    let (spot, anchor) = {
+        let overlay = app.state::<Overlay>();
+        let widget = lock(&overlay.widget);
+        (widget.spot, widget.anchor)
+    };
+    let raw = match (client, spot) {
+        // 붙어 있다: 게임 화면 기준의 자리.
+        (Some(client), _) => anchor
+            .unwrap_or_else(|| Anchor::inside_top_right(attach_margin(window)))
+            .position(client, size),
+        // 끌어 둔 자리가 있다: 그 모서리 점에 맞춘다.
+        (None, Some(spot)) => spot.position(size),
+        // 기본 자리(오른쪽 위): 지금 창의 오른쪽 위 모서리를 지킨다.
+        (None, None) => {
+            let corner = overlay_widget::Corner::default();
+            overlay_widget::top_left_at(overlay_widget::corner_point(old, corner), corner, size)
+        }
+    };
+    overlay_widget::clamp_into(raw, size, &work_areas(app, window))
+}
+
+/// 오버레이를 숨긴다(위젯의 숨기기 단추). 앱은 끝나지 않는다 — 앱 창의 설정·홈이나 단축키(Alt+Shift+O)로 다시 띄운다.
+#[tauri::command]
+fn overlay_hide(app: AppHandle) -> OverlaySnapshot {
+    handle_action(&app, OverlayAction::Hide);
+    app.state::<Overlay>().snapshot()
+}
+
+/// 오버레이 설정을 바꾼다(앱 창의 설정 화면). `prefs`에는 바꿀 칸만 담는다: `scale_percent`·`opacity_percent`·
+/// `leave`(`stay`·`collapse`·`hide`)·`leave_after_sec`·`default_shape`·`click_through`. 수는 범위 안으로 맞추고,
+/// 모르는 낱말은 한국어로 거부한다(그때는 아무것도 바뀌지 않는다). 기억해 두고 모든 창에 알린다.
+#[tauri::command]
+fn set_overlay_prefs(app: AppHandle, prefs: Value) -> Result<WidgetSnapshot, String> {
+    let overlay = app.state::<Overlay>();
+    let (before, next) = {
+        let widget = lock(&overlay.widget);
+        (widget.prefs, widget.prefs.merged(&prefs)?)
+    };
+    if next.click_through != before.click_through {
+        // 클릭 통과는 창이 보일 때만 바꾼다(전환 규칙 — 숨긴 창의 상태가 몰래 바뀌지 않게).
+        let shown = lock(&overlay.state).visible && !lock(&overlay.widget).auto.is_resting();
+        if !shown {
+            return Err("오버레이가 숨겨져 있어 클릭 통과를 바꾸지 못했다. 오버레이를 띄운 뒤에 바꾼다".to_string());
+        }
+        // 단축키(Alt+Shift+C)와 같은 길이다. 바뀐 값은 그 길에서 설정에 적히고 기억된다.
+        if lock(&overlay.state).click_through != next.click_through {
+            handle_action(&app, OverlayAction::ToggleClickThrough);
+        }
+        if lock(&overlay.state).click_through != next.click_through {
+            return Err("클릭 통과를 바꾸지 못했다".to_string());
+        }
+    }
+    {
+        let mut widget = lock(&overlay.widget);
+        // 떠났을 때 하는 일을 바꿨으면 자동 표시가 다시 판단하게 한다(쉬게 해 둔 창은 아래에서 깨운다).
+        widget.prefs = next;
+    }
+    if next.leave != before.leave {
+        release_auto_show(&app);
+    }
+    save_widget(&app);
+    emit_widget(&app);
+    Ok(widget_snapshot(&app))
+}
+
+/// 끌어 둔 자리를 잊고 기본 자리로 되돌린다(앱 창의 설정 화면): 붙이기가 켜져 있으면 게임 화면의 오른쪽 위 안쪽,
+/// 아니면 주 모니터의 오른쪽 위.
+#[tauri::command]
+fn reset_overlay_position(app: AppHandle) -> Result<WidgetSnapshot, String> {
+    let overlay = app.state::<Overlay>();
+    {
+        let mut widget = lock(&overlay.widget);
+        widget.spot = None;
+        widget.anchor = None;
+        widget.moved_at = None;
+        widget.dirty = false;
+    }
+    save_widget(&app);
+    let tracker = app.state::<GameTracker>();
+    let attached = tracker.follow.load(Ordering::Acquire) && lock(&tracker.client).is_some();
+    if attached {
+        // 붙이기가 다음 주기에 기본 자리로 옮긴다.
+        wake_game_tracker(&app);
+    } else if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+        place_top_right(&app, &window).map_err(|e| format!("오버레이를 옮기지 못했다: {e}"))?;
+    }
+    emit_widget(&app);
+    Ok(widget_snapshot(&app))
+}
+
+/// 데스크톱 앱 창이 요격전 추천 계산의 진행을 알린다(시작·진행·끝). 오버레이 창이 작게 보여 준다.
+/// 계산을 시작하거나 멈추는 명령이 아니다 — 적어 두고 모든 창에 알릴 뿐이다.
+#[tauri::command]
+fn announce_activity(app: AppHandle, activity: Activity) -> Activity {
+    let activity = activity.sanitized();
+    let changed = {
+        let state = app.state::<ComputeActivity>();
+        let mut current = lock(&state.0);
+        let changed = *current != activity;
+        *current = activity.clone();
+        changed
+    };
+    if changed {
+        if let Err(e) = app.emit(COMPUTE_ACTIVITY_EVENT, activity.clone()) {
+            eprintln!("계산 진행을 화면에 알리지 못했다: {e}");
+        }
+    }
+    activity
+}
+
+/// 데스크톱 앱 창이 마지막으로 알린 계산 진행: `{running, label, done, total, elapsed_ms}`.
+#[tauri::command]
+fn compute_activity(activity: State<'_, ComputeActivity>) -> Activity {
+    lock(&activity.0).clone()
+}
+
 /// 실행 인자로 받은 결과 파일 경로(`nikke-companion.exe <결과.json>`). 없으면 null.
 #[tauri::command]
 fn startup_report_path() -> Option<String> {
     report::first_path_arg(std::env::args().skip(1))
 }
 
-/// 앱을 끝낸다. 오버레이 창에는 테두리도 작업 표시줄 단추도 없어서 그 창의 끝내기 단추가 이것을 부른다
-/// (앱 창은 창의 닫기 단추로 끝낸다 — 아래 `run`의 창 이벤트).
-/// 돌던 엔진 계산·계정 수집은 앱이 끝나는 길(`run`의 종료 처리 — `stop_running_work`)에서 멈춘다.
-#[tauri::command]
-fn quit_app(app: AppHandle) {
-    app.exit(0);
-}
-
 /// 앱이 끝날 때: 돌던 엔진 계산과 계정 수집을 멈추고, 그 프로세스들(자식까지)이 끝나 자리가 빌 때까지 잠깐 기다린다.
-/// 끝내기 단추·오버레이 창 닫기 어느 길로 끝나든 여기를 지난다. 시간 안에 끝나지 않아도 앱은 끝난다 — 그때와
+/// 앱을 끝내는 길은 앱 창을 닫는 것 하나다(P-028: 오버레이 위젯에는 끝내기가 없다 — 숨기기만 있다) — 그 길이 여기를 지난다. 시간 안에 끝나지 않아도 앱은 끝난다 — 그때와
 /// 앱이 여기를 지나지 못하고 죽었을 때(프로세스 종료·충돌)는 프로세스 묶음(`engine_win32.rs`)이 앱과 함께 닫히며 끝낸다.
 fn stop_running_work(app: &AppHandle) {
     let engine_run = app.state::<EngineRun>();
@@ -1173,6 +1763,12 @@ fn apply_transition(window: &WebviewWindow, t: &Transition) -> Result<(), String
         window
             .set_ignore_cursor_events(ignore)
             .map_err(|e| e.to_string())?;
+        // 이 창은 보이고 숨기는 것을 Win32로 직접 한다 — 창 라이브러리는 이 창이 숨겨져 있다고 알고 있어, 스타일을
+        // 다시 입히면서 「보임」을 빼 버릴 수 있다(확인하지 못한 가정 — app/README.md §오버레이 위젯 §한계).
+        // 클릭 통과는 보이는 동안에만 바뀌므로(전환 규칙) 활성화 없이 한 번 더 보인다. 이미 보이면 아무 일도 없다.
+        if t.next.visible && t.set_visible.is_none() {
+            show_overlay_without_activating(window)?;
+        }
     }
     match t.visibility_change() {
         Some(VisibilityChange::ShowWithoutActivating) => show_overlay_without_activating(window),
@@ -1212,7 +1808,35 @@ fn handle_action(app: &AppHandle, action: OverlayAction) {
     let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
         return;
     };
-    {
+    // 자동 표시가 쉬게 해 둔 동안(창은 숨겨져 있지만 논리 상태는 「보임」이다)의 처리.
+    let was_resting = {
+        let mut widget = lock(&overlay.widget);
+        let resting = widget.auto.is_resting();
+        // 쉬는 창을 사용자가 보이거나 숨겼다 — 이제 사용자가 정한 것이다(자동 표시가 다시 깨우지 않는다).
+        if resting && !matches!(action, OverlayAction::ToggleClickThrough) {
+            widget.auto.touched();
+        }
+        resting
+    };
+    if was_resting {
+        match action {
+            // 쉬던 창을 다시 보인다 — 활성화 없이. 논리 상태는 줄곧 「보임」이었다.
+            OverlayAction::ToggleVisibility | OverlayAction::Show => {
+                if let Err(e) = show_overlay_without_activating(&window) {
+                    eprintln!("쉬던 오버레이를 다시 보이지 못했다: {e}");
+                }
+                emit_widget(app);
+                wake_screen_tracker(app);
+                wake_game_tracker(app);
+                return;
+            }
+            // 클릭 통과는 창이 보일 때만 바꾼다.
+            OverlayAction::ToggleClickThrough => return,
+            // 숨기기: 아래에서 논리 상태도 「숨김」으로 간다.
+            OverlayAction::Hide => emit_widget(app),
+        }
+    }
+    let click_through = {
         let mut state = lock(&overlay.state);
         let transition = state.apply(action);
         if transition.is_noop() {
@@ -1224,6 +1848,13 @@ fn handle_action(app: &AppHandle, action: OverlayAction) {
             return;
         }
         *state = transition.next;
+        transition.set_click_through
+    };
+    if let Some(on) = click_through {
+        // 클릭 통과는 설정이기도 하다 — 다음에 켤 때도 그대로이게 기억해 둔다.
+        lock(&overlay.widget).prefs.click_through = on;
+        save_widget(app);
+        emit_widget(app);
     }
     if let Err(e) = app.emit(OVERLAY_STATE_EVENT, overlay.snapshot()) {
         eprintln!("오버레이 상태를 화면에 알리지 못했다: {e}");
@@ -1277,6 +1908,9 @@ fn register_shortcuts(app: &AppHandle) {
                     match action {
                         ShortcutAction::Overlay(action) => handle_action(app, action),
                         ShortcutAction::CaptureGame => capture_from_shortcut(app),
+                        ShortcutAction::CycleShape => {
+                            change_shape(app, None);
+                        }
                     }
                 }
             });
@@ -1291,8 +1925,21 @@ fn register_shortcuts(app: &AppHandle) {
     }
 }
 
+/// 시작할 때 오버레이를 둘 자리: 끌어 둔 자리를 기억하고 있으면 거기(화면 밖이면 안쪽으로 되돌려), 아니면 주 모니터의 오른쪽 위.
+/// 붙이기가 켜져 있으면 그 뒤에 게임 창 추적이 게임 창 기준의 자리로 옮긴다.
+fn place_at_start(app: &AppHandle, window: &WebviewWindow) -> tauri::Result<()> {
+    let Some(spot) = lock(&app.state::<Overlay>().widget).spot else {
+        return place_top_right(app, window);
+    };
+    let size = window.outer_size()?;
+    let size = (size.width, size.height);
+    let position = overlay_widget::clamp_into(spot.position(size), size, &work_areas(app, window));
+    move_overlay(app, window, position);
+    Ok(())
+}
+
 /// 창을 주 모니터 작업 영역의 오른쪽 위에 둔다. 모니터를 알 수 없으면 그대로 둔다.
-fn place_top_right(window: &WebviewWindow) -> tauri::Result<()> {
+fn place_top_right(app: &AppHandle, window: &WebviewWindow) -> tauri::Result<()> {
     let monitor = match window.primary_monitor()? {
         Some(m) => Some(m),
         None => window.current_monitor()?,
@@ -1309,6 +1956,7 @@ fn place_top_right(window: &WebviewWindow) -> tauri::Result<()> {
         window.outer_size()?.width,
         margin,
     );
+    note_programmatic_move(app, (x, y));
     window.set_position(PhysicalPosition::new(x, y))
 }
 
@@ -1330,11 +1978,11 @@ pub fn run() {
         .manage(ScreenTracker::default())
         .manage(FetchRun::default())
         .manage(GameImages::default())
+        .manage(ComputeActivity::default())
         .invoke_handler(tauri::generate_handler![
             load_report,
             overlay_status,
             startup_report_path,
-            quit_app,
             engine_catalog,
             engine_version,
             engine_run_batch,
@@ -1370,7 +2018,16 @@ pub fn run() {
             save_intercept_result,
             load_intercept_result,
             show_app_window,
-            set_overlay_visible
+            set_overlay_visible,
+            overlay_widget,
+            overlay_shape,
+            overlay_pin,
+            overlay_fit,
+            overlay_hide,
+            set_overlay_prefs,
+            reset_overlay_position,
+            announce_activity,
+            compute_activity
         ])
         .setup(|app| {
             let window = app
@@ -1380,9 +2037,30 @@ pub fn run() {
             if app.get_webview_window(APP_WINDOW).is_none() {
                 return Err("앱 창(app)이 설정에 없다".into());
             }
+            // 위젯의 설정·핀·끌어 둔 자리를 계정 폴더에서 읽는다(읽지 못하면 기본값 — 그 사실은 위젯 상태에 남는다).
+            // 클릭 통과를 켜 둔 채 끝냈으면 창을 보이기 전에 다시 켠다.
+            {
+                let (stored, problem) = shared_dir()
+                    .map(|dir| overlay_store::load(&dir))
+                    .unwrap_or_default();
+                let overlay = app.state::<Overlay>();
+                let click_through = stored.prefs.click_through
+                    && window.set_ignore_cursor_events(true).is_ok();
+                lock(&overlay.state).click_through = click_through;
+                let mut widget = lock(&overlay.widget);
+                widget.prefs = Prefs {
+                    click_through,
+                    ..stored.prefs
+                };
+                widget.shape = stored.prefs.default_shape;
+                widget.pinned = stored.pinned;
+                widget.spot = stored.spot;
+                widget.anchor = stored.anchor;
+                widget.problem = problem;
+            }
             // 오버레이는 설정에서 숨긴 채 만들고, 자리를 잡은 뒤에 보인다(엉뚱한 자리에서 번쩍이지 않게).
-            if let Err(e) = place_top_right(&window) {
-                eprintln!("창을 화면 오른쪽 위로 옮기지 못했다: {e}");
+            if let Err(e) = place_at_start(app.handle(), &window) {
+                eprintln!("오버레이를 제자리로 옮기지 못했다: {e}");
             }
             // 오버레이를 언제 띄울지는 계정 폴더의 설정에 있다(읽지 못하면 기본값 — 앱과 함께).
             // 보일 때는 활성화하지 않는다 — 방금 뜬 앱 창이 포커스를 갖고, 그 뒤의 보임/숨김도 같은 길이다(apply_transition).
@@ -1414,6 +2092,12 @@ pub fn run() {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     handle_action(window.app_handle(), OverlayAction::Hide);
+                }
+            }
+            // 오버레이 창이 옮겨졌다: 사용자가 끈 것이면 그 자리를 기억한다(이 앱이 옮긴 것은 가려낸다).
+            if window.label() == MAIN_WINDOW {
+                if let tauri::WindowEvent::Moved(position) = event {
+                    overlay_moved(window.app_handle(), position.x, position.y);
                 }
             }
         })

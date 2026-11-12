@@ -291,6 +291,53 @@ export interface OverlaySnapshot {
   shortcut_problems: string[];
 }
 
+// ── 오버레이 위젯(P-028) — Rust 쪽 src-tauri/src/overlay_widget.rs와 같아야 한다 ──────────────
+
+/** 위젯의 모양: 접힘(알약) · 한 줄 카드(기본) · 펼침. */
+export type OverlayShape = 'collapsed' | 'card' | 'expanded';
+
+/** 이상 개체 화면을 떠났을 때 위젯이 하는 일: 그대로 두기 · 접기 · 쉬기(창을 숨긴다 — 돌아오면 다시 뜬다). */
+export type OverlayLeave = 'stay' | 'collapse' | 'hide';
+
+/** 오버레이 설정(Rust의 Prefs). 앱 창의 설정 화면에서 바꾼다. */
+export interface OverlayPrefs {
+  /** 크기 배율(%). 80~150. */
+  scale_percent: number;
+  /** 불투명도(%). 40~100 — 기본은 불투명(100)이다. */
+  opacity_percent: number;
+  leave: OverlayLeave;
+  /** 떠난 뒤 접거나 쉬기까지 기다리는 시간(초). */
+  leave_after_sec: number;
+  /** 앱을 켰을 때의 모양. */
+  default_shape: OverlayShape;
+  /** 클릭 통과를 켜 뒀는가(다음에 켤 때도 그대로다). */
+  click_through: boolean;
+}
+
+/** 위젯의 지금 상태(Rust의 WidgetSnapshot). */
+export interface WidgetSnapshot {
+  shape: OverlayShape;
+  /** 핀으로 고정했는가(자동 표시가 접거나 쉬게 하지 않는다). */
+  pinned: boolean;
+  /** 자동 표시가 쉬게 했는가(창이 숨겨져 있다 — 이상 개체 화면으로 돌아오면 다시 뜬다). */
+  resting: boolean;
+  prefs: OverlayPrefs;
+  /** 설정·자리를 읽거나 저장하다 난 문제. 없으면 null. */
+  problem: string | null;
+}
+
+/** 데스크톱 앱 창이 알리는 요격전 추천 계산의 진행(Rust의 Activity). 오버레이가 작게 보여 준다. */
+export interface ComputeActivity {
+  running: boolean;
+  /** 무엇을 하는 중인지. */
+  label: string;
+  /** 끝난 건수와 전체 건수. 전체를 아직 모르면 0. */
+  done: number;
+  total: number;
+  /** 시작한 뒤 흐른 시간(밀리초). */
+  elapsed_ms: number;
+}
+
 // ── 요격전 추천 결과 — 정본은 docs/data-model.md §요격전 추천 결과와 src/core/intercept.mjs ──────────────
 
 /** 보스의 속성과 약점(루트 src/core/intercept.mjs의 resolveElement). 한쪽만 확인됐으면 다른 쪽은 규칙으로 유도한 값이다. */

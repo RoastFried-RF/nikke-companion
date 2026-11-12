@@ -390,6 +390,13 @@ pub fn follow_target(
     overlay_width: u32,
     margin: u32,
 ) -> Option<(i32, i32)> {
+    follow_client(follow, status).map(|client| attach_position(client, overlay_width, margin))
+}
+
+/// 붙이기가 켜져 있을 때 오버레이가 기준으로 삼을 게임 화면(클라이언트 영역). 붙일 수 없으면(꺼짐·게임 없음·최소화·
+/// 영역 없음·화면 밖으로 치워진 자리) `None`. `follow_target`과 같은 가장자리 규칙이다 — 오버레이를 게임 창 기준의
+/// 기억해 둔 자리에 둘 때(P-028 — `overlay_widget::Anchor`)에도 이 규칙을 그대로 쓴다.
+pub fn follow_client(follow: bool, status: &GameWindowStatus) -> Option<ScreenRect> {
     if !follow {
         return None;
     }
@@ -397,7 +404,7 @@ pub fn follow_target(
     if window.minimized || window.client.is_empty() || is_parked(window.client) {
         return None;
     }
-    Some(attach_position(window.client, overlay_width, margin))
+    Some(window.client)
 }
 
 /// 붙이기의 한 주기에 할 일.
