@@ -310,3 +310,46 @@ fn output_that_is_not_json_or_misses_a_request_is_an_error() {
     assert_eq!(err, EngineError::MissingResult { index: 1 });
     assert!(err.to_string().contains("요청 1"));
 }
+
+/// P-032: 버스트 흐름 — 엔진의 JSON 결과에는 없어 텍스트 보기(`--view burst`)를 돌려 글을 받는다.
+#[test]
+fn real_engine_burst_view_returns_the_text_in_input_order_and_isolates_row_errors() {
+    let deck = ["리틀 머메이드", "크라운", "라피 : 레드 후드", "헬름", "앨리스"];
+    let requests = vec![
+        sim(&deck),
+        json!({ "squad": ["없는 니케"] }),
+        sim(&["크라운", "헬름"]),
+    ];
+    let progress = Mutex::new(Vec::new());
+    let on_progress = |done: usize, total: usize| progress.lock().unwrap().push((done, total));
+    let rows = engine::run_views(
+        &real_config(3),
+        &requests,
+        "burst",
+        Some(&on_progress),
+        &engine::StopSignal::new(),
+    )
+    .expect("보기 실행");
+    assert_eq!(rows.len(), 3);
+
+    // 엔진이 적은 글 그대로다: 머리줄과, 이름에 콜론·공백이 있는 니케의 줄(한글이 깨지지 않았다).
+    let text = rows[0]["text"].as_str().expect("글");
+    assert!(text.contains("[버스트 사이클]"), "{text}");
+    assert!(text.contains("stage:1 사용  리틀 머메이드"), "{text}");
+    assert!(text.contains("stage:3 사용  라피 : 레드 후드"), "{text}");
+    assert!(text.contains("full_burst 시작"), "{text}");
+    assert!(rows[0].get("error").is_none());
+
+    // 입력 오류는 그 건만 오류다(엔진의 말이 실린다).
+    assert_eq!(rows[1]["error"]["type"], "invalid_input", "{}", rows[1]);
+    let said = rows[1]["error"]["message"].as_str().expect("문장");
+    assert!(said.contains("없는 니케"), "{said}");
+    assert!(rows[1].get("text").is_none());
+
+    // 1단계가 없는 두 명: 그래도 엔진의 글에는 머리줄이 있다.
+    assert!(rows[2]["text"].as_str().expect("글").contains("[버스트 사이클]"));
+
+    let mut seen = progress.into_inner().unwrap();
+    seen.sort_unstable();
+    assert_eq!(seen, vec![(1, 3), (2, 3), (3, 3)]);
+}

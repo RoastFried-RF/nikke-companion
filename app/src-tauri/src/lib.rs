@@ -484,6 +484,28 @@ async fn engine_run_batch(app: AppHandle, requests: Vec<Value>) -> Result<Vec<Va
     .await
 }
 
+/// 요청마다 엔진의 텍스트 보기(`view` — 지금은 'burst'뿐이다)를 돌려 `{text}` 또는 `{error}`를 입력 순서대로 돌려준다.
+/// 엔진의 JSON 결과에 없는 버스트 흐름을 읽는 길이다(`engine::run_views`). 글은 화면 쪽 계산 모듈이 해석한다.
+/// 엔진 배치와 같은 자리를 쓴다 — 배치가 도는 동안에는 '이미 계산 중'이고, `engine_cancel`로 멈춘다.
+#[tauri::command]
+async fn engine_run_views(
+    app: AppHandle,
+    requests: Vec<Value>,
+    view: String,
+) -> Result<Vec<Value>, String> {
+    let config = engine_config(&app)?;
+    blocking(move || {
+        let run = app.state::<EngineRun>();
+        let ticket = run.0.begin().map_err(|e| e.to_string())?;
+        let progress = |done: usize, total: usize| {
+            let _ = app.emit(ENGINE_PROGRESS_EVENT, EngineProgress { done, total });
+        };
+        engine::run_views(&config, &requests, &view, Some(&progress), ticket.signal())
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 /// 도는 엔진 배치를 멈춘다. 멈출 배치가 있었으면 true — 그 배치의 `engine_run_batch`가 '중단됨' 오류로 돌아온다.
 /// 도는 배치가 없으면 아무 일도 하지 않고 false다(다음에 시작할 배치를 미리 멈추지 않는다).
 #[tauri::command]
@@ -2033,6 +2055,7 @@ pub fn run() {
             engine_catalog,
             engine_version,
             engine_run_batch,
+            engine_run_views,
             engine_cancel,
             read_json_file,
             pick_json_file,

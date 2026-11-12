@@ -77,6 +77,8 @@ pub enum EngineError {
     /// 밖에서 멈추라고 했다(`StopSignal`). 화면의 중단 단추가 이 길로 온다.
     Stopped,
     Busy,
+    /// 허용하지 않은 텍스트 보기를 청했다(`VIEW_KINDS`에 없는 이름).
+    UnknownView { view: String },
 }
 
 /// 중단으로 끝난 배치의 오류 문장이 시작하는 말. 화면이 '중단됨'으로 보인다.
@@ -119,6 +121,11 @@ impl fmt::Display for EngineError {
             Self::Cancelled => write!(f, "다른 엔진 프로세스의 오류로 계산을 멈췄다"),
             Self::Stopped => write!(f, "{STOPPED_PREFIX}: 엔진 계산을 멈췄다"),
             Self::Busy => write!(f, "이미 계산 중이다. 끝난 뒤에 다시 실행하라"),
+            Self::UnknownView { view } => write!(
+                f,
+                "돌릴 수 없는 보기다: {view} (쓸 수 있는 것: {})",
+                VIEW_KINDS.join(", ")
+            ),
         }
     }
 }
@@ -750,6 +757,210 @@ pub fn run_batch_with_stop(
         .collect()
 }
 
+// ── 텍스트 보기 ───────────────────────────────────────────────────────────────
+
+/// 돌릴 수 있는 텍스트 보기 — 엔진 `runner/sim.py`의 `--view` 종류 가운데 이 앱이 읽는 것뿐이다
+/// (Node 런타임의 `VIEW_KINDS`와 같다). 화면이 다른 이름을 넘기면 엔진을 띄우지 않는다.
+pub const VIEW_KINDS: [&str; 1] = ["burst"];
+
+/// 명령줄 인자로 넘기는 요청 JSON의 길이 상한(글자). Windows의 명령줄 한도(32,767자)보다 넉넉히 작게 잡는다.
+pub const VIEW_REQUEST_MAX_CHARS: usize = 24_000;
+
+/// 한 건의 문제를 줄 단위 오류로(`run_batch`의 줄 단위 오류와 같은 모양 — `{error: {type, message}}`).
+fn view_error(kind: &str, message: String) -> Value {
+    json!({ "error": { "type": kind, "message": message } })
+}
+
+fn read_text(pipe: &mut impl Read) -> String {
+    let mut bytes = Vec::new();
+    let _ = pipe.read_to_end(&mut bytes);
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// 요청 하나를 엔진의 텍스트 보기로 돌린다: `python -m runner.sim --request <JSON> --view <종류>`.
+/// 끝나면 `{text}`(표준 출력 그대로) 또는 `{error}`다. 프로세스를 띄우지 못했거나 멈췄거나 시간을 넘기면 `Err`.
+fn run_view_once(
+    config: &EngineConfig,
+    request: &Value,
+    view: &str,
+    stop: &StopSignal,
+) -> Result<Value, EngineError> {
+    if stop.is_stopped() {
+        return Err(EngineError::Stopped);
+    }
+    // 객체가 아닌 값은 넘기지 않는다 — `{`로 시작하지 않는 --request 값을 엔진은 파일 경로로 읽는다.
+    if !request.is_object() {
+        return Ok(view_error(
+            "invalid_input",
+            "요청은 JSON 객체여야 한다".to_string(),
+        ));
+    }
+    let request_json = request.to_string();
+    let length = request_json.chars().count();
+    if length > VIEW_REQUEST_MAX_CHARS {
+        return Ok(view_error(
+            "invalid_input",
+            format!("요청이 너무 길어 엔진에 넘기지 못했다 ({length}자 — 상한 {VIEW_REQUEST_MAX_CHARS}자)"),
+        ));
+    }
+    let mut cmd = Command::new(&config.python);
+    cmd.args(["-m", "runner.sim", "--request"])
+        .arg(&request_json)
+        .args(["--view", view])
+        .current_dir(&config.engine_dir)
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console(&mut cmd);
+    let mut child = cmd.spawn().map_err(|e| EngineError::Spawn {
+        python: config.python.clone(),
+        detail: e.to_string(),
+    })?;
+    let group = ProcessGroup::adopt(&child);
+    let mut stdout = child.stdout.take().expect("stdout 파이프");
+    let mut stderr = child.stderr.take().expect("stderr 파이프");
+    let deadline = Instant::now() + config.timeout;
+
+    let (status, out_text, err_text) = thread::scope(|scope| {
+        // 두 파이프를 따로 읽어야 한쪽이 차서 엔진이 멈추는 일이 없다.
+        let out = scope.spawn(move || read_text(&mut stdout));
+        let err = scope.spawn(move || read_text(&mut stderr));
+        let status: Result<ExitStatus, EngineError> = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break Ok(status),
+                Ok(None) => {}
+                Err(e) => {
+                    break Err(EngineError::Io {
+                        detail: e.to_string(),
+                    })
+                }
+            }
+            if stop.is_stopped() {
+                break Err(EngineError::Stopped);
+            }
+            if Instant::now() >= deadline {
+                break Err(EngineError::Timeout {
+                    seconds: config.timeout.as_secs(),
+                });
+            }
+            thread::sleep(Duration::from_millis(15));
+        };
+        if status.is_err() {
+            kill_engine(&mut child, &group);
+        }
+        (
+            status,
+            out.join().unwrap_or_default(),
+            err.join().unwrap_or_default(),
+        )
+    });
+
+    let status = status?;
+    if status.success() {
+        return Ok(json!({ "text": out_text }));
+    }
+    // 텍스트 모드의 입력 오류(코드 2)는 사유를 표준 출력에 한 줄로 찍는다. 그 밖은 평가기의 실패다.
+    let code = status.code();
+    let said = if code == Some(2) { out_text.trim() } else { "" };
+    let message = if !said.is_empty() {
+        tail_chars(said, 500)
+    } else if !err_text.trim().is_empty() {
+        tail_chars(err_text.trim(), 500)
+    } else {
+        format!(
+            "엔진 종료 코드 {}",
+            code.map_or_else(|| "없음".to_string(), |c| c.to_string())
+        )
+    };
+    Ok(view_error(
+        if code == Some(2) { "invalid_input" } else { "internal_error" },
+        message,
+    ))
+}
+
+/// 요청마다 엔진의 텍스트 보기를 한 번씩 돌린다(동시에 `config.concurrency`개까지). 반환 배열은 입력 순서와 같고
+/// 요청마다 `{text}` 또는 `{error: {type, message}}`다 — 한 건의 입력 오류가 다른 건을 막지 않는다.
+///
+/// 엔진의 JSON 결과에는 버스트 흐름이 없어, 같은 요청을 텍스트 보기로 한 번 더 돌려 그 글을 화면 쪽의 계산 모듈
+/// (`src/core/burst.mjs`)이 읽는다. 여기서는 글을 해석하지 않는다. `stop`이 켜지면 프로세스를 모두 끝내고 `Stopped`다.
+pub fn run_views(
+    config: &EngineConfig,
+    requests: &[Value],
+    view: &str,
+    on_progress: Option<&(dyn Fn(usize, usize) + Sync)>,
+    stop: &StopSignal,
+) -> Result<Vec<Value>, EngineError> {
+    if !VIEW_KINDS.contains(&view) {
+        return Err(EngineError::UnknownView {
+            view: view.chars().take(40).collect(),
+        });
+    }
+    let total = requests.len();
+    if total == 0 {
+        return Ok(Vec::new());
+    }
+    let next = AtomicUsize::new(0);
+    let done = AtomicUsize::new(0);
+    let failed = AtomicBool::new(false);
+    let slots: Vec<Mutex<Option<Value>>> = (0..total).map(|_| Mutex::new(None)).collect();
+    let workers = config.concurrency.clamp(1, MAX_WORKERS).min(total);
+    let outcomes: Vec<Result<(), EngineError>> = thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                let (next, done, failed, slots) = (&next, &done, &failed, &slots);
+                scope.spawn(move || -> Result<(), EngineError> {
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        if i >= total || failed.load(Ordering::Relaxed) {
+                            return Ok(());
+                        }
+                        match run_view_once(config, &requests[i], view, stop) {
+                            Ok(row) => {
+                                *slots[i].lock().unwrap_or_else(|e| e.into_inner()) = Some(row);
+                                let finished = done.fetch_add(1, Ordering::Relaxed) + 1;
+                                if let Some(on_progress) = on_progress {
+                                    on_progress(finished.min(total), total);
+                                }
+                            }
+                            Err(e) => {
+                                failed.store(true, Ordering::Relaxed);
+                                return Err(e);
+                            }
+                        }
+                    }
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| {
+                h.join().unwrap_or_else(|_| {
+                    Err(EngineError::Io {
+                        detail: "엔진 작업 스레드가 죽었다".to_string(),
+                    })
+                })
+            })
+            .collect()
+    });
+    if stop.is_stopped() {
+        return Err(EngineError::Stopped);
+    }
+    for outcome in outcomes {
+        outcome?;
+    }
+    slots
+        .into_iter()
+        .enumerate()
+        .map(|(index, slot)| {
+            slot.into_inner()
+                .unwrap_or_else(|e| e.into_inner())
+                .ok_or(EngineError::MissingResult { index })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1082,9 +1293,82 @@ mod tests {
             EngineError::Cancelled,
             EngineError::Stopped,
             EngineError::Busy,
+            EngineError::UnknownView { view: "hits".into() },
         ];
         for e in all {
             assert!(has_korean(&e.to_string()), "{e:?}");
         }
+    }
+
+    #[test]
+    fn only_the_burst_view_can_be_run_and_other_names_never_launch_the_engine() {
+        // 없는 python이라 띄우려 하면 Spawn 오류가 난다 — 보기 이름이 먼저 걸러져 띄우지 않는다.
+        let config = EngineConfig {
+            engine_dir: repo_root().join(ENGINE_SUBDIR),
+            python: "nikke-companion-없는-python".to_string(),
+            concurrency: 2,
+            timeout: DEFAULT_TIMEOUT,
+        };
+        let requests = [json!({ "squad": ["크라운"] })];
+        for view in ["hits", "summary", "", "burst --json", "../burst"] {
+            assert!(
+                matches!(
+                    run_views(&config, &requests, view, None, &StopSignal::new()),
+                    Err(EngineError::UnknownView { .. })
+                ),
+                "{view}"
+            );
+        }
+        assert_eq!(VIEW_KINDS, ["burst"]);
+        // 빈 목록은 엔진을 띄우지 않는다.
+        assert_eq!(run_views(&config, &[], "burst", None, &StopSignal::new()), Ok(Vec::new()));
+        // 허용된 보기는 띄우려 한다(이 설정에서는 python이 없어 실패한다).
+        assert!(matches!(
+            run_views(&config, &requests, "burst", None, &StopSignal::new()),
+            Err(EngineError::Spawn { .. })
+        ));
+    }
+
+    #[test]
+    fn a_view_request_that_is_not_an_object_or_is_too_long_is_a_row_error_without_the_engine() {
+        let config = EngineConfig {
+            engine_dir: repo_root().join(ENGINE_SUBDIR),
+            python: "nikke-companion-없는-python".to_string(),
+            concurrency: 1,
+            timeout: DEFAULT_TIMEOUT,
+        };
+        // 문자열 요청이 파일 경로로 읽히면 안 된다 — 엔진에 넘기지 않는다.
+        let long = json!({ "squad": ["가".repeat(VIEW_REQUEST_MAX_CHARS)] });
+        let rows = run_views(
+            &config,
+            &[json!("C:\\secret.json"), json!(["크라운"]), Value::Null, long],
+            "burst",
+            None,
+            &StopSignal::new(),
+        )
+        .expect("줄 단위 오류");
+        assert_eq!(rows.len(), 4);
+        for row in &rows {
+            assert_eq!(row["error"]["type"], "invalid_input", "{row}");
+            assert!(has_korean(row["error"]["message"].as_str().expect("문장")));
+            assert!(row.get("text").is_none());
+        }
+        assert!(rows[3]["error"]["message"].as_str().expect("문장").contains("너무 길어"));
+    }
+
+    #[test]
+    fn a_stopped_view_run_never_launches_the_engine() {
+        let config = EngineConfig {
+            engine_dir: repo_root().join(ENGINE_SUBDIR),
+            python: "nikke-companion-없는-python".to_string(),
+            concurrency: 1,
+            timeout: DEFAULT_TIMEOUT,
+        };
+        let stop = StopSignal::new();
+        stop.stop();
+        assert_eq!(
+            run_views(&config, &[json!({ "squad": ["크라운"] })], "burst", None, &stop),
+            Err(EngineError::Stopped)
+        );
     }
 }

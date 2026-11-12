@@ -11,6 +11,10 @@
 // 선택: runtime.runBatchWithStats(requests, opts) → Promise<{results, cache}> — 시뮬 결과 캐시로 감싼 런타임
 // (`src/core/cache.mjs`의 withCache)에만 있다. 계산 모듈은 `engineAccess().runBatchWithStats`로 부른다.
 //
+// 선택: runtime.runViews(requests, view, opts) → Promise<({text} | {error})[]> — 엔진의 텍스트 보기(`--view <종류>`)를
+// 요청마다 한 번씩 돌려 출력 글을 그대로 돌려준다(입력 순서). 엔진의 JSON 결과에 없는 것(버스트 흐름)을 읽는 길이다 —
+// 지금은 버스트 흐름(src/core/burst.mjs)만 쓴다. 보기 종류는 런타임이 허용한 것만 받는다('burst').
+//
 // 구현: Node는 `src/runtime/node.mjs`, 데스크톱 앱은 `app/src/lib/runtime.ts`(Rust 명령 호출).
 // 이 파일과 계산 모듈은 `node:` 모듈을 import하지 않는다(tests/unit/core-runtime.test.mjs가 확인한다).
 
@@ -48,6 +52,15 @@ export function engineAccess(deps = {}) {
         return runtime.runBatchWithStats(requests, options);
       }
       return { results: await this.runBatch(requests, options), cache: null };
+    },
+    /**
+     * 요청마다 엔진의 텍스트 보기를 돌려 `{text}` 또는 `{error: {type, message}}`를 입력 순서대로 받는다.
+     * 런타임이 이 길을 주지 않으면 던진다 — 없는 값을 지어내지 않는다.
+     */
+    async runViews(requests, view, options) {
+      if (typeof deps.runViews === 'function') return deps.runViews(requests, view, options);
+      if (typeof runtime?.runViews !== 'function') throw new Error('이 런타임은 엔진의 텍스트 보기를 돌리지 못한다 — 버스트 흐름을 읽을 수 없다');
+      return runtime.runViews(requests, view, options);
     },
     /** 엔진 버전. 런타임이 알려 주지 못하면 커밋은 null(버전 미확인)이다 — 값을 지어내지 않는다. */
     async version() {

@@ -2,6 +2,7 @@
 // 계산 규칙은 여기에 없다. suggestSquads·compareSquads·recommendIntercept·compareGrowth에 런타임을 넘겨 부를 뿐이다
 // (CLI의 suggest·compare·intercept·growth와 같은 길).
 
+import { burstReport } from '@core/burst.mjs';
 import { withCache } from '@core/cache.mjs';
 import { DEFAULT_BUDGET, DEFAULT_LIMIT, DEFAULT_TOP, suggestSquads } from '@core/candidates.mjs';
 import { compareSquads, InputError } from '@core/compare.mjs';
@@ -11,6 +12,7 @@ import { compareGrowth } from '@core/growth.mjs';
 import { DEFAULT_INTERCEPT_BUDGET, DEFAULT_INTERCEPT_TOP, recommendIntercept } from '@core/intercept.mjs';
 import type {
   BossProgress,
+  BurstReport,
   CompareReport,
   CubeReport,
   DeckOpponent,
@@ -297,6 +299,26 @@ export async function runDeckSwap(input: DeckInput & { slot: number; limit?: num
       coreDeps(deps),
     );
     return report as unknown as DeckSwapReport;
+  } catch (e) {
+    throw asComputeError(e);
+  }
+}
+
+// ── 버스트 흐름(P-032) ────────────────────────────────────────────────────────
+// 규칙은 전부 루트의 src/core/burst.mjs에 있다. 계산 도구의 결과 문서에는 버스트 흐름이 없어, 같은 요청을 텍스트 보기로
+// 한 번 더 돌려(런타임의 runViews — Rust 명령 engine_run_views) 그 글을 읽는다. 캐시는 쓰지 않는다(편성마다 몇 초).
+
+/** 버스트 흐름의 입력: 읽어 둔 계정, 전투 조건, 편성 하나 또는 둘(첫째가 기준, 둘째가 견줄 편성). */
+export interface BurstInput {
+  account: unknown;
+  condition: Record<string, unknown>;
+  squads: { name: string; members: string[] }[];
+}
+
+/** 편성들의 버스트 흐름(풀 버스트 구간·니케별 버스트 사용)을 읽는다. */
+export async function runBurstFlow(input: BurstInput, deps: ComputeDeps = defaultDeps): Promise<BurstReport> {
+  try {
+    return (await burstReport({ account: input.account as object, condition: input.condition, squads: input.squads }, coreDeps(deps))) as unknown as BurstReport;
   } catch (e) {
     throw asComputeError(e);
   }

@@ -193,6 +193,76 @@ export async function runBatch(requests, options = {}) {
   return results;
 }
 
+/** 돌릴 수 있는 텍스트 보기(엔진 `runner/sim.py`의 `--view` 종류 가운데 이 앱이 읽는 것). Rust의 `VIEW_KINDS`와 같다. */
+export const VIEW_KINDS = Object.freeze(['burst']);
+/** 명령줄 인자로 넘기는 요청 JSON의 길이 상한(글자). Windows의 명령줄 한도(32,767자)보다 넉넉히 작게 잡는다. */
+export const VIEW_REQUEST_MAX_CHARS = 24_000;
+
+function runViewOnce(request, view, { engineDir, python, timeoutMs }) {
+  return new Promise((resolve, reject) => {
+    if (request === null || typeof request !== 'object' || Array.isArray(request)) {
+      resolve({ error: { type: 'invalid_input', message: '요청은 JSON 객체여야 한다' } });
+      return;
+    }
+    const json = JSON.stringify(request);
+    if (json.length > VIEW_REQUEST_MAX_CHARS) {
+      resolve({ error: { type: 'invalid_input', message: `요청이 너무 길어 엔진에 넘기지 못했다 (${json.length}자 — 상한 ${VIEW_REQUEST_MAX_CHARS}자)` } });
+      return;
+    }
+    // `{`로 시작하는 --request 값은 엔진이 JSON 문자열로 읽는다(파일 경로가 아니다).
+    const child = spawn(python, ['-m', 'runner.sim', '--request', json, '--view', view], {
+      cwd: engineDir,
+      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let out = '';
+    let err = '';
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`엔진 시간 초과 (${Math.round(timeoutMs / 1000)}초)`));
+    }, timeoutMs);
+    child.stdout.setEncoding('utf8').on('data', (d) => (out += d));
+    child.stderr.setEncoding('utf8').on('data', (d) => (err += d));
+    child.on('error', (e) => {
+      clearTimeout(timer);
+      reject(new Error(`엔진을 실행할 수 없다 (${python}): ${e.message}`));
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve({ text: out });
+      // 텍스트 모드의 입력 오류(코드 2)는 사유를 표준 출력에 한 줄로 찍는다. 그 밖은 평가기의 실패다.
+      else resolve({ error: { type: code === 2 ? 'invalid_input' : 'internal_error', message: (code === 2 ? out.trim() : '') || err.trim().slice(-500) || `엔진 종료 코드 ${code}` } });
+    });
+  });
+}
+
+/**
+ * 요청마다 엔진의 텍스트 보기(`python -m runner.sim --request <JSON> --view <종류>`)를 한 번씩 돌린다.
+ * 반환 배열은 입력 순서와 같고 요청마다 `{text}`(엔진의 표준 출력 그대로) 또는 `{error: {type, message}}`다.
+ * 엔진의 JSON 결과에는 버스트 흐름이 없다 — 같은 요청을 텍스트 보기로 한 번 더 돌려 읽는다(같은 `prepare()` → `execute()`).
+ */
+export async function runViews(requests, view, options = {}) {
+  const {
+    engineDir = DEFAULT_ENGINE_DIR,
+    python = process.env.NIKKE_PYTHON ?? 'python',
+    concurrency = Math.max(1, Math.min(4, os.cpus().length - 1)),
+    timeoutMs = 10 * 60_000,
+  } = options;
+  if (!VIEW_KINDS.includes(view)) throw new Error(`돌릴 수 없는 보기다: ${String(view)} (쓸 수 있는 것: ${VIEW_KINDS.join(', ')})`);
+  const results = new Array(requests.length).fill(null);
+  let next = 0;
+  const worker = async () => {
+    while (next < requests.length) {
+      const i = next;
+      next += 1;
+      results[i] = await runViewOnce(requests[i], view, { engineDir, python, timeoutMs });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, requests.length) }, worker));
+  return results;
+}
+
 const defined = (o) => Object.fromEntries(Object.entries(o ?? {}).filter(([, v]) => v !== undefined));
 
 /**
@@ -205,6 +275,7 @@ export function createNodeRuntime(options = {}) {
     loadCatalog: () => loadCatalog(fixed.engineDir),
     engineVersion: () => engineVersion(fixed.engineDir),
     runBatch: (requests, perCall) => runBatch(requests, { ...fixed, ...defined(perCall) }),
+    runViews: (requests, view, perCall) => runViews(requests, view, { ...fixed, ...defined(perCall) }),
   };
 }
 

@@ -4,7 +4,7 @@
 
 import { createMemoryStore } from '@core/cache.mjs';
 import type { EngineRuntime, SimCacheStore } from '../types';
-import { engineCatalog, engineRunBatch, engineVersion } from './backend';
+import { engineCatalog, engineRunBatch, engineRunViews, engineVersion } from './backend';
 
 /**
  * 시뮬 결과 캐시의 저장소(루트 src/core/cache.mjs의 저장소 계약). 이 앱은 메모리 저장소만 쓴다 —
@@ -18,4 +18,6 @@ export const tauriRuntime: EngineRuntime = {
   engineVersion: () => engineVersion(),
   // 동시 실행 수·시간 제한·엔진 폴더는 Rust 쪽 설정이 정한다. 화면에서 넘기지 않는다.
   runBatch: (requests) => engineRunBatch(requests),
+  // 버스트 흐름(P-032): 계산 도구의 결과 문서에는 없어 텍스트 보기를 한 번 더 돌려 글을 받는다.
+  runViews: (requests, view) => engineRunViews(requests, view),
 };

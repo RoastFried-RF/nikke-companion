@@ -5,7 +5,7 @@
 //   한 명을 바꾼다면(자리 하나를 골라 같은 버스트 단계의 보유 니케를 하나씩 넣어 본다) · 자리 순서 비교 · 내 편성 저장 · 편성 복사
 // 계산 규칙은 여기에 없다 — 루트의 순수 모듈(src/core/deck.mjs)이 하고, 그 안에서 편성 비교(compareSquads)와 자리 변형(search.mjs)을 그대로 쓴다.
 // 숨기면 안 되는 표시(추정·미확인 값·속성 상성 미반영·검증용·계산하지 못함)는 접힌 구획 밖의 배지와 문장이다.
-import { computed, onActivated, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onActivated, ref, shallowRef, watch } from 'vue';
 import { copyText, errorMessage } from '../lib/backend';
 import { runDeckEvaluate, runDeckOrder, runDeckSwap } from '../lib/compute';
 import {
@@ -29,7 +29,7 @@ import {
   type DeckDraft,
   type Slots,
 } from '../lib/deck';
-import { useEngineRun } from '../lib/engineRun';
+import { useEngineOwner, useEngineRun } from '../lib/engineRun';
 import { damageUnit, engineLabel } from '../lib/format';
 import { RUN_DECK, useNav } from '../lib/nav';
 import { rosterRows } from '../lib/roster';
@@ -42,6 +42,7 @@ import NikkeTile from '../ui/NikkeTile.vue';
 import ProgressPanel from '../ui/ProgressPanel.vue';
 import SkeletonBlock from '../ui/SkeletonBlock.vue';
 import StatusPill from '../ui/StatusPill.vue';
+import BurstPanel from './BurstPanel.vue';
 import DeckBook from './DeckBook.vue';
 import DeckOpponent from './DeckOpponent.vue';
 import DeckRoster from './DeckRoster.vue';
@@ -51,6 +52,8 @@ const nav = useNav();
 const decks = useDecks();
 const { catalog, info } = useNikkeCatalog();
 const engine = useEngineRun(RUN_DECK);
+// 버스트 흐름 구획(BurstPanel)이 따로 도는 동안에도 이 화면의 계산 단추를 막는다 — 계산 자리는 하나다.
+const owner = useEngineOwner();
 
 // ── 계정 ──────────────────────────────────────────────────────────────────────
 // 계정 문서는 통째로 갈아 끼운다(안쪽까지 지켜보지 않는다) — 계산 코드에 보통 객체로 넘어가야 결과를 캐시에 담을 수 있다.
@@ -179,7 +182,7 @@ const shares = computed(() => {
 });
 const shareOf = (name: string): number | null | undefined => (shares.value ? (shares.value.get(name) ?? null) : undefined);
 
-const canRun = computed(() => full.value && opponent.value !== null && read.value !== null && !engine.computing && !engine.busyElsewhere);
+const canRun = computed(() => full.value && opponent.value !== null && read.value !== null && !engine.computing && !engine.busyElsewhere && owner.value === null);
 const whyNot = computed(() => {
   if (engine.busyElsewhere) return '다른 화면에서 계산이 돌고 있다 — 끝난 뒤에 누른다';
   if (!opponent.value) return '상대를 먼저 고른다';
@@ -293,6 +296,28 @@ function applyOrder(next: string[]): void {
 }
 /** 가장 좋은 순서가 지금보다 얼마나 큰가(+6.0%). */
 const orderGain = computed(() => (order.value?.gain_ratio ? changeText(order.value.gain_ratio - 1) : '–'));
+
+// ── 버스트 흐름(P-032) ────────────────────────────────────────────────────────
+// 지금 편성의 버스트 순환을 타임라인으로 본다. 자리 순서를 바꾼 편성이나 한 명을 바꾼 편성을 고르면 둘을 위아래로 견준다.
+const burstPanel = ref<InstanceType<typeof BurstPanel> | null>(null);
+const burstOther = ref<{ name: string; members: string[] } | null>(null);
+// 편성이나 상대가 바뀌면 견주던 편성은 지운다(바꾸기 전 편성에서 나온 것이다).
+watch(key, () => {
+  burstOther.value = null;
+});
+const burstSquads = computed(() => (full.value ? [{ name: '지금 편성', members: members.value }, ...(burstOther.value ? [burstOther.value] : [])] : []));
+const burstKey = computed(() => JSON.stringify([key.value, burstOther.value?.members ?? null]));
+const burstBlocked = computed(() => {
+  if (!opponent.value) return '상대를 먼저 고른다';
+  if (!full.value) return `다섯 자리를 모두 채우면 버스트 흐름을 볼 수 있다(지금 ${members.value.length}명)`;
+  return undefined;
+});
+/** 지금 편성과 다른 편성(가장 좋은 자리 순서·한 명을 바꾼 편성)의 버스트 흐름을 견준다. */
+async function compareBurst(name: string, other: string[]): Promise<void> {
+  burstOther.value = { name, members: [...other] };
+  await nextTick();
+  await burstPanel.value?.run();
+}
 
 // ── 복사 ──────────────────────────────────────────────────────────────────────
 const copied = ref('');
@@ -538,6 +563,7 @@ const warnings = computed(() => {
             <strong class="deck__change" :data-tone="row.change !== null && row.change > 0 ? 'ok' : 'neutral'" data-testid="swap-change">{{ changeText(row.change) }}</strong>
             <span class="nk-muted" data-testid="swap-total">{{ damageUnit(row.total_damage) }}</span>
             <span class="nk-spacer"></span>
+            <button type="button" class="nk-btn nk-btn--quiet" :disabled="!canRun" title="지금 편성과 이 니케로 바꾼 편성의 버스트 흐름을 위아래로 견준다" data-testid="swap-burst" @click="compareBurst(`${row.name}(으)로 바꾼 편성`, row.members)">버스트 흐름 견주기</button>
             <button type="button" class="nk-btn" :disabled="engine.computing" data-testid="swap-apply" @click="applySwap(swap.slot, row.name)">이 니케로 바꾸기</button>
           </li>
         </ul>
@@ -569,6 +595,7 @@ const warnings = computed(() => {
             <strong class="deck__change" data-tone="ok" data-testid="order-gain">지금 순서보다 {{ orderGain }}</strong>
             <span class="nk-muted" data-testid="order-total">{{ damageUnit(order.current.total_damage) }} → {{ damageUnit(order.best.total_damage) }}</span>
             <span class="nk-spacer"></span>
+            <button type="button" class="nk-btn nk-btn--quiet" :disabled="!canRun" title="지금 순서와 가장 좋은 순서의 버스트 흐름을 위아래로 견준다" data-testid="order-burst" @click="compareBurst('가장 좋은 자리 순서', order.best.members)">버스트 흐름 견주기</button>
             <button type="button" class="nk-btn nk-btn--primary" :disabled="engine.computing" data-testid="order-apply" @click="applyOrder(order.best.members)">이 순서로 바꾸기</button>
           </div>
           <p class="nk-muted" data-testid="order-changes">바꾼 것: {{ order.changes.join(', ') }}</p>
@@ -583,6 +610,17 @@ const warnings = computed(() => {
         <p v-if="order.variants.failed > 0" class="nk-note" data-testid="order-failed">{{ order.variants.failed }}가지는 계산하지 못했다(0으로 치지 않고 뺐다).</p>
         <p class="nk-muted">같은 버스트 단계 안의 순서와 3번 자리에 누가 서는지만 바꿔 본다 — 모든 순서를 본 것이 아니다.</p>
       </section>
+
+      <!-- 버스트 흐름: 지금 편성(과 견줄 편성)의 버스트 순환을 타임라인으로 -->
+      <BurstPanel
+        ref="burstPanel"
+        :run-name="RUN_DECK"
+        :condition="opponent?.condition ?? null"
+        :load-account="() => read!.account"
+        :squads="burstSquads"
+        :state-key="burstKey"
+        :blocked="burstBlocked"
+      />
 
       <DeckRoster :rows="rows" :picked="members" :weak-to="weakTo" :disabled="engine.computing" @pick="add" />
 

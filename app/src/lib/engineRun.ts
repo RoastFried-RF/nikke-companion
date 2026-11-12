@@ -136,6 +136,18 @@ export function useEngineRun(name: string) {
               engineBusy = false;
             }
           },
+          // 버스트 흐름(텍스트 보기)도 같은 자리의 엔진 실행이다 — 진행 건수를 세고, 중단이 닿는다.
+          runViews: async (requests, view, options) => {
+            if (stopping.value) throw STOPPED;
+            if (!defaultDeps.runtime.runViews) throw new Error('이 앱은 버스트 흐름을 읽지 못한다');
+            progress.value = { done: 0, total: requests.length };
+            engineBusy = true;
+            try {
+              return await defaultDeps.runtime.runViews(requests, view, options);
+            } finally {
+              engineBusy = false;
+            }
+          },
         },
         // 단계가 바뀌면 앞 단계의 건수를 지운다. 이 단계의 요청이 모두 캐시에 있으면 엔진을 부르지 않는다.
         onStage: (s) => {

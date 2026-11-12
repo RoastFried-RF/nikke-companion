@@ -34,6 +34,23 @@ function engineDefaultProfile(level) {
   return profile;
 }
 
+/**
+ * 편성 하나의 엔진 요청(vendor/nikke-calc/docs/SIM-JSON.md §요청). 편성 비교와 버스트 흐름(src/core/burst.mjs)이 같은
+ * 함수로 요청을 만든다 — 총딜을 낸 계산과 버스트 흐름을 읽는 계산이 다른 요청이 될 자리가 없다.
+ *   계정 육성 편성      조건의 레벨 상한이 있으면 계정의 동기화 레벨을 상한까지 반영한다. 없으면 fixed(400)
+ *   엔진 기본 스펙 편성 계정의 동기화 레벨을 쓰지 않는다 — 상한이 있으면 상한 레벨, 없으면 fixed(400)
+ * @param {{members: string[], growth?: string}} squad
+ * @returns {{request: object, level: object}}
+ */
+export function squadRequest(squad, account, condition) {
+  if (usesEngineDefault(squad)) {
+    const level = levelPlan(condition, null);
+    return { level, request: { ...toEngineBase(condition, level), squad: squad.members, profile: engineDefaultProfile(level) } };
+  }
+  const level = levelPlan(condition, account);
+  return { level, request: { ...toEngineBase(condition, level), squad: squad.members, profile: toEngineProfile(account, squad.members, level) } };
+}
+
 export class InputError extends Error {
   constructor(what, errors) {
     super(`${what}: ${errors.map((e) => `${e.path || '/'} ${e.message}`).join('; ')}`);
@@ -112,15 +129,9 @@ export async function compareSquads({ account, condition, squads }, deps = {}) {
 
   // 레벨: 조건에 상한(level_cap)이 있으면 계정의 동기화 레벨을 상한까지 반영한다. 없으면 종전대로 fixed(400).
   const level = levelPlan(condition, account);
-  const base = toEngineBase(condition, level);
   // 엔진 기본 스펙 편성: 계정의 동기화 레벨을 쓰지 않는다 — 상한이 있으면 상한 레벨, 없으면 fixed(400).
   const defaultLevel = levelPlan(condition, null);
-  const defaultBase = toEngineBase(condition, defaultLevel);
-  const requests = accepted.map((s) =>
-    usesEngineDefault(s)
-      ? { ...defaultBase, squad: s.members, profile: engineDefaultProfile(defaultLevel) }
-      : { ...base, squad: s.members, profile: toEngineProfile(account, s.members, level) },
-  );
+  const requests = accepted.map((s) => squadRequest(s, account, condition).request);
   const { results, cache } = await engine.runBatchWithStats(requests, { concurrency: deps.concurrency });
 
   const ranking = [];

@@ -953,6 +953,105 @@ P-031. 성장 투자 비교(§성장 투자 비교 — 업그레이드 후보를
 - 한계: 추천한 큐브를 갖고 있는지·몇 레벨인지 모른다, 같은 레벨로 견줬다, 한 큐브를 몇 명이 함께 낄 수 있는지 모른다(같은 큐브가
   여러 니케에게 추천될 수 있다).
 
+## 버스트 흐름 — `src/core/burst.mjs`
+
+P-032. 편성의 버스트 순환(풀 버스트가 몇 번, 얼마마다 열리고 누가 버스트를 썼는가)을 **엔진의 기록에서 읽는다** — 계산하거나
+어림하지 않는다. 화면은 덱 빌더와 요격전 상세의 「버스트 흐름」 구획이다(`app/README.md` §버스트 흐름).
+
+### 엔진이 주는 것과 얻는 길
+
+- 엔진의 **JSON 결과(`--json`·`--batch` — `vendor/nikke-calc/docs/SIM-JSON.md` §결과 객체)에는 버스트 흐름이 없다**(총딜·멤버 딜·
+  적·스펙·조작 요약·경고뿐이다 — `runner/sim.py`의 `payload()`).
+- 엔진은 그것을 **텍스트 보기**로만 낸다: `python -m runner.sim --request <요청 JSON> --view burst`(`SimLog.burst_summary()`).
+  `--view`는 `--json`·`--batch`와 함께 쓸 수 없다(엔진이 오류로 끊는다). 그래서 **요청 방법을 바꿨다** — 같은 요청을 텍스트 보기로
+  한 번 더 돌린다. 엔진 문서의 보장대로 같은 `prepare()` → `execute()`를 거치므로 총딜을 낸 계산과 같은 전투다(기대값 모드라 결정론).
+- 런타임 계약에 선택 함수 `runViews(requests, view, opts) → ({text} | {error: {type, message}})[]`를 더했다(`src/core/runtime.mjs`).
+  Node는 `src/runtime/node.mjs`의 `runViews`, 앱은 Rust 명령 `engine_run_views`(`src-tauri/src/engine.rs`의 `run_views`)다. 둘 다
+  **보기 이름을 `burst`만 받고**(`VIEW_KINDS`), 객체가 아닌 요청은 엔진에 넘기지 않으며(엔진은 `{`로 시작하지 않는 `--request` 값을
+  파일 경로로 읽는다), 요청 JSON이 24,000자를 넘으면 그 건을 오류로 돌려준다(명령줄 인자로 넘긴다 — Windows 한도 32,767자. 시험 계정의
+  요청은 수천 자다). 편성 하나에 엔진 한 번(약 3초), 동시에 네 개까지. **캐시하지 않는다**(시뮬 결과 캐시는 JSON 결과만 담는다).
+- 요청은 편성 비교와 같은 함수가 만든다(`compare.mjs`의 `squadRequest` — 계정 육성·엔진 기본 스펙 둘 다).
+
+엔진이 적는 줄(이름·단위는 엔진 그대로):
+
+```text
+[버스트 사이클]
+  t=  3.000s  stage:1 사용  리틀 머메이드        ← 시각(초, 전투 시작부터) · 단계 · 쓴 니케
+  t=  3.100s  stage:2 사용  크라운
+  t=  3.200s  stage:3 사용  라피 : 레드 후드
+  t=  3.583s  full_burst 시작
+  t= 13.583s  full_burst 종료
+  t= 43.000s  reenter:1 사용  티아                ← 버스트 재진입(엔진 문서 GAMEPLAY.md)
+```
+
+| 읽는 것 | 사건(`parseBurstView`의 `events`) |
+|---|---|
+| `stage:N 사용  <이름>` · `reenter:N 사용  <이름>` | `{t, kind: "use", stage: "N", name, reenter}` |
+| `full_burst 시작` · `full_burst 종료` | `{t, kind: "full_burst_start"}` · `{t, kind: "full_burst_end"}` |
+| `게이지 만충 …` · `카메라 초점: …`(엔진의 게이지 판정 모드에서만 나온다 — 이 앱은 그 모드를 쓰지 않는다) | `{t, kind: "note"}` — 흐름에 쓰지 않는다 |
+| 그 밖의 줄, 편성에 없는 이름의 줄 | 버리지 않고 `unread`에 원문 그대로(결과의 caveats에 몇 줄인지 적는다) |
+
+`[버스트 사이클]` 머리줄이 없으면 `found: false` — **엔진이 주지 않은 것**이고 그 편성은 흐름 없이 `failed`가 된다(다른 줄에서
+지어내지 않는다). 텍스트 보기의 글은 엔진 문서가 「사람용」이라고 밝힌 것이라 모양이 바뀔 수 있다 — 바뀌면 통합 테스트
+(`tests/integration/burst.engine.test.mjs`)의 「모르는 줄이 없다」가 먼저 걸린다.
+
+**읽지 않는 것(지원하지 않음)**: 버스트 게이지가 차는 내역(엔진의 다른 보기 `gauge` — 이 앱이 쓰는 판정 모드 `fixed`에서는 게이지가
+사이클을 정하지 않아 그리지 않았다), 버스트가 늦은 까닭(엔진이 말하지 않는다), 보스 패턴에 따른 변화, 버스트 순서를 손으로 정하기.
+
+### 흐름 — `summarizeBurst(events, {duration, members})`
+
+단위는 전부 **초**(전투 시작부터)다. 엔진이 적은 시각만으로 센다.
+
+| 칸 | 뜻 |
+|---|---|
+| `duration` | 전투 시간 — 요청의 `sim.duration`(전투 조건의 `duration`, 적지 않으면 180) |
+| `count` | 풀 버스트 횟수 = `full_burst 시작` 줄의 수 |
+| `first_at` · `first_use_at` | 첫 풀 버스트가 열린 시각 · 첫 버스트를 쓴 시각. 없으면 `null` |
+| `average_period` | 평균 주기 = (마지막 풀 버스트 시작 − 첫 풀 버스트 시작) ÷ (횟수 − 1). 두 번 미만이면 `null`(모른다) |
+| `uptime_seconds` · `uptime_ratio` | 풀 버스트가 열려 있던 시간의 합과 전투 시간에 대한 비율(0~1). 닫히지 않은 풀 버스트는 전투 끝까지로 센다 |
+| `full_bursts[]` | `{index, start, end, open, users[], chain_start, wait, waited_for}` — `end: null`·`open: true`는 엔진이 종료를 적지 않은 것(전투가 끝날 때까지 열려 있었다). `users`는 그 풀 버스트를 연 버스트들(직전 풀 버스트 시작 뒤부터). `wait`는 그 버스트들 사이가 가장 길게 벌어진 시간 |
+| `uses[]` | 모든 버스트 사용 `{t, stage, name, reenter}` |
+| `by_stage` | 단계(`"1"`·`"2"`·`"3"`) → `[{name, count}]`(많이 쓴 순) — **단계별로 누가 버스트를 썼는지**. 단계는 엔진이 그 버스트를 쓴 단계로 적은 값이다 |
+| `by_member[]` | 자리 순서대로 `{name, count, stages, uses[]}` — 버스트를 쓰지 않은 니케도 빈 줄로 있다 |
+| `pending[]` · `tail_wait` | 풀 버스트로 이어지지 못하고 전투가 끝난 버스트들 · 그 마지막 버스트 뒤로 남은 시간 |
+| `stalls[]` | 다음 버스트가 늦은 풀 버스트 `{index, wait, stage}` |
+| `status` | `ok` · `stalled`(늦은 풀 버스트가 있다) · `none`(풀 버스트가 한 번도 열리지 않았다) |
+| `headline` | 「3분 동안 풀 버스트 9번, 평균 20초마다」 / 「3분 동안 풀 버스트가 한 번도 열리지 않았다」 |
+| `problem` | 돌지 않는 편성의 한 문장(없으면 `null`) — 「2단계 버스트를 쓴 니케가 없어 풀 버스트가 한 번도 열리지 않았다(1단계까지만 이어졌다).」, 「풀 버스트 7번 가운데 6번은 다음 버스트가 1초 넘게 늦었다 — 가장 길게는 3단계를 14.6초 기다렸다. 버스트 쿨타임이 맞지 않는 것으로 보인다.」 |
+
+**「늦었다」는 이 앱의 규칙이다**(`STALL_GAP_SECONDS = 1`): 풀 버스트 하나를 여는 동안 버스트와 버스트 사이가 1초 이상 벌어지면 다음 단계를
+기다린 것으로 센다. 엔진이 버스트를 이어 쓰는 간격은 0.1초(재진입 0.5초)다. 엔진은 **왜** 늦었는지 말하지 않는다 — 문장은 「쿨타임이
+맞지 않는 것으로 보인다」까지만 말한다. 실제 엔진에서 본 모양: 2단계가 없으면 `stage:1` 한 줄뿐, 3단계가 한 명(쿨타임 40초)뿐이면
+2단계 뒤에 3단계를 10~15초 기다린다, 1단계가 쿨타임 40초 한 명이면 `reenter:1`까지 40초를 기다린다.
+
+### 결과 문서 — `burstReport({account, condition, squads}, deps)`
+
+```jsonc
+{
+  "schema_version": 1, "kind": "burst_flow", "generated_at": "…",
+  "account": {"name": "…", "is_test_data": true, "updated_at": null},
+  "condition": { … },                       // 받은 전투 조건 그대로
+  "duration": 180,                          // 시간축의 길이(초)
+  "source": {"view": "burst", "stall_gap_seconds": 1},
+  "lines": [                                // 받은 편성 순서대로(첫째가 기준)
+    {"name": "지금 편성", "members": ["…"], "status": "read", "flow": { … 위의 흐름 … }, "unread": []},
+    {"name": "…", "members": ["…"], "status": "rejected", "reasons": ["편성은 5명이어야 한다 (지금 4명)"]},
+    {"name": "…", "members": ["…"], "status": "failed", "error": {"type": "not_provided", "message": "…"}}
+  ],
+  "comparison": {"count_delta": -2, "text": "풀 버스트 9번 → 7번, 평균 주기 20초 → 25초, 첫 풀 버스트 3.6초 → 5.6초."},
+  "engine": {"repo": "Jgaram/nikke-calc", "commit": "…", "dirty": false},
+  "caveats": ["…"]
+}
+```
+
+- `lines[].status`: `read`(읽었다) · `rejected`(계산 전 검사 — `squadProblems`, 엔진을 부르지 않는다) · `failed`(엔진이 그 편성을
+  돌리지 못했거나 `error.type: "not_provided"` — 출력에 버스트 줄이 없다). **읽지 못한 편성에는 `flow`가 없다.**
+- `comparison`: 편성을 둘 줬고 둘 다 읽었을 때만(아니면 `null`). 횟수·평균 주기·첫 풀 버스트가 어떻게 다른지만 말한다 — 어느 쪽이
+  낫다고 판정하지 않는다(총딜은 덱 빌더의 계산이 말한다).
+- `caveats`: 실전 미대조, 같은 조건이라는 것, 운용은 엔진의 기본값(손으로 정하기는 지원하지 않음), 「늦었다」는 이 앱의 규칙,
+  지원하지 않는 것(게이지 내역·보스 패턴), 읽지 못한 줄의 수.
+- 런타임에 `runViews`가 없으면 던진다(빈 흐름을 내지 않는다).
+
 ## 시뮬 결과 캐시 — `src/core/cache.mjs`
 
 엔진 시뮬 1회가 4~5초라서, 같은 엔진 판·같은 요청의 결과는 다시 계산하지 않는다. `withCache(runtime, store)`가

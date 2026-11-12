@@ -185,6 +185,80 @@ export interface EngineRuntime {
   engineVersion(): Promise<EngineVersion> | EngineVersion;
   /** 결과는 입력 순서 그대로다. 줄마다 결과 또는 `{error}`. */
   runBatch(requests: EngineRequest[], options?: { concurrency?: number }): Promise<EngineRow[]>;
+  /** 요청마다 계산 도구의 텍스트 보기를 돌린다(버스트 흐름). 없는 런타임에서는 버스트 흐름을 읽지 못한다. */
+  runViews?(requests: EngineRequest[], view: string, options?: { concurrency?: number }): Promise<EngineViewRow[]>;
+}
+
+/** 텍스트 보기 한 건의 결과: 계산 도구가 적은 글 그대로, 또는 그 건의 오류. */
+export type EngineViewRow = { text: string } | { error: { type?: string; message?: string } };
+
+// ── 버스트 흐름(P-032 — 루트 src/core/burst.mjs의 결과. docs/data-model.md §버스트 흐름) ──────────────
+
+/** 버스트 사용 한 번. 시각은 전투 시작부터의 초다. */
+export interface BurstUse {
+  t: number;
+  stage: string;
+  name: string;
+  /** 계산 도구가 「재진입」으로 적은 사용. */
+  reenter: boolean;
+}
+
+/** 풀 버스트 한 번. `end`가 null이면 전투가 끝날 때까지 열려 있었다. */
+export interface FullBurst {
+  index: number;
+  start: number;
+  end: number | null;
+  open: boolean;
+  users: BurstUse[];
+  chain_start: number | null;
+  /** 이 풀 버스트를 여는 동안 버스트 사이가 가장 길게 벌어진 시간(초). */
+  wait: number;
+  waited_for: { stage: string; reenter: boolean } | null;
+}
+
+/** 한 편성의 버스트 흐름 요약. */
+export interface BurstFlow {
+  duration: number;
+  count: number;
+  first_at: number | null;
+  first_use_at: number | null;
+  average_period: number | null;
+  uptime_seconds: number;
+  uptime_ratio: number | null;
+  full_bursts: FullBurst[];
+  uses: BurstUse[];
+  by_stage: Record<string, { name: string; count: number }[]>;
+  by_member: { name: string; count: number; stages: string[]; uses: { t: number; stage: string; reenter: boolean }[] }[];
+  pending: BurstUse[];
+  tail_wait: number;
+  stalls: { index: number; wait: number; stage: string | null }[];
+  /** ok 잘 돈다 / stalled 다음 버스트가 늦는다 / none 풀 버스트가 한 번도 열리지 않았다. */
+  status: 'ok' | 'stalled' | 'none';
+  headline: string;
+  problem: string | null;
+}
+
+/** 버스트 흐름 결과의 편성 한 줄: 읽음 · 거부됨(계산 전 검사) · 실패(계산 도구가 주지 않았다). */
+export type BurstLine = { name: string; members: string[]; growth?: string } & (
+  | { status: 'read'; flow: BurstFlow; unread: string[] }
+  | { status: 'rejected'; reasons: string[] }
+  | { status: 'failed'; error: { type?: string; message?: string } }
+);
+
+export interface BurstReport {
+  schema_version: number;
+  kind: 'burst_flow';
+  generated_at: string;
+  account: { name: string | null; is_test_data?: boolean; updated_at?: string | null };
+  condition: Record<string, unknown>;
+  /** 전투 시간(초) — 시간축의 길이. */
+  duration: number;
+  source: { view: string; stall_gap_seconds: number };
+  lines: BurstLine[];
+  /** 두 편성을 견준 한 문장(둘 다 읽었을 때만). */
+  comparison: { count_delta: number; text: string } | null;
+  engine: EngineVersion;
+  caveats: string[];
 }
 
 /** 화면 위의 사각형(물리 픽셀). x·y는 화면 좌표의 왼쪽 위다. */
@@ -395,6 +469,8 @@ export interface InterceptBoss {
   level: LevelPlan;
   duration: number;
   source?: string;
+  /** 이 보스를 계산한 전투 조건(보스 값 → 적 설정). 버스트 흐름(P-032)이 같은 조건으로 다시 돌린다. 옛 결과에는 없을 수 있다. */
+  condition?: Record<string, unknown>;
   /** 확인된 칸의 이름. */
   confirmed: string[];
   unconfirmed: UnconfirmedField[];

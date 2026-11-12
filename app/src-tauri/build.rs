@@ -9,6 +9,7 @@ fn main() {
             "engine_catalog",
             "engine_version",
             "engine_run_batch",
+            "engine_run_views",
             "engine_cancel",
             "read_json_file",
             "pick_json_file",

@@ -1945,9 +1945,19 @@
         "덱 빌더에서 편성을 바꿔 가며 버스트 타임라인이 게임에서의 체감과 맞는지 본다"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261112T135108-P-032-a1",
+        "verified_tree": "a693ac1a5c7a75476bad84feee421ccd4adf0dbb",
+        "verified_at": "2026-11-12T14:15:30.839Z",
+        "commit": null
+      }
     },
     {
       "id": "P-033",

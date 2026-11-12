@@ -17,6 +17,7 @@ import type {
   EngineRequest,
   EngineRow,
   EngineVersion,
+  EngineViewRow,
   ExtensionLinkStatus,
   FetchedProfile,
   FetchLine,
@@ -116,6 +117,14 @@ export function engineVersion(): Promise<EngineVersion> {
 /** 요청 여러 건을 엔진 배치로 돌린다. 결과는 입력 순서 그대로이고 줄마다 결과 또는 `{error}`다. */
 export function engineRunBatch(requests: EngineRequest[]): Promise<EngineRow[]> {
   return invoke<EngineRow[]>('engine_run_batch', { requests });
+}
+
+/**
+ * 요청마다 계산 도구의 텍스트 보기를 돌려 `{text}` 또는 `{error}`를 입력 순서대로 받는다(버스트 흐름 — P-032).
+ * 보기 이름은 Rust가 정한 것만 받는다('burst'). 엔진 배치와 같은 자리를 써서 `engineCancel`로 멈춘다.
+ */
+export function engineRunViews(requests: EngineRequest[], view: string): Promise<EngineViewRow[]> {
+  return invoke<EngineViewRow[]>('engine_run_views', { requests, view });
 }
 
 /**

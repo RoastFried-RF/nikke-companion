@@ -20,6 +20,7 @@ import {
   loadDecks,
   saveDecks,
   copyText,
+  engineRunViews,
   ENGINE_PROGRESS_EVENT,
   engineCancel,
   engineCatalog,
@@ -174,6 +175,8 @@ const COMMANDS = [
   'load_decks',
   'save_decks',
   'copy_text',
+  // P-032: 버스트 흐름 — 계산 도구의 텍스트 보기를 돌려 글을 받는 명령 하나. 데스크톱 앱 창의 것이다(오버레이는 계산을 시작하지 않는다).
+  'engine_run_views',
 ];
 
 /**
@@ -216,7 +219,7 @@ const WIDGET_COMMANDS = [COMMANDS[3], ...COMMANDS.slice(40, 48)];
 /** 요격전 계획(P-029)에서 더한 명령 두 개. */
 const PLAN_COMMANDS = COMMANDS.slice(48, 50);
 /** 덱 빌더(P-030)에서 더한 명령 세 개. */
-const DECK_COMMANDS = COMMANDS.slice(50);
+const DECK_COMMANDS = COMMANDS.slice(50, 53);
 /** 내 편성(P-030) — 지어낸 편성 한 벌. */
 const deckBook = {
   schema_version: 1,
@@ -337,6 +340,7 @@ describe('Rust 명령 호출', () => {
       if (cmd === 'engine_catalog') return { nikkes: {}, bosses: [] };
       if (cmd === 'engine_version') return { repo: 'Jgaram/nikke-calc', commit: null };
       if (cmd === 'engine_run_batch') return [{ id: 0, total_damage: 1 }];
+      if (cmd === 'engine_run_views') return [{ text: '[버스트 사이클]' }];
       if (cmd === 'read_json_file') return { schema_version: 1 };
       if (cmd === 'game_window_status') return gameSnapshot;
       if (cmd === 'set_follow_game') return { ...gameSnapshot, follow: true };
@@ -416,6 +420,9 @@ describe('Rust 명령 호출', () => {
     await expect(loadDecks()).resolves.toEqual(deckBook);
     await expect(saveDecks(null, deckBook)).resolves.toBeNull();
     await expect(copyText(deckCopy)).resolves.toBeNull();
+    await expect(engineRunViews([{ squad: ['크라운'] }], 'burst')).resolves.toEqual([{ text: '[버스트 사이클]' }]);
+    // 버스트 흐름: 화면이 넘기는 것은 요청과 보기의 이름뿐이다(실행할 프로그램·폴더는 없다 — 이름은 Rust가 정한 것만 받는다).
+    expect(calls[53].args).toEqual({ requests: [{ squad: ['크라운'] }], view: 'burst' });
     // 요격전 계획: 화면이 넘기는 것은 계정 이름(경로가 아니다 — 주지 않으면 지금 쓰는 계정)과 계획 문서뿐이다.
     expect(calls[48].args).toEqual({ name: null });
     expect(calls[49].args).toEqual({ name: null, plan: planDoc });
@@ -1367,7 +1374,8 @@ describe('권한(capability)', () => {
     // P-028: 38 → 42(위젯 상태 읽기·오버레이 설정 바꾸기·자리 초기화·계산 진행 알리기).
     // P-029: 42 → 44(요격전 계획 읽기·저장 — 손으로 적은 기록과 즐겨찾기를 계정 폴더에 둔다).
     // P-030: 44 → 47(덱 빌더 — 저장한 편성 읽기·저장, 편성을 글자로 클립보드에 쓰기).
-    expect(forApp).toHaveLength(47);
+    // P-032: 47 → 48(버스트 흐름 — 계산 도구의 버스트 보기를 돌려 글 받기).
+    expect(forApp).toHaveLength(48);
     // 끝내기 명령은 어느 창에도 없다 — 앱에 그런 명령이 없다.
     for (const p of [...capability.permissions, ...appCapability.permissions]) expect(p).not.toMatch(/quit|exit/);
     expect(COMMANDS).not.toContain('quit_app');
@@ -1396,6 +1404,13 @@ describe('엔진 호출(Rust)', () => {
     expect(engineRs).toContain('.args(["-m", "runner.sim", "--batch"])');
     expect(engineRs).toContain('.env("PYTHONUTF8", "1")');
     expect(engineRs).toContain('pub const MAX_WORKERS: usize = 4;');
+    // P-032 버스트 보기: 보기의 이름은 Rust가 허용한 것(VIEW_KINDS)만 돌리고, 객체가 아닌 요청은 엔진에 넘기지 않는다
+    // (`{`로 시작하지 않는 --request 값은 엔진이 파일 경로로 읽는다).
+    expect(libRs).toMatch(/async fn engine_run_views\(\s*app: AppHandle,\s*requests: Vec<Value>,\s*view: String,?\s*\)/);
+    expect(engineRs).toContain('pub const VIEW_KINDS: [&str; 1] = ["burst"];');
+    expect(engineRs).toMatch(/if !VIEW_KINDS\.contains\(&view\) \{\s*return Err\(EngineError::UnknownView/);
+    expect(engineRs).toMatch(/if !request\.is_object\(\) \{/);
+    expect(engineRs).toContain('.args(["-m", "runner.sim", "--request"])');
   });
 
   it('화면은 엔진 폴더·python 경로를 넘기지 않는다 — 설정값이다', () => {
@@ -1453,7 +1468,9 @@ describe('엔진 호출(Rust)', () => {
     // 요격전 계획(P-029)의 둘: 손으로 적은 요격전 기록·즐겨찾기를 계정 폴더에 계정마다 두고 읽는다(48 → 50). 화면이 넘기는 계정 이름은 경로가 아니다.
     // 덱 빌더(P-030)의 셋: 저장한 편성을 계정 폴더에 계정마다 두고 읽는 둘과, 편성을 글자로 클립보드에 쓰는 하나(50 → 53).
     // 계산에는 명령을 더하지 않았다 — 덱 빌더의 계산은 이미 있는 engine_run_batch로 돈다.
-    expect(COMMANDS).toHaveLength(53);
+    // 버스트 흐름(P-032)의 하나: 계산 도구의 결과 문서(engine_run_batch가 받는 것)에는 버스트 흐름이 없어, 같은 요청을
+    // 텍스트 보기로 돌려 글을 받는 engine_run_views가 필요하다(53 → 54). 보기의 이름은 Rust가 정한 것('burst')만 받는다.
+    expect(COMMANDS).toHaveLength(54);
     expect(DECK_COMMANDS).toEqual(['load_decks', 'save_decks', 'copy_text']);
     expect(libRs).toContain('async fn load_decks(name: Option<String>) -> Result<Option<Value>, String>');
     expect(libRs).toContain('async fn save_decks(name: Option<String>, decks: Value) -> Result<(), String>');

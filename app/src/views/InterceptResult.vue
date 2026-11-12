@@ -9,8 +9,9 @@ import { summarizeInterceptBoss } from '@core/summary.mjs';
 import { computed, onActivated, ref, watch } from 'vue';
 import { useDecks } from '../lib/deck';
 import { engineLabel, localTime } from '../lib/format';
-import { useNav } from '../lib/nav';
+import { RUN_INTERCEPT, useNav } from '../lib/nav';
 import { recordCheck, usePlan } from '../lib/plan';
+import { useShared } from '../lib/shared';
 import { recall, remember } from '../lib/remember';
 import { findBoss, LAST_BOSS, useScreenTrack } from '../lib/screenTrack';
 import { useNikkeCatalog } from '../lib/useNikkeCatalog';
@@ -19,6 +20,7 @@ import BossCard from '../ui/BossCard.vue';
 import DetailsFold from '../ui/DetailsFold.vue';
 import ElementChip from '../ui/ElementChip.vue';
 import StatusPill from '../ui/StatusPill.vue';
+import BurstPanel from './BurstPanel.vue';
 import RecordPanel from './RecordPanel.vue';
 import SquadPanel from './SquadPanel.vue';
 
@@ -51,6 +53,20 @@ function openInDeck(entry: RankingEntry): void {
   decks.openRanking(entry, boss.value?.id ?? null);
   nav.openTool('deck');
 }
+
+// 버스트 흐름(P-032): 고른 보스의 1위 편성과(있으면) 2위 편성의 버스트 순환을 지금 계정으로 다시 돌려 읽는다.
+// 조건은 추천을 계산할 때의 그 보스 조건(결과에 실려 있다)이다. 데스크톱 앱 창에서만 보인다(오버레이 창에는 계정을 읽는 길이 없다).
+const shared = useShared();
+const burstHere = computed(() => !props.compact && !!decks && !!shared);
+const burstCondition = computed(() => boss.value?.condition ?? null);
+const burstSquads = computed(() =>
+  (boss.value?.ranking ?? [])
+    .filter((e) => e.rank === 1 || e.rank === 2)
+    .sort((a, b) => a.rank - b.rank)
+    .map((e) => ({ name: `${e.rank}위 편성`, members: (e.members ?? []).map((m) => m.name) })),
+);
+const burstKey = computed(() => JSON.stringify([props.report.generated_at ?? null, boss.value?.id ?? null, burstSquads.value.map((s) => s.members)]));
+const loadBurstAccount = async () => (await shared!.loadAccount()).account;
 
 // 요격전 기록(P-029): 고른 보스의 가장 최근 기록과 추정 총딜의 차이. 기록이 없으면(또는 이 창에 기록이 없으면) null.
 const planStore = usePlan();
@@ -218,6 +234,17 @@ const conditionCount = computed(() => {
 
       <!-- 손으로 적는 기록(데스크톱 앱 창에서만 — 오버레이에는 없다). -->
       <RecordPanel :boss="boss" :estimate="bestTotal(boss)" />
+
+      <!-- 버스트 흐름(P-032): 1위 편성(2위가 있으면 둘을 위아래로)의 버스트 순환. 데스크톱 앱 창에서만 — 오버레이는 계산을 시작하지 않는다. -->
+      <BurstPanel
+        v-if="burstHere && boss.status === 'computed'"
+        :run-name="RUN_INTERCEPT"
+        :condition="burstCondition"
+        :load-account="loadBurstAccount"
+        :squads="burstSquads"
+        :state-key="burstKey"
+        :blocked="burstCondition ? undefined : '이 추천에는 전투 조건이 남아 있지 않다 — 「다시 계산」을 누른 뒤에 볼 수 있다'"
+      />
 
       <DetailsFold summary="계산 조건" :count="conditionCount" :tone="unconfirmedOf(boss).length || (boss.flags ?? []).length ? 'unknown' : 'neutral'" data-testid="calc-conditions">
         <p class="nk-list__head">보스</p>

@@ -66,7 +66,7 @@ npm --prefix app run fixture                              # 컴포넌트 테스�
 **창이 둘이다**(P-027 — `app/README.md` §창 둘 — 데스크톱 앱과 오버레이): **데스크톱 앱 창**(`app` — 테두리가 있는 보통 창, 1100×720,
 `app/src/App.vue`)이 전부 한다 — 왼쪽 메뉴의 홈 · 요격전 · 내 니케 · 편성 도구 · 티어 · 설정(계정 연결 · 오버레이 · 계산 도구 ·
 고급). **오버레이 창**(`main` — 게임 위의 작은 위젯, `app/src/Overlay.vue`)은 마지막 요격전 추천만 보여 준다. 권한도 창마다 따로다
-(`src-tauri/capabilities/app.json` 명령 47개 / `overlay.json` 명령 15개 — 결과·상태 읽기와 자기 창의 조작). 앱을 실행하면 앱 창이 뜨고 오버레이는
+(`src-tauri/capabilities/app.json` 명령 48개 / `overlay.json` 명령 15개 — 결과·상태 읽기와 자기 창의 조작). 앱을 실행하면 앱 창이 뜨고 오버레이는
 설정대로 뜬다(앱과 함께 — 기본 · 게임을 찾았을 때 · 직접). **앱 창을 닫으면 앱이 끝난다**(오버레이 창은 닫히지 않고 숨는다. 끝내기
 명령은 없다 — 오버레이 위젯의 `×`는 숨기기다).
 화면은 파일 경로를 묻지 않는다: 계정은 기본 계정(이름 — 경로가 아니다), 보스 값은 내장한 `data/intercept/anomaly.json`.
@@ -123,6 +123,21 @@ cargo test --manifest-path app/src-tauri/Cargo.toml --test live_clipboard -- --i
 node --test tests/unit/efficiency.test.mjs                # 순수 함수: 큐브 표 → 목록, 한 단계 후보(최대·미확인·잠김·없음), 효율표·상한·실패, 오버로드 줄 놓기·바꿔 보기, 큐브 후보·비교·추천
 node --test tests/integration/efficiency.engine.test.mjs  # 실제 엔진(약 25초): 효율표, 오버로드 줄(줄 수 = 레벨 10), 큐브 바꾸기(기본 큐브 값 대조·지원하지 않는 큐브는 엔진이 끊는다)
 npm --prefix app test -- GrowthLab                        # 화면(가짜 backend): 기준 편성 둘·효율표(순위·막대·비용 문장·상한)·오버로드 칸·큐브 추천·진행·중단·오류
+```
+
+**버스트 흐름**(P-032 — `app/README.md` §버스트 흐름, 형식·규칙은 `docs/data-model.md` §버스트 흐름): 덱 빌더와 요격전 상세의 「버스트 흐름」
+구획 — 편성의 버스트 순환을 타임라인으로 본다(한 줄 요약 「3분 동안 풀 버스트 9번, 평균 20초마다」, 시간축 위의 풀 버스트 띠, 니케별 초상화
+줄의 버스트 표시, 두 편성을 위아래로 견주기 — 자리 순서를 바꾼 편성·한 명을 바꾼 편성·요격전 1위와 2위). **엔진의 JSON 결과에는 버스트
+흐름이 없다** — 같은 요청을 엔진의 텍스트 보기(`--view burst`)로 한 번 더 돌려 그 글을 읽는다(런타임의 `runViews`: Node `src/runtime/node.mjs`,
+앱은 Rust 명령 `engine_run_views` — 보기 이름은 `burst`만 받고 요청은 JSON 객체만 넘긴다). 규칙은 순수 모듈 `src/core/burst.mjs`
+(`parseBurstView`·`summarizeBurst`·`burstReport` — 요청은 `compare.mjs`의 `squadRequest`가 만든다), 화면은 `app/src/views/BurstPanel.vue`·
+`BurstTimeline.vue`. **엔진이 주지 않는 것은 그리지 않는다**(게이지가 차는 내역·늦은 까닭 — 「지원하지 않음」으로 적는다. 버스트 줄이 없는
+출력은 「읽지 못함」이다), 버스트가 돌지 않는 편성(단계 없음·다음 버스트가 1초 넘게 늦음 — 이 기준은 이 앱의 규칙이다)은 빨간 배지와 한 문장이다.
+
+```bash
+node --test tests/unit/burst.test.mjs                     # 순수 함수: 버스트 보기 글 읽기, 요약(횟수·평균 주기·첫 버스트·단계별 사용자), 돌지 않는 편성, 두 편성 견주기, 결과 문서
+node --test tests/integration/burst.engine.test.mjs       # 실제 엔진(약 10초): 샘플 편성·자리 순서를 바꾼 편성, 2단계 없는 편성·3단계 한 명인 편성, 요청 길이·오류 격리
+npm --prefix app test -- BurstFlow                        # 화면(가짜 backend): 요약·띠·니케 줄·두 편성 위아래·빨간 표시와 문장·읽지 못함·진행
 ```
 
 **오버레이는 작은 위젯이다**(P-028 — `app/README.md` §오버레이 위젯): 모양 셋 — 접힘(알약: 보스 얼굴·이름·총딜) · 한 줄 카드(기본:

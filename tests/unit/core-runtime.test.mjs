@@ -13,7 +13,7 @@ import { createNodeRuntime, nodeRuntime } from '../../src/runtime/node.mjs';
 const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const CORE = path.join(ROOT, 'src/core');
 /** 웹뷰와 Node CLI가 함께 쓰는 계산 모듈. */
-const PURE_MODULES = ['account', 'condition', 'compare', 'candidates', 'search', 'growth', 'format', 'render', 'cache', 'intercept', 'import-profile', 'summary', 'eta', 'plan', 'deck', 'efficiency'];
+const PURE_MODULES = ['account', 'condition', 'compare', 'candidates', 'search', 'growth', 'format', 'render', 'cache', 'intercept', 'import-profile', 'summary', 'eta', 'plan', 'deck', 'efficiency', 'burst'];
 
 /** 주석을 뺀 소스. 문자열 안의 `//`(경로 등)는 건드리지 않게 줄 맨 앞·공백 뒤의 주석만 지운다. */
 function code(source) {
@@ -87,9 +87,9 @@ test('계산 모듈이 가져오는 파일을 끝까지 따라가도 Node 전용
   assert.ok(![...files.keys()].some((f) => f.includes(`${path.sep}runtime${path.sep}`)), 'src/runtime은 주입받는다 — import하지 않는다');
 });
 
-test('Node 런타임은 계약의 세 함수를 갖는다', () => {
+test('Node 런타임은 계약의 세 함수와, 선택 함수인 텍스트 보기(runViews — P-032 버스트 흐름)를 갖는다', () => {
   for (const rt of [nodeRuntime, createNodeRuntime({ engineDir: 'x', python: 'y', concurrency: 1 })]) {
-    assert.deepEqual(Object.keys(rt).sort(), ['engineVersion', 'loadCatalog', 'runBatch']);
+    assert.deepEqual(Object.keys(rt).sort(), ['engineVersion', 'loadCatalog', 'runBatch', 'runViews']);
     for (const fn of Object.values(rt)) assert.equal(typeof fn, 'function');
   }
 });
