@@ -18,7 +18,8 @@
     "allowJs": true,
     "checkJs": false,
     "paths": {
-      "@core/*": ["../src/core/*"]
+      "@core/*": ["../src/core/*"],
+      "@tier/*": ["../src/tier/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.vue", "tests/**/*.ts"]

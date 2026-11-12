@@ -48,6 +48,278 @@ ol {
   list-style: none;
 }
 
+/* ── 결과 화면들이 함께 쓰는 조각(비교·요격전·성장·티어). 오버레이는 좁다(기본 440px) — 긴 글은 줄을 바꾼다. ── */
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.meta__row {
+  display: flex;
+  align-items: center;
+  gap: 6px 8px;
+  flex-wrap: wrap;
+}
+
+.meta__account {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.meta__line {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.meta__line--warn {
+  color: var(--warn);
+}
+
+.badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.badge--test,
+.badge--warn {
+  color: #1a1300;
+  background: var(--warn);
+  border-color: var(--warn);
+}
+
+.badge--real,
+.badge--accent {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.badge--unknown,
+.badge--muted {
+  color: var(--muted);
+}
+
+.badge--danger {
+  color: #2a0505;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.block__title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.block--failed .block__title {
+  color: var(--danger);
+}
+
+.block--caveats {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+.notes {
+  margin-top: 6px;
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.notes li {
+  overflow-wrap: anywhere;
+}
+
+.notes li::before {
+  content: '! ';
+  font-weight: 800;
+}
+
+.fold {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.fold summary {
+  cursor: pointer;
+}
+
+.bullets {
+  padding-left: 14px;
+  list-style: disc;
+  font-size: 12px;
+}
+
+.bullets li {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.issues {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.issues__name {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.issues__reason {
+  color: var(--warn);
+  overflow-wrap: anywhere;
+}
+
+.block--failed .issues__reason {
+  color: var(--danger);
+}
+
+.issues__members {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* 화면 하나(탭 하나)의 틀: 위쪽은 입력·오류, 아래쪽(.screen__content)만 스크롤한다. */
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+.screen__content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.screen__error {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.screen__hint {
+  margin: 0;
+  color: var(--muted);
+}
+
+.screen__hint code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* 입력 칸 묶음(계산 실행·결과 파일). */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.panel__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel__spacer {
+  flex: 1;
+}
+
+.panel__count {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.panel__count input {
+  width: 56px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+}
+
+.panel__text {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+}
+
+.panel__button {
+  padding: 3px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: rgba(124, 196, 255, 0.16);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.panel__button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 입력 칸을 접고 펴는 단추. 결과가 나오면 접어서 결과가 위에 보이게 한다. */
+.panel__toggle {
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.panel__label {
+  min-width: 28px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.panel__fold-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
 }

@@ -1,14 +1,17 @@
-// 편성 추천·비교 실행: 파일 읽기 → 루트의 계산 코드(src/core) → 비교 결과.
-// 계산 규칙은 여기에 없다. suggestSquads·compareSquads에 런타임을 넘겨 부를 뿐이다(CLI의 suggest·compare와 같은 길).
+// 계산 실행(편성 추천·비교, 요격전 보스별 추천, 성장 투자 비교): 파일 읽기 → 루트의 계산 코드(src/core) → 결과 문서.
+// 계산 규칙은 여기에 없다. suggestSquads·compareSquads·recommendIntercept·compareGrowth에 런타임을 넘겨 부를 뿐이다
+// (CLI의 suggest·compare·intercept·growth와 같은 길).
 
 import { withCache } from '@core/cache.mjs';
 import { DEFAULT_BUDGET, DEFAULT_LIMIT, DEFAULT_TOP, suggestSquads } from '@core/candidates.mjs';
 import { compareSquads, InputError } from '@core/compare.mjs';
-import type { CompareReport, EngineRuntime, SearchStage, SimCacheStore } from '../types';
+import { compareGrowth } from '@core/growth.mjs';
+import { DEFAULT_INTERCEPT_BUDGET, DEFAULT_INTERCEPT_TOP, recommendIntercept } from '@core/intercept.mjs';
+import type { BossProgress, CompareReport, EngineRuntime, GrowthReport, InterceptReport, SearchStage, SimCacheStore } from '../types';
 import { errorMessage, readJsonFile } from './backend';
 import { simCache, tauriRuntime } from './runtime';
 
-export { DEFAULT_BUDGET, DEFAULT_LIMIT, DEFAULT_TOP };
+export { DEFAULT_BUDGET, DEFAULT_INTERCEPT_BUDGET, DEFAULT_INTERCEPT_TOP, DEFAULT_LIMIT, DEFAULT_TOP };
 
 /** 계산에 필요한 바깥 일. 테스트에서 가짜로 바꿔 끼운다. */
 export interface ComputeDeps {
@@ -26,6 +29,8 @@ export interface ComputeDeps {
    * 계산 코드의 `deps.onStage`로 그대로 넘긴다.
    */
   onStage?: (stage: SearchStage) => void;
+  /** 요격전 추천이 보스 하나의 계산을 시작하기 직전에 부른다 — 진행 표시용. 계산 코드의 `deps.onBoss`로 그대로 넘긴다. */
+  onBoss?: (boss: BossProgress) => void;
   now?: () => Date;
 }
 
@@ -73,7 +78,12 @@ function asComputeError(e: unknown): ComputeError {
 function coreDeps(deps: ComputeDeps): object {
   // 캐시는 주어진 런타임의 바깥을 감싼다 — 런타임의 runBatch는 저장소에 없던 요청만 받는다(진행 건수도 그 수다).
   const runtime = deps.cache ? withCache(deps.runtime, deps.cache) : deps.runtime;
-  return { runtime, ...(deps.now ? { now: deps.now } : {}), ...(deps.onStage ? { onStage: deps.onStage } : {}) };
+  return {
+    runtime,
+    ...(deps.now ? { now: deps.now } : {}),
+    ...(deps.onStage ? { onStage: deps.onStage } : {}),
+    ...(deps.onBoss ? { onBoss: deps.onBoss } : {}),
+  };
 }
 
 /**
@@ -90,6 +100,87 @@ export async function runSuggest(input: SuggestInput, deps: ComputeDeps = defaul
       coreDeps(deps),
     );
     return report as unknown as CompareReport;
+  } catch (e) {
+    throw asComputeError(e);
+  }
+}
+
+export interface InterceptInput {
+  accountPath: string;
+  /** 보스 묶음 파일(docs/data-model.md §보스 묶음). CLI의 `--bosses`. */
+  bossesPath: string;
+  /** 보스별 표시 수. 주지 않으면 계산 코드의 기본값. */
+  top?: number;
+  /** 전체 시뮬 횟수의 상한(보스 수로 나눈다). 주지 않으면 계산 코드의 기본값. */
+  budget?: number;
+}
+
+/**
+ * 계정 + 보스 묶음 → 보스마다 추천(멤버 조합 + 배치 탐색) → 보스별 상위 편성.
+ * CLI의 `intercept`와 같은 함수(`recommendIntercept`)다 — 보스를 전투 조건으로 바꾸는 규칙, 예산 나누기,
+ * 미확인 칸의 처리도 그 함수가 정한다.
+ */
+export async function runIntercept(input: InterceptInput, deps: ComputeDeps = defaultDeps): Promise<InterceptReport> {
+  try {
+    const account = await readInput(deps, '계정', input.accountPath);
+    const bundle = await readInput(deps, '보스 묶음', input.bossesPath);
+    const report = await recommendIntercept(
+      { account: account as object, bundle: bundle as object },
+      { top: input.top, budget: input.budget },
+      coreDeps(deps),
+    );
+    return report as unknown as InterceptReport;
+  } catch (e) {
+    throw asComputeError(e);
+  }
+}
+
+export interface GrowthInput {
+  accountPath: string;
+  conditionPath: string;
+  /** 기준 편성이 든 편성 파일. */
+  squadsPath: string;
+  /** 기준 편성의 이름. 비우면 파일의 첫 편성이다(CLI의 `--squad`). */
+  squadName?: string;
+  /** 업그레이드 후보 파일. */
+  upgradesPath: string;
+}
+
+type SquadDoc = { name?: string; members: string[] };
+
+/** 편성 파일에서 기준 편성 하나를 고른다. 이름을 주지 않으면 첫 편성이다 — CLI(src/cli.mjs의 pickSquad)와 같다. */
+function pickSquad(squadsDoc: unknown, name: string | undefined): SquadDoc {
+  const squads = Array.isArray(squadsDoc) ? squadsDoc : (squadsDoc as { squads?: unknown } | null)?.squads;
+  if (!Array.isArray(squads) || squads.length === 0) {
+    throw new InputError('기준 편성이 없다', [{ path: '편성 파일', message: '편성을 하나 이상 담은 파일이어야 한다' }]);
+  }
+  if (name === undefined) return squads[0] as SquadDoc;
+  const found = squads.find((s) => (s as SquadDoc | null)?.name === name);
+  if (!found) {
+    const names = squads.map((s) => (s as SquadDoc | null)?.name ?? '(이름 없음)').join(', ');
+    throw new InputError('기준 편성이 없다', [{ path: '기준 편성 이름', message: `그 이름의 편성이 없다. 있는 이름: ${names}` }]);
+  }
+  return found as SquadDoc;
+}
+
+/**
+ * 계정 + 전투 조건 + 기준 편성 + 업그레이드 후보 → 후보마다 기준 편성의 적용 전후 총딜 → 증가율 순위.
+ * CLI의 `growth`와 같은 함수(`compareGrowth`)다.
+ */
+export async function runGrowth(input: GrowthInput, deps: ComputeDeps = defaultDeps): Promise<GrowthReport> {
+  try {
+    const account = await readInput(deps, '계정', input.accountPath);
+    const condition = await readInput(deps, '전투 조건', input.conditionPath);
+    const squadsDoc = await readInput(deps, '편성', input.squadsPath);
+    const upgradesDoc = await readInput(deps, '업그레이드 후보', input.upgradesPath);
+    const squadName = input.squadName?.trim() || undefined;
+    // CLI와 같다: 후보 배열 그대로이거나 {upgrades: [...]}.
+    const upgrades = Array.isArray(upgradesDoc) ? upgradesDoc : (upgradesDoc as { upgrades?: unknown } | null)?.upgrades;
+    const report = await compareGrowth(
+      { account: account as object, condition: condition as object, squad: pickSquad(squadsDoc, squadName), upgrades: upgrades as object[] },
+      coreDeps(deps),
+    );
+    return report as unknown as GrowthReport;
   } catch (e) {
     throw asComputeError(e);
   }

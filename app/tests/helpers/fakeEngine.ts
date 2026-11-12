@@ -2,21 +2,30 @@
 // 카탈로그·계정·조건·편성은 저장소의 실제 파일이다(엔진 데이터와 검증용 샘플). 엔진 실행만 가짜다.
 import type { EngineCatalog, EngineRequest, EngineRow, EngineRuntime, EngineVersion } from '../../src/types';
 import account from '../../../data/samples/account.sample.json';
+import bossBundle from '../../../data/samples/bosses.anomaly.sample.json';
 import condition from '../../../data/samples/condition.solo-raid.json';
 import squadsDoc from '../../../data/samples/squads.sample.json';
+import upgradesDoc from '../../../data/samples/upgrades.sample.json';
 import bossPresets from '../../../vendor/nikke-calc/data/boss_presets.json';
 import parsedNikke from '../../../vendor/nikke-calc/data/parsed_nikke.json';
 
 export const ACCOUNT_PATH = 'D:\\입력\\account.json';
 export const CONDITION_PATH = 'D:\\입력\\condition.json';
 export const SQUADS_PATH = 'D:\\입력\\squads.json';
+/** 검증용 보스 묶음(보스 5종 — 확인된 칸이 많은 보스부터 속성도 약점도 모르는 보스까지). */
+export const BOSSES_PATH = 'D:\\입력\\bosses.json';
+export const UPGRADES_PATH = 'D:\\입력\\upgrades.json';
 
 /** 경로 → 문서. Rust의 read_json_file을 흉내 낸다. */
 export const documents: Record<string, unknown> = {
   [ACCOUNT_PATH]: account,
   [CONDITION_PATH]: condition,
   [SQUADS_PATH]: squadsDoc,
+  [BOSSES_PATH]: bossBundle,
+  [UPGRADES_PATH]: upgradesDoc,
 };
+
+export const sampleBossBundle = bossBundle;
 
 export const sampleAccount = account;
 

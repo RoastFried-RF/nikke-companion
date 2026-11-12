@@ -54,7 +54,7 @@ npm --prefix app run build                                # 타입 검사 + 프�
 npm --prefix app test                                     # 컴포넌트 테스트 (vitest)
 cargo test --manifest-path app/src-tauri/Cargo.toml       # Rust 단위 테스트
 cargo build --manifest-path app/src-tauri/Cargo.toml
-npm --prefix app run fixture                              # 컴포넌트 테스트용 샘플 결과를 실제 CLI로 다시 만든다
+npm --prefix app run fixture                              # 컴포넌트 테스트용 샘플 결과 넷을 실제 CLI로 다시 만든다(몇 분). 고른 것만: `-- tier growth`
 ```
 
 게임 창·화면 캡처·요격전 화면 인식(실행 중인 니케가 필요하다 — `--recognize <PNG>`와 `live_recognize`만 빼고. 게임은 읽기만 한다 —

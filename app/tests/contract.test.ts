@@ -359,6 +359,38 @@ describe('엔진 호출(Rust)', () => {
     expect(sources['../src/lib/compute.ts']).toContain("from '@core/compare.mjs'");
   });
 
+  it('요격전·성장 비교·티어 화면도 계산 로직을 다시 쓰지 않았다 — 루트의 src/core·src/tier 함수를 그대로 부른다', () => {
+    const compute = sources['../src/lib/compute.ts'];
+    expect(compute).toMatch(/import \{[^}]*\brecommendIntercept\b[^}]*\} from '@core\/intercept\.mjs'/);
+    expect(compute).toMatch(/import \{[^}]*\bcompareGrowth\b[^}]*\} from '@core\/growth\.mjs'/);
+    expect(compute).toMatch(/await recommendIntercept\(/);
+    expect(compute).toMatch(/await compareGrowth\(/);
+    // 결과의 판 번호·상태 이름·버스트 묶음 규칙·탐색 요약 문장은 루트 모듈의 것을 가져다 쓴다.
+    expect(sources['../src/lib/reports.ts']).toContain("from '@tier/evaluate.mjs'");
+    expect(sources['../src/lib/reports.ts']).toContain("from '@core/intercept.mjs'");
+    expect(sources['../src/lib/reports.ts']).toContain("from '@core/growth.mjs'");
+    expect(sources['../src/components/TierView.vue']).toContain("import { STATUS_HOLD, STATUS_PREDICTED } from '@tier/evaluate.mjs'");
+    expect(sources['../src/components/TierView.vue']).toContain("import { burstOrderGroup } from '@core/search.mjs'");
+    expect(sources['../src/components/InterceptView.vue']).toContain("import { searchLine } from '@core/render.mjs'");
+    // 화면 코드에는 계산(등급 매기기·속성 상성·증가율·엔진 요청 만들기)이 없다.
+    for (const [file, text] of Object.entries(sources)) {
+      if (!/\/(components|screens)\//.test(file)) continue;
+      expect(text, file).not.toMatch(/\bgradeOf\b|ELEMENT_ADVANTAGE|\bgainRate\b|\bbuildTier\b|\btierRequest\b|profile_level|\.runBatch\(/);
+    }
+    // 티어 화면은 결과 파일을 읽기만 한다 — 엔진을 부르는 실행 상태를 쓰지 않는다.
+    expect(sources['../src/screens/TierScreen.vue']).not.toMatch(/useEngineRun|RunButtons|compute'/);
+  });
+
+  it('새 화면을 위해 Rust 명령이나 권한을 더하지 않았다 — 결과 파일은 read_json_file로 읽는다', () => {
+    expect(COMMANDS).toHaveLength(14);
+    expect(sources['../src/lib/resultFile.ts']).toContain('await readJsonFile(target)');
+    // Tauri API를 직접 부르는 곳은 여전히 lib/backend.ts 하나다.
+    for (const [file, text] of Object.entries(sources)) {
+      if (file === '../src/lib/backend.ts') continue;
+      expect(text, file).not.toMatch(/@tauri-apps\/api/);
+    }
+  });
+
   it('파일 고르기 창은 대화 상자 플러그인이 아니라 앱 명령 하나로만 연다', () => {
     expect(cargoToml).not.toMatch(/tauri-plugin-(dialog|fs|shell|http|opener)/);
     expect(libRs).not.toMatch(/tauri_plugin_(dialog|fs|shell|http|opener)/);

@@ -248,3 +248,206 @@ export interface OverlaySnapshot {
   /** 등록하지 못한 전역 단축키의 설명. 비어 있으면 모두 등록됐다. */
   shortcut_problems: string[];
 }
+
+// ── 요격전 추천 결과 — 정본은 docs/data-model.md §요격전 추천 결과와 src/core/intercept.mjs ──────────────
+
+/** 보스의 속성과 약점(루트 src/core/intercept.mjs의 resolveElement). 한쪽만 확인됐으면 다른 쪽은 규칙으로 유도한 값이다. */
+export interface BossElement {
+  /** 보스 자신의 속성. 모르면 null — 속성 상성 미반영. */
+  code: string | null;
+  /** `bundle` = 보스 묶음에 적힌 값, `weak_to` = 약점에서 유도. */
+  code_source: 'bundle' | 'weak_to' | null;
+  weak_to: string | null;
+  /** `bundle` = 보스 묶음에 적힌 값, `code` = 보스 속성에서 유도. */
+  weak_to_source: 'bundle' | 'code' | null;
+  /** 속성 상성을 계산에 반영했나. */
+  reflected: boolean;
+}
+
+/** 미확인 칸 하나와 그 칸을 무엇으로 계산했는가. */
+export interface UnconfirmedField {
+  field: string;
+  label: string;
+  computed_as: unknown;
+  /** 사람이 읽는 한 줄. */
+  text: string;
+}
+
+/** 레벨을 어떻게 정했나(루트 src/core/condition.mjs의 levelPlan). */
+export interface LevelPlan {
+  mode: 'fixed' | 'cap';
+  level: number;
+  cap: number | null;
+  synchro_level: number | null;
+  /** 동기화 레벨을 몰라 상한으로 가정했다. */
+  assumed: boolean;
+  engine_policy?: string;
+}
+
+export interface InterceptBoss {
+  id: string;
+  name: string;
+  element: BossElement;
+  reward: string | null;
+  level: LevelPlan;
+  duration: number;
+  source?: string;
+  /** 확인된 칸의 이름. */
+  confirmed: string[];
+  unconfirmed: UnconfirmedField[];
+  /** 눈에 띄어야 하는 표시(「속성 상성 미반영」). */
+  flags: string[];
+  status: 'computed' | 'not_computed';
+  budget: number;
+  sims: number;
+  assumptions: string[];
+  ranking: RankingEntry[];
+  rejected: RejectedSquad[];
+  failed: FailedSquad[];
+  suggestion: SuggestionSummary | null;
+  /** 약점 속성 보유 니케가 후보 풀에 얼마나 들었나. 약점을 모르거나 계산하지 않았으면 null. */
+  weak_pool: { element: string; owned: string[]; pooled: string[]; not_pooled: string[] } | null;
+  notes: string[];
+  caveats: string[];
+}
+
+export interface InterceptReport {
+  schema_version: 1;
+  kind: 'intercept_report';
+  generated_at?: string;
+  account: { name?: string | null; is_test_data?: boolean; updated_at?: string | null };
+  content: string;
+  bundle: { name: string | null; version: string | null; is_test_data: boolean; source: string; bosses: number };
+  assumptions: string[];
+  engine?: EngineVersion | null;
+  cache?: CacheStats | null;
+  top: number;
+  sims: { budget: number; used: number; per_boss: { id: string; name: string; budget: number; used: number }[] };
+  bosses: InterceptBoss[];
+  caveats: string[];
+}
+
+/** 요격전 추천이 보스 하나의 계산을 시작하기 직전에 알리는 진행 상황(recommendIntercept의 `deps.onBoss`). */
+export interface BossProgress {
+  /** 0부터. */
+  index: number;
+  total: number;
+  boss: { id: string; name: string };
+  /** 이 보스에 돌아간 시뮬 예산. */
+  budget: number;
+}
+
+// ── 성장 투자 비교 결과 — 정본은 docs/data-model.md §성장 투자 비교와 src/core/growth.mjs ─────────────────
+
+export interface GrowthChange {
+  nikke: string;
+  /** 육성 칸의 이름(계정 문서의 키). */
+  field: string;
+  /** 적지 않았거나 미확인이던 칸이면 null. */
+  before: unknown;
+  after: unknown;
+}
+
+export interface GrowthEntry {
+  rank: number;
+  name: string;
+  changes: GrowthChange[];
+  total_before: number;
+  total_after: number;
+  gain: number;
+  /** (적용 후 − 적용 전) / 적용 전. 적용 전 총딜이 0이면 null. */
+  gain_rate: number | null;
+  members: (ReportMember & { gain: number })[];
+  notes: string[];
+  engine_warnings: string[];
+}
+
+export interface GrowthReport {
+  schema_version: 1;
+  kind: 'growth';
+  generated_at?: string;
+  account: { name?: string | null; is_test_data?: boolean; updated_at?: string | null };
+  condition?: Record<string, unknown>;
+  assumptions?: string[];
+  engine?: EngineVersion | null;
+  cache?: CacheStats | null;
+  baseline: {
+    name: string;
+    members: ReportMember[];
+    total_damage: number;
+    notes: string[];
+    engine_warnings: string[];
+    ungrown_members: string[];
+  };
+  ranking: GrowthEntry[];
+  rejected: { name: string; reasons: string[] }[];
+  failed: { name: string; changes?: GrowthChange[]; error: { type?: string | null; message: string; path?: string | null } }[];
+  caveats: string[];
+}
+
+// ── 티어 결과 — 정본은 docs/data-model.md §티어 결과와 src/tier/evaluate.mjs ─────────────────────────────
+
+/** 기준 편성 하나에 바꿔 넣은 결과. */
+export interface TierComparison {
+  reference: string;
+  slot: number;
+  /** 대신 들어간 자리의 원래 멤버. */
+  replaced: string;
+  total_damage: number;
+  reference_total: number;
+  ratio: number;
+}
+
+export interface TierEntry {
+  name: string;
+  /** 등급을 매긴 항목의 순위(점수 순). 평가 보류는 null. */
+  rank: number | null;
+  burst_stage: string | null;
+  /** 「예측 평가」 · 「평가 보류」 (앞으로 「실측 대조 완료」가 더해질 수 있다). */
+  status: string;
+  /** 화면·표에 쓰는 상태 표기. 평가 보류는 사유가 괄호로 붙는다. */
+  status_label: string;
+  tier: string | null;
+  tier_label: string | null;
+  /** 팀 총딜 비율(1.0 = 기준 편성과 같다). 평가 보류는 null — 0점이 아니다. */
+  score: number | null;
+  /** 엔진이 효과 모델이 없다고 알린 효과가 있다 — 그 효과가 빠진 수치다. */
+  unsupported: boolean;
+  flags: string[];
+  best: TierComparison | null;
+  comparisons: TierComparison[];
+  excluded_references: { reference: string; reason: string }[];
+  hold: { code: string; label: string; message: string } | null;
+  notes: string[];
+  engine_warnings: string[];
+}
+
+export interface TierReport {
+  schema_version: 1;
+  kind: 'tier';
+  generated_at?: string;
+  method: { id: string; version: number };
+  engine?: EngineVersion | null;
+  /** 엔진 데이터 버전(데이터 파일 해시). 확인하지 못했으면 null. */
+  engine_data: { version: string; files?: Record<string, string> } | null;
+  scenario: { id?: string; boss: string; duration: number; enemy?: unknown; growth: string; growth_note?: string | null; expected?: boolean };
+  assumptions: string[];
+  references: {
+    version: string;
+    source?: unknown;
+    squads: { id: string; members: string[]; source?: string | null; status: string; reason: string | null; total_damage: number | null }[];
+  };
+  rules: { version: string; provisional: boolean; tiers: { tier: string; min: number }[] };
+  sims: { budget: number; used: number; baselines: number; variants: number; skipped_for_budget: number };
+  cache?: CacheStats | null;
+  summary: {
+    requested: number;
+    graded: number;
+    hold: number;
+    unsupported: number;
+    by_tier: Record<string, number>;
+    hold_by_reason: Record<string, number>;
+  };
+  entries: TierEntry[];
+  caveats: string[];
+}

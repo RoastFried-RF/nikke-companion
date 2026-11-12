@@ -12,8 +12,8 @@ export default defineConfig(({ command, mode }) => {
   // Tauri가 띄운 터미널에서 Rust 오류가 지워지지 않게 한다.
   clearScreen: false,
   resolve: {
-    // 저장소 루트의 계산 코드(src/core)를 그대로 가져다 쓴다. 복제하지 않는다.
-    alias: { '@core': here('../src/core') },
+    // 저장소 루트의 계산 코드(src/core, src/tier)를 그대로 가져다 쓴다. 복제하지 않는다.
+    alias: { '@core': here('../src/core'), '@tier': here('../src/tier') },
   },
   define: {
     __DEV_SAMPLE_REPORT__: JSON.stringify(dev ? here('./tests/fixtures/compare.sample.json') : ''),
@@ -24,6 +24,11 @@ export default defineConfig(({ command, mode }) => {
             account: here('../data/samples/account.sample.json'),
             condition: here('../data/samples/condition.solo-raid.json'),
             squads: here('../data/samples/squads.sample.json'),
+            upgrades: here('../data/samples/upgrades.sample.json'),
+            // 요격전의 보스 묶음은 게임 화면에서 확인한 실제 묶음이다(검증용 묶음이 아니다).
+            bosses: here('../data/intercept/anomaly.json'),
+            // 티어 화면의 샘플은 실제 CLI로 만든 테스트 입력이다(일부 니케만 계산한 결과).
+            tier: here('./tests/fixtures/tier.sample.json'),
           }
         : null,
     ),
