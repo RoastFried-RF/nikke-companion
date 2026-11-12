@@ -3,6 +3,7 @@
 // 계산은 루트의 src/core가 하고(lib/compute.ts), 엔진 프로세스는 Rust가 띄운다. 결과는 부모가 그린다.
 // 진행 표시·중단은 다른 계산 화면과 같은 것을 쓴다(lib/engineRun.ts, RunStatus, RunButtons).
 import { reactive, ref } from 'vue';
+import { onAccountAdopted } from '../lib/accountLink';
 import { DEFAULT_BUDGET, DEFAULT_LIMIT, DEFAULT_TOP, runCompare, runSuggest } from '../lib/compute';
 import { useEngineRun } from '../lib/engineRun';
 import { recall, remember } from '../lib/remember';
@@ -52,6 +53,11 @@ const budget = ref<number | ''>('');
 const refine = ref(recall(KEY('refine')) !== 'off');
 
 const engine = useEngineRun('compare');
+
+// 계정 화면이 계정 파일을 저장하면 그 경로가 계정 칸에 들어온다(계산은 시작하지 않는다).
+onAccountAdopted((path) => {
+  paths.account = path;
+});
 
 const count = (value: number | ''): number | undefined => (value === '' ? undefined : value);
 

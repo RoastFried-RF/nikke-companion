@@ -1,19 +1,15 @@
 // 계정 가져오기: 엔진의 육성 프로필(vendor/nikke-calc `scraper/profile_fetch.py`가 만든 `profiles/<이름>.json`)
 // → 우리 계정 상태. 형식 설명은 docs/data-model.md §계정 가져오기.
 //
-// 사용자가 직접 받아 둔 프로필 파일만 읽는다. 로그인 세션·쿠키·네트워크는 다루지 않는다.
+// 이 파일은 순수 변환이다 — 파일·프로세스·네트워크에 닿지 않는다. Node CLI와 오버레이(웹뷰)가 함께 쓴다.
+// 프로필 파일을 읽고 계정 파일을 쓰는 일은 런타임마다 따로 한다: Node는 src/runtime/import-profile.mjs,
+// 오버레이는 Rust 명령(app/src-tauri/src/account_sync.rs). 로그인 세션·쿠키는 여기서 다루지 않는다.
 // 옮기지 못한 칸은 값을 지어내지 않고 그 니케의 `unknown`에 남긴다 — 결과에 "미확인"으로 드러난다.
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { ACCOUNT_SCHEMA_VERSION, validateAccount } from './account.mjs';
 import { InputError } from './compare.mjs';
-import { DEFAULT_ENGINE_DIR, loadCatalog } from '../runtime/node.mjs';
 
 export const IMPORT_REPORT_SCHEMA_VERSION = 1;
 export const IMPORT_FORMAT = 'nikke-calc profile';
-/** 개인 계정 데이터를 두는 곳(gitignore). */
-export const DEFAULT_ACCOUNTS_DIR = path.resolve(fileURLToPath(new URL('../../data/accounts', import.meta.url)));
 
 /** 프로필이 언제나 적는 칸. 없거나 읽을 수 없으면 미확인이다. */
 const EXPECTED_FIELDS = ['breakthrough', 'core_enhancement', 'affinity', 'skill_levels', 'equipment', 'overload', 'collection_stage'];
@@ -33,15 +29,26 @@ const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArr
 const isInt = (v, lo, hi = Infinity) => Number.isInteger(v) && v >= lo && v <= hi;
 const isAmount = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 
-/** 엔진의 오버로드 옵션 표 → `{엔진 키: {name: 인게임 이름, values: [레벨별 퍼센트]}}`. */
-export function loadOptionTable(engineDir = DEFAULT_ENGINE_DIR) {
-  const raw = JSON.parse(fs.readFileSync(path.join(engineDir, 'data/base_stat_tables/equipment_skills.json'), 'utf8'));
+/** 엔진 폴더에서 본 오버로드 옵션 표 파일. 런타임이 이 파일을 읽어 `optionTableFrom`에 넘긴다. */
+export const OPTION_TABLE_FILE = 'data/base_stat_tables/equipment_skills.json';
+
+/**
+ * 엔진의 오버로드 옵션 표 파일(`OPTION_TABLE_FILE`)의 내용 → `{엔진 키: {name: 인게임 이름, values: [레벨별 퍼센트]}}`.
+ * 모양이 다르면 입력 오류다(엔진 데이터가 바뀌었거나 다른 파일이다).
+ */
+export function optionTableFrom(raw) {
+  const bad = (message) => new InputError('오버로드 옵션 표를 읽을 수 없다', [{ path: OPTION_TABLE_FILE, message }]);
+  if (!isPlainObject(raw)) throw bad('옵션 표는 객체여야 한다');
   const table = {};
   for (const [key, row] of Object.entries(raw)) {
     if (key.startsWith('_')) continue;
+    if (!isPlainObject(row) || typeof row.template !== 'string' || !Array.isArray(row.values) || !row.values.every((v) => typeof v === 'number')) {
+      throw bad(`${key}: {template, values} 모양이 아니다`);
+    }
     // 인게임 이름은 표의 문구에서 뽑는다 — 엔진(`runner/spec.py`)이 옵션 이름을 정하는 방식과 같다.
-    table[key] = { name: String(row.template).split('{0}')[0].trim(), values: row.values.map((v) => v * 100) };
+    table[key] = { name: row.template.split('{0}')[0].trim(), values: row.values.map((v) => v * 100) };
   }
+  if (Object.keys(table).length === 0) throw bad('옵션이 하나도 없다');
   return table;
 }
 
@@ -114,8 +121,9 @@ function linesToOverload(pieces, equipSkills, table) {
     const expected = lineLevels.reduce((s, lv) => s + table[key].values[lv - 1], 0);
     if (Math.abs(total - expected) > OPTION_TOLERANCE) return null;
   }
-  // 줄이 없는 옵션도 `[]`(그 옵션 없음)로 적는다. 엔진은 항목에 적지 않은 옵션을 0이 아니라 기본 스펙 값
-  // (우월 코드 4줄·공격력 2줄·최대 장탄 2줄)으로 계산하므로, 빼놓으면 없는 옵션이 붙은 것으로 계산된다.
+  // 줄이 없는 옵션도 `[]`(그 옵션 없음)로 적는다 — 계정 파일만 봐도 "확인했고 없다"와 "적지 않았다"가 구분된다.
+  // (계산 값은 어느 쪽이든 0줄이다: 엔진은 항목에 적지 않은 옵션을 기본 스펙 값으로 계산하지만, 계정 → 엔진 변환
+  // `toEngineEntry`(account.mjs)가 적지 않은 옵션을 0줄로 채워 넘긴다.)
   const out = {};
   for (const key of Object.keys(table)) out[table[key].name] = (levels[key] ?? []).sort((a, b) => b - a);
   return out;
@@ -213,18 +221,8 @@ function convertAccountLevel(src, warnings) {
   return out;
 }
 
-/**
- * 엔진 육성 프로필 → 계정 상태 문서. 파일을 쓰지 않는 순수 변환이다.
- *
- * @param {object} profile 프로필 파일의 내용(`{_meta, _account, chars}`)
- * @param {object} [deps]
- * @param {object} [deps.catalog]     엔진 카탈로그(`loadCatalog`). 이름 확인에 쓴다
- * @param {object} [deps.optionTable] 오버로드 옵션 표(`loadOptionTable`)
- * @param {string} [deps.name]        계정 이름. 주지 않으면 프로필 이름
- * @param {() => Date} [deps.now]
- * @returns {{account: object, skipped: {name: string, reason: string}[], unknown: {nikke: string, fields: string[]}[], warnings: string[]}}
- */
-export function importProfile(profile, deps = {}) {
+/** 프로필 문서의 겉모양을 본다. 프로필이 아니면 입력 오류다(엔진 데이터를 읽기 전에 알 수 있는 것만). */
+export function checkProfileShape(profile) {
   if (!isPlainObject(profile)) throw new InputError('프로필을 읽을 수 없다', [{ path: '', message: '프로필 문서는 객체여야 한다' }]);
   if (!isPlainObject(profile.chars)) {
     const raw = Array.isArray(profile.characters) || Array.isArray(profile.details);
@@ -235,8 +233,28 @@ export function importProfile(profile, deps = {}) {
         : 'chars가 없다 — 엔진의 scraper/profile_fetch.py가 만든 프로필 파일이 아니다',
     }]);
   }
-  const catalog = deps.catalog ?? loadCatalog(deps.engineDir);
-  const table = deps.optionTable ?? loadOptionTable(deps.engineDir);
+}
+
+/**
+ * 엔진 육성 프로필 → 계정 상태 문서. 파일을 쓰지 않는 순수 변환이다.
+ *
+ * 카탈로그와 옵션 표는 호출하는 쪽이 준다(이 모듈은 엔진 폴더를 읽지 않는다): Node는
+ * `src/runtime/import-profile.mjs`의 `importProfile`이 엔진 폴더에서 읽어 채우고, 오버레이는 Rust 명령으로 받는다.
+ *
+ * @param {object} profile 프로필 파일의 내용(`{_meta, _account, chars}`)
+ * @param {object} deps
+ * @param {object} deps.catalog       엔진 카탈로그(런타임의 `loadCatalog`). 이름 확인에 쓴다
+ * @param {object} deps.optionTable   오버로드 옵션 표(`optionTableFrom`)
+ * @param {string} [deps.name]        계정 이름. 주지 않으면 프로필 이름
+ * @param {() => Date} [deps.now]
+ * @returns {{account: object, skipped: {name: string, reason: string}[], unknown: {nikke: string, fields: string[]}[], warnings: string[]}}
+ */
+export function importProfile(profile, deps = {}) {
+  checkProfileShape(profile);
+  const catalog = deps.catalog;
+  const table = deps.optionTable;
+  if (!isPlainObject(catalog) || !isPlainObject(catalog.nikkes)) throw new Error('importProfile: 엔진 카탈로그(deps.catalog)가 없다');
+  if (!isPlainObject(table)) throw new Error('importProfile: 오버로드 옵션 표(deps.optionTable)가 없다');
   const meta = isPlainObject(profile._meta) ? profile._meta : {};
   const now = (deps.now ?? (() => new Date()))().toISOString();
 
@@ -282,47 +300,33 @@ export function accountFileName(name) {
   return safe === '' ? 'imported' : safe;
 }
 
+/** 가져오기 결과에 언제나 붙는 주의 문구. */
+export const IMPORT_CAVEATS = Object.freeze([
+  '가져온 값을 인게임 육성 상태와 대조하지 않았다. 계정 파일을 열어 직접 확인하라.',
+  // 엔진은 항목이 있는 니케의 적지 않은 칸을 기본 스펙(만렙)으로 계산하지만, 계정 → 엔진 변환(account.mjs의
+  // toEngineEntry)이 그 칸들을 미육성 값으로 채워 넘긴다 — 그래서 미확인 칸은 낮은 쪽으로 계산된다.
+  '미확인 칸은 값이 없는 칸이다. 계산할 때 적지 않은 칸과 미확인 칸은 미육성 값(돌파 0·코어 강화 0·호감도 1·스킬 1/1/1·소장품 없음·오버로드 옵션 0줄, 장비는 오버로드 줄이 하나도 없으면 미장착)으로 채워지므로, 미확인 칸이 있는 니케는 실제보다 낮게 나올 수 있다. 확인한 값을 계정 파일에 적고 그 칸을 unknown에서 지워라.',
+  '니케별 레벨과 큐브는 계정 상태에 담지 않는다 — 레벨은 콘텐츠가 정하고(레벨 상한이 있는 콘텐츠는 account.synchro_level을 상한까지 반영한다), 큐브는 엔진 기본 스펙 큐브로 계산된다.',
+]);
+
 /**
- * 프로필 파일을 읽어 계정 상태로 바꾸고 `data/accounts/<이름>.json`에 쓴다.
- * 같은 이름의 파일이 있으면 쓰지 않는다 — 손으로 고친 계정 파일을 덮어쓰지 않기 위해서다(`force`로만 덮어쓴다).
+ * 가져오기 결과 문서(docs/data-model.md §계정 가져오기 §결과). 파일을 읽고 쓰는 쪽이 입력·출력 경로를 넘긴다.
  *
  * @param {object} input
- * @param {string} input.file      프로필 파일 경로
- * @param {string} [input.name]    계정 이름(파일 이름도 여기서 나온다). 기본은 프로필 이름, 없으면 입력 파일 이름
- * @param {string} [input.outDir]  기본 `data/accounts/`
- * @param {boolean} [input.force]
- * @param {object} [deps] importProfile과 같다
+ * @param {object} input.profile  변환에 쓴 프로필 문서
+ * @param {{account: object, skipped: object[], unknown: object[], warnings: string[]}} input.result `importProfile`의 결과
+ * @param {string|null} [input.file]    프로필 파일 경로(화면에 보일 글자 그대로)
+ * @param {string|null} [input.output]  계정 파일을 쓴 경로. 아직 쓰지 않았으면 null
  */
-export function importProfileFile({ file, name, outDir = DEFAULT_ACCOUNTS_DIR, force = false }, deps = {}) {
-  if (typeof file !== 'string' || file === '') {
-    throw new InputError('인자가 빠졌다', [{ path: '<파일>', message: '엔진 프로필 파일(profiles/<이름>.json) 경로가 필요하다' }]);
-  }
-  let profile;
-  try {
-    profile = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch (e) {
-    throw new InputError('파일을 읽을 수 없다', [{ path: file, message: e.message }]);
-  }
-  const fallbackName = path.basename(file).replace(/\.json$/i, '');
-  const profileName = isPlainObject(profile?._meta) && typeof profile._meta.name === 'string' && profile._meta.name !== '' ? profile._meta.name : null;
-  const { account, skipped, unknown, warnings } = importProfile(profile, { ...deps, name: name ?? profileName ?? fallbackName });
-
-  const output = path.join(outDir, `${accountFileName(account.name)}.json`);
-  fs.mkdirSync(outDir, { recursive: true });
-  try {
-    fs.writeFileSync(output, JSON.stringify(account, null, 2) + '\n', { encoding: 'utf8', flag: force ? 'w' : 'wx' });
-  } catch (e) {
-    if (e.code !== 'EEXIST') throw e;
-    throw new InputError('계정 파일이 이미 있다', [{ path: output, message: '덮어쓰면 손으로 고친 내용이 사라진다 — 덮어쓰려면 --force, 따로 두려면 --name <다른 이름>' }]);
-  }
-
+export function importReport({ profile, result, file = null, output = null }) {
+  const { account, skipped, unknown, warnings } = result;
   const fieldCounts = {};
   for (const u of unknown) for (const f of u.fields) fieldCounts[f] = (fieldCounts[f] ?? 0) + 1;
   return {
     schema_version: IMPORT_REPORT_SCHEMA_VERSION,
     kind: 'import',
     generated_at: account.import.imported_at,
-    input: { file: path.resolve(file), format: IMPORT_FORMAT, profile_name: account.import.profile_name, fetched_at: account.import.fetched_at },
+    input: { file, format: IMPORT_FORMAT, profile_name: account.import.profile_name, fetched_at: account.import.fetched_at },
     output,
     account: { name: account.name, is_test_data: account.is_test_data, source: account.source, updated_at: account.updated_at },
     summary: {
@@ -335,10 +339,6 @@ export function importProfileFile({ file, name, outDir = DEFAULT_ACCOUNTS_DIR, f
     unknown,
     skipped,
     warnings,
-    caveats: [
-      '가져온 값을 인게임 육성 상태와 대조하지 않았다. 계정 파일을 열어 직접 확인하라.',
-      '미확인 칸은 값이 없는 칸이다. 지금 엔진은 항목에 적지 않은 칸을 기본 스펙 값(돌파 3·스킬 10/10/10·오버로드 장비 등)으로 계산하므로, 미확인 칸이 있는 니케는 실제보다 높게 나올 수 있다. 확인한 값을 계정 파일에 적고 그 칸을 unknown에서 지워라.',
-      '니케별 레벨과 큐브는 계정 상태에 담지 않는다 — 레벨은 콘텐츠가 정하고(레벨 상한이 있는 콘텐츠는 account.synchro_level을 상한까지 반영한다), 큐브는 엔진 기본 스펙 큐브로 계산된다.',
-    ],
+    caveats: [...IMPORT_CAVEATS],
   };
 }

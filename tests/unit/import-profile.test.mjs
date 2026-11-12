@@ -11,7 +11,8 @@ import { InputError } from '../../src/core/compare.mjs';
 import { loadCatalog } from '../../src/runtime/node.mjs';
 import {
   importProfile, importProfileFile, loadOptionTable, accountFileName, DEFAULT_ACCOUNTS_DIR, IMPORT_FORMAT,
-} from '../../src/core/import-profile.mjs';
+} from '../../src/runtime/import-profile.mjs';
+import { importProfile as convertProfile, importReport, IMPORT_CAVEATS, optionTableFrom } from '../../src/core/import-profile.mjs';
 import { renderImportReport } from '../../src/core/render.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -53,7 +54,7 @@ const deps = { catalog, optionTable, now };
 
 const NO_OPTIONS = { atk_pct: 0, element_bonus: 0, max_ammo_pct: [], crit_rate: 0, crit_dmg: 0, charge_speed_pct: [], charge_dmg_pct: 0, accuracy_pct: 0, def_pct: 0 };
 const NO_LINES = { 머리: [], 몸통: [], 팔: [], 다리: [] };
-/** 계정 상태의 overload: 줄이 없는 옵션도 `[]`로 적혀 있어야 한다(엔진이 적지 않은 옵션을 기본 스펙 값으로 계산한다). */
+/** 계정 상태의 overload: 줄이 없는 옵션도 `[]`로 적혀 있어야 한다("확인했고 없다"가 계정 파일에 드러난다). */
 const overloadOf = (lines = {}) => ({
   공격력: [], '우월 코드 대미지': [], '최대 장탄 수': [], '크리티컬 확률': [], '크리티컬 대미지': [],
   '차지 속도': [], '차지 대미지': [], 명중률: [], 방어력: [], ...lines,
@@ -369,4 +370,68 @@ test('CLI import-profile: 프로필 파일을 받아 계정 파일을 쓰고 요
     assert.equal(r.status, 2, bad.join(' '));
     assert.match(r.stderr, /입력 오류/);
   }
+});
+
+// ── 순수 변환(src/core/import-profile.mjs) — 오버레이(웹뷰)가 함께 쓴다 ─────────────────────
+
+test('순수 변환은 엔진 폴더를 읽지 않는다 — 카탈로그와 옵션 표를 받아야 하고, 받으면 Node 쪽과 같은 결과다', () => {
+  const profile = profileOf({ 크라운: entry(), 헬름: entry() });
+  assert.throws(() => convertProfile(profile, { optionTable, now }), /엔진 카탈로그\(deps\.catalog\)가 없다/);
+  assert.throws(() => convertProfile(profile, { catalog, now }), /오버로드 옵션 표\(deps\.optionTable\)가 없다/);
+  // 프로필이 아닌 문서는 카탈로그가 없어도 입력 오류로 먼저 걸린다.
+  assert.throws(() => convertProfile({ chars: [] }, {}), InputError);
+  assert.deepEqual(convertProfile(profile, deps), importProfile(profile, deps));
+});
+
+test('옵션 표는 파일 내용에서 만든다 — 모양이 다르면 입력 오류', () => {
+  const raw = ENGINE_FILES['data/base_stat_tables/equipment_skills.json'];
+  assert.deepEqual(optionTableFrom(raw), optionTable);
+  assert.equal(optionTableFrom(raw).atk_pct.name, '공격력');
+  for (const bad of [null, [], 'x', {}, { _comment: '주석뿐' }, { atk_pct: { values: [1] } }, { atk_pct: { template: '공격력 {0}', values: ['1'] } }]) {
+    assert.throws(() => optionTableFrom(bad), InputError, JSON.stringify(bad));
+  }
+});
+
+test('결과 문서는 파일 없이도 만든다(오버레이: 저장 전의 요약) — 파일로 쓴 결과와 요약이 같다', (t) => {
+  const profile = profileOf({ 크라운: entry(), 헬름: entry(), '새로 나온 니케': entry() });
+  const result = convertProfile(profile, deps);
+  const bare = importReport({ profile, result });
+  assert.equal(bare.input.file, null);
+  assert.equal(bare.output, null);
+  assert.deepEqual(bare.summary, { roster: 3, imported: 2, skipped: 1, with_unknown: 1, unknown_fields: { favorite_stage: 1 } });
+
+  const dir = tmpDir(t);
+  const file = path.join(dir, 'me.json');
+  fs.writeFileSync(file, JSON.stringify(profile));
+  const written = importProfileFile({ file, outDir: path.join(dir, 'accounts') }, deps);
+  assert.deepEqual({ ...written, input: { ...written.input, file: null }, output: null }, bare);
+});
+
+test('주의 문구가 지금의 계산과 맞다: 미확인 칸은 미육성 값으로 채워져 낮게 계산된다(기본 스펙이 아니다)', () => {
+  const text = IMPORT_CAVEATS.join('\n');
+  // P-008 때의 설명("엔진이 기본 스펙 값으로 계산하므로 … 높게 나올 수 있다")은 사실이 아니게 됐다.
+  assert.doesNotMatch(text, /높게 나올 수 있다|돌파 3|10\/10\/10/);
+  assert.match(text, /미육성 값\(돌파 0·코어 강화 0·호감도 1·스킬 1\/1\/1·소장품 없음·오버로드 옵션 0줄, 장비는 오버로드 줄이 하나도 없으면 미장착\)/);
+  assert.match(text, /실제보다 낮게 나올 수 있다/);
+
+  // 문구가 말하는 값이 계정 → 엔진 변환(toEngineProfile → toEngineEntry)이 실제로 채우는 값이다.
+  const broken = { collection_stage: 'SR5' };
+  const { account, unknown } = importProfile(profileOf({ 크라운: broken, 앨리스: entry() }), deps);
+  assert.deepEqual(unknown, [{ nikke: '크라운', fields: ['breakthrough', 'core_enhancement', 'affinity', 'skill_levels', 'equipment', 'overload'] }]);
+  const sent = toEngineProfile(account, ['크라운']).chars.크라운;
+  assert.equal(sent.breakthrough, 0);
+  assert.equal(sent.core_enhancement, 0);
+  assert.equal(sent.affinity, 1);
+  assert.deepEqual(sent.skill_levels, [1, 1, 1]);
+  assert.equal(sent.collection_stage, 'SR5', '적힌 칸은 그대로다');
+  assert.deepEqual(Object.values(sent.overload), Array(9).fill(0));
+  assert.deepEqual(sent.equipment, Object.fromEntries(['머리', '몸통', '팔', '다리'].map((p) => [p, { tier: '없음' }])));
+  // 소장품이 미확인이면 '없음'으로 채워진다.
+  const noCollection = importProfile(profileOf({ 크라운: entry({ collection_stage: '???' }) }), deps).account;
+  assert.equal(toEngineProfile(noCollection, ['크라운']).chars.크라운.collection_stage, '없음');
+
+  // 가져오기 결과와 CLI 출력에 같은 문구가 실린다.
+  const report = importReport({ profile: profileOf({ 크라운: entry() }), result: importProfile(profileOf({ 크라운: entry() }), deps) });
+  assert.deepEqual(report.caveats, [...IMPORT_CAVEATS]);
+  assert.match(renderImportReport(report), /실제보다 낮게 나올 수 있다/);
 });

@@ -496,3 +496,91 @@ export interface TierReport {
   entries: TierEntry[];
   caveats: string[];
 }
+
+// ── 계정 받기(src-tauri/src/account_sync.rs) ──────────────────────────────────
+// 세션 쿠키의 내용은 이 타입들 어디에도 없다 — Rust가 화면에 넘기지 않는다.
+
+/** 계정 받기의 지금 상태(account_sync.rs의 SyncStatus). 파일의 유무와 시각뿐이다. */
+export interface SyncStatus {
+  /** 확인한 이름. 쓸 수 없는 이름이면 빈 문자열이고 이유가 `problems`에 있다. */
+  name: string;
+  /** 쿠키 파일이 있는가. 내용은 오지 않는다. */
+  cookie_saved: boolean;
+  cookie_saved_at: string | null;
+  /** 그 이름의 프로필을 마지막으로 받은 시각. */
+  profile_fetched_at: string | null;
+  /** 그 이름의 계정 파일 경로(있을 때만). */
+  account_file: string | null;
+  login_window_open: boolean;
+  /** 엔진 폴더·수집 스크립트·python·계정 폴더의 문제(한국어 문장). */
+  problems: string[];
+}
+
+/** 쿠키를 저장한 결과(account_sync.rs의 CookieSaved). 쿠키의 내용은 없다. */
+export interface CookieSaved {
+  saved_at: string | null;
+  /** 저장한 쿠키의 수. */
+  count: number;
+}
+
+/** 수집 스크립트가 낸 줄 하나(account_sync.rs의 FetchLine). 쿠키 값은 가려져 있다. */
+export interface FetchLine {
+  text: string;
+  /** 경고 줄(`[!]`)인가. */
+  warning: boolean;
+}
+
+/** 프로필 수집의 결과(account_sync.rs의 FetchOutcome). */
+export interface FetchOutcome {
+  name: string;
+  profile_path: string;
+  fetched_at: string | null;
+  /** 스크립트가 낸 모든 줄(낸 차례대로). */
+  lines: FetchLine[];
+  /** 그 가운데 경고 줄. */
+  warnings: string[];
+  seconds: number;
+}
+
+/** 계정 받기 명령이 거부한 값(account_sync.rs의 SyncFailure). */
+export interface SyncFailure {
+  /** 실패의 종류: cookie_missing · cookie_invalid · cookie_rejected · not_logged_in · session_expired · network · timeout · stopped · … */
+  kind: string;
+  /** 한국어 문장. */
+  message: string;
+  /** 쿠키를 다시 받아야 하는가 — 쿠키를 받는 순서를 함께 보인다. */
+  cookie_help: boolean;
+  /** 수집 스크립트가 그때까지 낸 줄(수집 실패일 때만). */
+  lines: FetchLine[];
+  warnings: string[];
+}
+
+/** 받은 프로필과 변환에 쓸 엔진의 오버로드 옵션 표(account_sync.rs의 read_profile). 변환은 루트 src/core/import-profile.mjs가 한다. */
+export interface FetchedProfile {
+  path: string;
+  profile: unknown;
+  option_table: unknown;
+}
+
+/** 계정 파일을 쓴 결과(account_sync.rs의 SavedAccount). */
+export interface SavedAccount {
+  path: string;
+  /** 덮어쓰기 전에 남긴 옛 파일의 사본. 새로 만든 것이면 null. */
+  backup: string | null;
+}
+
+/** 가져오기 결과 문서(루트 src/core/import-profile.mjs의 importReport — docs/data-model.md §계정 가져오기). */
+export interface ImportReport {
+  schema_version: number;
+  kind: string;
+  generated_at: string;
+  input: { file: string | null; format: string; profile_name: string | null; fetched_at: string | null };
+  /** 계정 파일을 쓴 경로. 아직 쓰지 않았으면 null. */
+  output: string | null;
+  account: { name: string; is_test_data: boolean; source: string; updated_at: string };
+  summary: { roster: number; imported: number; skipped: number; with_unknown: number; unknown_fields: Record<string, number> };
+  unknown: { nikke: string; fields: string[] }[];
+  skipped: { name: string; reason: string }[];
+  warnings: string[];
+  caveats: string[];
+}

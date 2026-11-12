@@ -16,6 +16,7 @@ import ResultLoader from '../components/ResultLoader.vue';
 import RunButtons from '../components/RunButtons.vue';
 import RunStatus from '../components/RunStatus.vue';
 import TrackPanel from '../components/TrackPanel.vue';
+import { onAccountAdopted } from '../lib/accountLink';
 import { errorMessage } from '../lib/backend';
 import { DEFAULT_INTERCEPT_BUDGET, DEFAULT_INTERCEPT_TOP, runIntercept } from '../lib/compute';
 import { useEngineRun } from '../lib/engineRun';
@@ -53,6 +54,11 @@ const restored = ref(report.value !== null);
 const error = ref('');
 /** 입력 칸을 펴 두나. 결과가 있으면 접어서 보스와 편성이 위에 보이게 한다. */
 const inputsOpen = ref(report.value === null);
+
+// 계정 화면이 계정 파일을 저장하면 그 경로가 계정 칸에 들어온다(계산은 시작하지 않는다).
+onAccountAdopted((path) => {
+  accountPath.value = path;
+});
 
 const engine = useEngineRun('intercept');
 const file = useResultFile<InterceptReport>({ key: 'intercept.report-path', label: '요격전 추천 결과', check: checkInterceptReport });

@@ -7,16 +7,23 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
   CaptureRecord,
   CompareReport,
+  CookieSaved,
   EngineCatalog,
   EngineProgress,
   EngineRequest,
   EngineRow,
   EngineVersion,
+  FetchedProfile,
+  FetchLine,
+  FetchOutcome,
   GameCaptureOutcome,
   GameSnapshot,
   OverlaySnapshot,
+  SavedAccount,
   ScreenRecognition,
   ScreenTrackStatus,
+  SyncFailure,
+  SyncStatus,
 } from '../types';
 
 /** 오버레이 상태가 바뀔 때 Rust가 보내는 이벤트 이름(src-tauri/src/lib.rs의 OVERLAY_STATE_EVENT). */
@@ -33,6 +40,9 @@ export const GAME_CAPTURE_EVENT = 'game-capture';
 
 /** 요격전 화면 자동 추적의 결과가 바뀔 때 Rust가 보내는 이벤트 이름(src-tauri/src/lib.rs의 SCREEN_TRACK_EVENT). */
 export const SCREEN_TRACK_EVENT = 'screen-track';
+
+/** 계정 수집 스크립트가 줄을 낼 때마다 Rust가 보내는 이벤트 이름(src-tauri/src/lib.rs의 ACCOUNT_FETCH_EVENT). */
+export const ACCOUNT_FETCH_EVENT = 'account-fetch';
 
 /** 비교 결과 파일을 읽는다. 실패하면 한국어 오류 문장으로 거부된다. */
 export function loadReport(path: string): Promise<CompareReport> {
@@ -123,6 +133,79 @@ export function setScreenTracking(enabled: boolean, intervalMs: number | null = 
 /** 자동 추적의 지금 상태(마지막으로 읽은 시각·근거 포함). 캡처하지 않는다 — 추적 스레드가 남긴 것을 읽을 뿐이다. */
 export function screenTrackStatus(): Promise<ScreenTrackStatus> {
   return invoke<ScreenTrackStatus>('screen_track_status');
+}
+
+// ── 계정 받기 ─────────────────────────────────────────────────────────────────
+// 세션 쿠키는 계정 접근권이다. 화면에서 Rust로 가는 것은 붙여넣은 글자 한 번뿐이고(accountSaveCookie),
+// Rust에서 화면으로 오는 것에는 쿠키가 없다 — 저장한 시각·개수, 가려진 진행 줄, 한국어 오류뿐이다.
+// 아래 명령들은 실패하면 `SyncFailure`(종류·문장·쿠키를 다시 받아야 하는지)로 거부된다 — `syncFailure`로 읽는다.
+
+/** 계정 받기의 지금 상태: 쿠키 파일이 있는지(내용은 오지 않는다), 마지막으로 받은 시각, 엔진 폴더·python 문제. */
+export function accountSyncStatus(name: string | null = null): Promise<SyncStatus> {
+  return invoke<SyncStatus>('account_sync_status', { name });
+}
+
+/**
+ * 붙여넣은 쿠키를 Rust에 넘겨 엔진의 쿠키 파일에 쓰게 한다. Rust가 한 줄로 정리하고, 필수 쿠키가 없으면 거부한다.
+ * 돌아오는 것은 저장한 시각과 개수뿐이다. 넘긴 글자는 화면 쪽 어디에도 남기지 않는다(부르는 쪽이 입력 칸을 비운다).
+ */
+export function accountSaveCookie(cookie: string): Promise<CookieSaved> {
+  return invoke<CookieSaved>('account_save_cookie', { cookie });
+}
+
+/**
+ * 엔진의 수집 스크립트로 프로필을 받는다(blablalink에 요청이 나간다 — 저장된 쿠키로, 엔진 스크립트가).
+ * 화면이 정하는 것은 이름뿐이다. 도는 동안 `account-fetch` 이벤트로 줄이 오고, 끝나면 모든 줄과 경고가 온다.
+ */
+export function accountFetchProfile(name: string): Promise<FetchOutcome> {
+  return invoke<FetchOutcome>('account_fetch_profile', { name });
+}
+
+/** 도는 계정 수집을 멈춘다. 멈출 수집이 있었으면 true — 그 수집의 `accountFetchProfile`이 '중단됨'으로 거부된다. */
+export function accountFetchCancel(): Promise<boolean> {
+  return invoke<boolean>('account_fetch_cancel');
+}
+
+/** 받은 프로필과 변환에 쓸 엔진의 오버로드 옵션 표를 읽는다. */
+export function accountReadProfile(name: string): Promise<FetchedProfile> {
+  return invoke<FetchedProfile>('account_read_profile', { name });
+}
+
+/** 계정 상태 문서를 계정 폴더의 `<이름>.json`에 쓴다. 폴더는 Rust가 정하고, 있던 파일은 `.bak`으로 한 벌 남는다. */
+export function accountSaveFile(name: string, account: unknown): Promise<SavedAccount> {
+  return invoke<SavedAccount>('account_save_file', { name, account });
+}
+
+/** blablalink 로그인 창을 연다(별도 창 — 로그인은 그 페이지에서 사용자가 직접 한다). */
+export function loginWindowOpen(): Promise<void> {
+  return invoke<void>('login_window_open');
+}
+
+/**
+ * 로그인 창의 쿠키를 Rust가 읽어 엔진의 쿠키 파일에 쓰고 창을 닫는다. 쿠키 값은 화면으로 오지 않는다.
+ * 아직 로그인하지 않았으면 `not_logged_in`으로 거부되고 창은 그대로다.
+ */
+export function loginWindowTakeCookie(): Promise<CookieSaved> {
+  return invoke<CookieSaved>('login_window_take_cookie');
+}
+
+/** 로그인 창의 세션(쿠키·저장 데이터)을 지운다. 한 일을 알리는 문장이 온다. */
+export function loginWindowClear(): Promise<string> {
+  return invoke<string>('login_window_clear');
+}
+
+/** 계정 수집 스크립트가 줄을 낼 때마다 불린다(쿠키 값은 가려져 있다). 돌려받은 함수로 구독을 끊는다. */
+export function onAccountFetch(handler: (line: FetchLine) => void): Promise<UnlistenFn> {
+  return listen<FetchLine>(ACCOUNT_FETCH_EVENT, (event) => handler(event.payload));
+}
+
+/** 계정 받기 명령이 거부한 값을 `SyncFailure`로. Rust가 준 것이 아니면(IPC 오류 등) 종류 없는 실패로 감싼다. */
+export function syncFailure(e: unknown): SyncFailure {
+  if (e !== null && typeof e === 'object' && typeof (e as SyncFailure).kind === 'string' && typeof (e as SyncFailure).message === 'string') {
+    const f = e as Partial<SyncFailure> & Pick<SyncFailure, 'kind' | 'message'>;
+    return { kind: f.kind, message: f.message, cookie_help: f.cookie_help === true, lines: f.lines ?? [], warnings: f.warnings ?? [] };
+  }
+  return { kind: 'unknown', message: errorMessage(e), cookie_help: false, lines: [], warnings: [] };
 }
 
 /** 자동 추적의 결과(켜짐·상태·인식한 화면과 보스)가 바뀔 때마다 불린다. 돌려받은 함수로 구독을 끊는다. */

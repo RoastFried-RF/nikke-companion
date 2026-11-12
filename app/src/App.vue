@@ -1,13 +1,15 @@
 <script setup lang="ts">
-// 오버레이 화면의 틀: 제목 줄, 오버레이 상태, 게임 창 칸, 탭(추천·비교 / 요격전 / 성장 / 티어).
+// 오버레이 화면의 틀: 제목 줄, 오버레이 상태, 게임 창 칸, 탭(추천·비교 / 요격전 / 성장 / 티어 / 계정).
 // 탭마다 화면 하나(src/screens)다. 탭을 옮겨도 화면의 상태(입력·결과·도는 계산)는 남는다(KeepAlive).
 import { KeepAlive, onBeforeUnmount, onMounted, ref } from 'vue';
 import GamePanel from './components/GamePanel.vue';
 import OverlayStatus from './components/OverlayStatus.vue';
+import { provideAccountLink } from './lib/accountLink';
 import { errorMessage, onOverlayState, overlayStatus, quitApp, startupReportPath } from './lib/backend';
 import { provideEngineOwner } from './lib/engineRun';
 import { recall, remember } from './lib/remember';
 import { provideScreenTrack } from './lib/screenTrack';
+import AccountScreen from './screens/AccountScreen.vue';
 import CompareScreen from './screens/CompareScreen.vue';
 import GrowthScreen from './screens/GrowthScreen.vue';
 import InterceptScreen from './screens/InterceptScreen.vue';
@@ -20,6 +22,7 @@ const TABS = [
   { key: 'intercept', label: '요격전' },
   { key: 'growth', label: '성장' },
   { key: 'tier', label: '티어' },
+  { key: 'account', label: '계정' },
 ] as const;
 type TabKey = (typeof TABS)[number]['key'];
 
@@ -36,6 +39,8 @@ const startupPath = ref('');
 const ready = ref(false);
 /** 지금 계산을 돌리는 탭(없으면 null). 계산은 한 번에 한 탭에서만 돈다. */
 const computingTab = provideEngineOwner();
+// 계정 화면이 저장한 계정 파일의 경로를 추천·비교, 요격전, 성장 화면의 계정 칸에 넣는 통로(lib/accountLink.ts).
+provideAccountLink();
 
 let unlisten: (() => void) | null = null;
 let unmounted = false;
@@ -115,7 +120,7 @@ onBeforeUnmount(() => {
         @click="select(t.key)"
       >
         {{ t.label }}
-        <!-- 탭이 좁아 글자 대신 점으로 알린다(탭 네 개가 440px에 들어가야 한다). -->
+        <!-- 탭이 좁아 글자 대신 점으로 알린다(탭 다섯 개가 440px에 들어가야 한다). -->
         <span v-if="computingTab === t.key" class="tabs__busy" role="img" title="계산 중" aria-label="계산 중" data-testid="tab-busy"></span>
       </button>
     </nav>
@@ -127,7 +132,8 @@ onBeforeUnmount(() => {
         <CompareScreen v-if="tab === 'compare'" :startup-path="startupPath" />
         <InterceptScreen v-else-if="tab === 'intercept'" />
         <GrowthScreen v-else-if="tab === 'growth'" />
-        <TierScreen v-else />
+        <TierScreen v-else-if="tab === 'tier'" />
+        <AccountScreen v-else />
       </KeepAlive>
     </template>
   </div>

@@ -19,7 +19,32 @@ fn main() {
             "recognize_game_screen",
             "set_screen_tracking",
             "screen_track_status",
+            "account_sync_status",
+            "account_save_cookie",
+            "account_fetch_profile",
+            "account_fetch_cancel",
+            "account_read_profile",
+            "account_save_file",
+            "login_window_open",
+            "login_window_take_cookie",
+            "login_window_clear",
         ]),
     );
     tauri_build::try_build(attributes).expect("tauri-build 실패");
+    embed_test_manifest();
+}
+
+/// Windows: 통합 테스트 실행 파일에 「공용 컨트롤 6」 선언을 넣는다.
+///
+/// 앱 실행 파일에는 tauri-build가 같은 선언을 넣어 준다. 테스트 실행 파일에는 없어서, Tauri의 창 코드를 실제로 쓰는
+/// 테스트(`tests/live_login_window.rs`)는 시작도 못 하고 죽는다(STATUS_ENTRYPOINT_NOT_FOUND). 앱 실행 파일에는 영향이 없다.
+fn embed_test_manifest() {
+    let target = |key: &str| std::env::var(key).unwrap_or_default();
+    if target("CARGO_CFG_TARGET_OS") != "windows" || target("CARGO_CFG_TARGET_ENV") != "msvc" {
+        return;
+    }
+    let manifest = std::path::Path::new(&target("CARGO_MANIFEST_DIR")).join("tests/windows-test.manifest");
+    println!("cargo:rerun-if-changed=tests/windows-test.manifest");
+    println!("cargo:rustc-link-arg-tests=/MANIFEST:EMBED");
+    println!("cargo:rustc-link-arg-tests=/MANIFESTINPUT:{}", manifest.display());
 }

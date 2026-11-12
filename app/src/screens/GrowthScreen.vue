@@ -8,6 +8,7 @@ import PathField from '../components/PathField.vue';
 import ResultLoader from '../components/ResultLoader.vue';
 import RunButtons from '../components/RunButtons.vue';
 import RunStatus from '../components/RunStatus.vue';
+import { onAccountAdopted } from '../lib/accountLink';
 import { errorMessage } from '../lib/backend';
 import { runGrowth } from '../lib/compute';
 import { useEngineRun } from '../lib/engineRun';
@@ -28,6 +29,11 @@ const report = ref<GrowthReport | null>(null);
 const error = ref('');
 /** 입력 칸을 펴 두나. 결과가 나오면 접는다. */
 const inputsOpen = ref(true);
+
+// 계정 화면이 계정 파일을 저장하면 그 경로가 계정 칸에 들어온다(계산은 시작하지 않는다).
+onAccountAdopted((path) => {
+  accountPath.value = path;
+});
 
 const engine = useEngineRun('growth');
 const file = useResultFile<GrowthReport>({ key: 'growth.report-path', label: '성장 비교 결과', check: checkGrowthReport });

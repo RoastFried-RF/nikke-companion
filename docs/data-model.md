@@ -41,8 +41,15 @@
 
 ## 계정 가져오기 — `src/core/import-profile.mjs`
 
-엔진의 `scraper/profile_fetch.py`가 만든 육성 프로필(`profiles/<이름>.json`)을 계정 상태로 바꾼다. **사용자가 직접 받아 둔
-파일만 읽는다** — 로그인 세션·쿠키·네트워크는 다루지 않고, 엔진의 `profiles/` 폴더에도 쓰지 않는다.
+엔진의 `scraper/profile_fetch.py`가 만든 육성 프로필(`profiles/<이름>.json`)을 계정 상태로 바꾼다. 변환은 순수 함수이고
+(`src/core/import-profile.mjs` — 파일·프로세스·네트워크에 닿지 않는다. Node CLI와 오버레이가 함께 쓴다), 프로필 파일을 읽고 계정
+파일을 쓰는 일은 런타임마다 따로 한다:
+
+- **Node CLI**(`src/runtime/import-profile.mjs`): 아래 명령. **사용자가 직접 받아 둔 파일만 읽는다** — 로그인 세션·쿠키·네트워크는
+  다루지 않고, 엔진의 `profiles/` 폴더에도 쓰지 않는다. 엔진 폴더에서 카탈로그와 오버로드 옵션 표를 읽어 변환 함수에 넘긴다.
+- **오버레이**(계정 탭 — `app/README.md` §계정 받기): Rust 명령이 쿠키 저장·수집 스크립트 실행·프로필 읽기·계정 파일 쓰기를 하고,
+  화면 쪽(`app/src/lib/accountSync.ts`)이 같은 변환 함수를 부른다. 있는 계정 파일은 `.bak`으로 한 벌 남기고 덮어쓴다(CLI는
+  `--force` 없이는 덮어쓰지 않는다).
 
 ```bash
 node src/cli.mjs import-profile <프로필.json> [--name <계정 이름>] [--out-dir <폴더>] [--force] [--json <결과.json>]
@@ -52,7 +59,10 @@ node src/cli.mjs import-profile <프로필.json> [--name <계정 이름>] [--out
   같은 이름의 파일이 있으면 쓰지 않는다(손으로 고친 내용을 지키기 위해). 덮어쓰려면 `--force`.
 - 결과는 `is_test_data: false`, `source: "import"`, `updated_at` = 프로필의 수집 시각. 프로필이 스스로 검증용이라고 밝힌
   경우(`_meta.is_test_data: true`, 예: `data/samples/profile.sample.json`)에만 `is_test_data: true`로 남긴다.
-- 순수 변환은 `importProfile(프로필, {catalog, optionTable, name, now})` → `{account, skipped, unknown, warnings}`.
+- 순수 변환은 `importProfile(프로필, {catalog, optionTable, name, now})` → `{account, skipped, unknown, warnings}`
+  (`src/core/import-profile.mjs`). `catalog`(엔진 카탈로그)와 `optionTable`(`optionTableFrom(엔진의
+  data/base_stat_tables/equipment_skills.json 내용)`)은 호출하는 쪽이 준다 — 없으면 오류다. `src/runtime/import-profile.mjs`의
+  같은 이름 함수는 주지 않은 것을 엔진 폴더에서 읽어 채운다. 결과 문서는 `importReport({profile, result, file, output})`이 만든다.
 
 | 프로필 | 계정 상태 |
 |---|---|
@@ -76,9 +86,12 @@ node src/cli.mjs import-profile <프로필.json> [--name <계정 이름>] [--out
 (돌파 3 · 스킬 10/10/10 · 오버로드 장비 등)으로 계산한다(`runner/spec.py`의 `GrowthProfile.layer` — 미육성은 항목이 아예
 없는 이름에만 쓰인다). 그래서 `toEngineEntry`(`src/core/account.mjs`)가 적지 않은 칸과 미확인 칸을 미육성 값으로 채워
 넘긴다. 실제 엔진의 미육성 결과와 같은지는 `tests/integration/compare.engine.test.mjs`가 대조한다(2026-11-12 수정 —
-그 전에는 비워 둔 칸이 만렙으로 계산됐다).
+그 전에는 비워 둔 칸이 만렙으로 계산됐다). 그래서 **미확인 칸이 있는 니케는 실제보다 낮게 계산될 수 있다** — 가져오기 결과의
+주의 문구(`IMPORT_CAVEATS`)가 그렇게 말한다(P-022에서 고쳤다: 그 전 문구는 P-008 때의 설명대로 "엔진이 기본 스펙 값으로
+계산하므로 높게 나올 수 있다"고 했다). 채워지는 값: 돌파 0 · 코어 강화 0 · 호감도 1 · 스킬 1/1/1 · 소장품 없음 · 애장품 0단계 ·
+오버로드 옵션 0줄, 장비는 오버로드 줄이 하나도 없으면 미장착(줄을 적었는데 장비만 미확인이면 엔진 기본 오버로드 장비).
 
-결과(`importProfileFile`, CLI의 `--json`):
+결과(`importReport` — CLI의 `importProfileFile`·`--json`, 오버레이의 계정 탭. 오버레이에서는 `output`이 Rust가 쓴 계정 파일의 경로다):
 
 ```jsonc
 {

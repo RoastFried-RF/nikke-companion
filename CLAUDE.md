@@ -72,6 +72,20 @@ cargo test --manifest-path app/src-tauri/Cargo.toml --test live_track -- --ignor
 cargo test --manifest-path app/src-tauri/Cargo.toml --test live_single_instance -- --ignored --nocapture        # 오버레이를 실제로 두 번 띄워 창이 하나인지 본다(떠 있는 오버레이는 끄고 돌린다)
 ```
 
+오버레이의 **계정** 탭에서 계정을 받는다(터미널의 세 단계 — 쿠키 저장 → `profile_fetch.py` → `import-profile` — 를 대신한다):
+1 쿠키 받기(blablalink 로그인 창의 「쿠키 가져오기」 또는 붙여넣기) → 2 계정 새로 받기(엔진의 수집 스크립트 실행) → 3 변환·저장
+(`data/accounts/<이름>.json`, 있던 파일은 `.bak`) → 추천·비교, 요격전, 성장 화면의 계정 칸에 들어간다. 자세한 것은 `app/README.md` §계정 받기.
+**세션 쿠키는 계정 접근권이다**: 앱은 쿠키를 엔진의 `scraper/.session_cookie` 한 곳에만 쓰고, 화면·로그·오류·이벤트·반환값·
+localStorage에 내보내지 않으며, 스스로 네트워크로 보내지 않는다(Rust `src-tauri/src/cookie.rs`·`account_sync.rs`·`login_window.rs`).
+로그인 창은 앱 명령을 부를 수 없다(capability에 없다). **에이전트는 실제 `vendor/nikke-calc/scraper/.session_cookie`,
+`vendor/nikke-calc/profiles/`, `data/accounts/`의 파일을 읽지도 출력하지도 실행에 쓰지도 않고, 실제 수집을 돌리지 않는다** — 개발과
+테스트는 지어낸 쿠키, 가짜 수집 스크립트, 샘플 프로필(`data/samples/profile.sample.json`)로만 한다.
+
+```bash
+cargo test --manifest-path app/src-tauri/Cargo.toml --test account_fetch                                   # 가짜 엔진 폴더·가짜 수집 스크립트로 수집·중단·쿠키 비노출(평소 cargo test에도 들어 있다)
+cargo test --manifest-path app/src-tauri/Cargo.toml --test live_login_window -- --ignored --nocapture       # 로그인 창을 실제로 띄운다(임시 세션 — 로그인하지 않는다. 네트워크 필요)
+```
+
 게임 창·화면 캡처·요격전 화면 인식(실행 중인 니케가 필요하다 — `--recognize <PNG>`와 `live_recognize`만 빼고. 게임은 읽기만 한다 —
 `app/README.md` §게임 창·화면 캡처, §화면 인식):
 

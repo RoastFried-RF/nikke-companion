@@ -2,15 +2,17 @@
 
 Tauri v2 + Vue 3 + Vite + TypeScript로 만든 데스크톱 오버레이다(P-009 골격, P-010 계산 실행, P-011 게임 창 추적·화면 캡처,
 P-016 계산 중단·활성화 없이 보이기·파일 고르기 창의 부모, P-019 요격전 화면 인식, P-017 요격전·성장 비교·티어 화면,
-P-021 인식한 보스의 추천 자동 표시·중복 실행 방지).
+P-021 인식한 보스의 추천 자동 표시·중복 실행 방지, P-022 계정 받기 — 로그인 창·쿠키 붙여넣기).
 
-화면은 탭 네 개다(§화면(탭)):
+화면은 탭 다섯 개다(§화면(탭)):
 
 - **추천·비교** — 계정 파일과 전투 조건 파일을 골라 **추천**(보유 니케에서 후보 생성)이나 **비교**(편성 파일)를 실행하고 순위를 그린다.
   이미 만들어 둔 비교 결과 JSON(`docs/data-model.md` §비교 결과)도 읽어 순위를 그린다.
 - **요격전** — 계정과 보스 묶음 파일을 골라 보스별 편성 추천을 실행하고, 보스를 골라 그 보스의 상위 편성을 본다.
 - **성장** — 계정·조건·기준 편성·업그레이드 후보 파일을 골라 성장 투자 비교를 실행한다.
 - **티어** — `tier build`가 만든 결과 JSON을 불러와 등급표로 본다.
+- **계정** — blablalink에서 내 계정의 육성 상태를 받아 계정 파일로 만든다: 쿠키 받기(로그인 창 또는 붙여넣기) → 계정 새로 받기 →
+  변환·저장. 저장한 파일은 다른 화면의 계정 칸에 들어간다(§계정 받기).
 
 그 밖에:
 
@@ -26,7 +28,10 @@ P-021 인식한 보스의 추천 자동 표시·중복 실행 방지).
 
 아직 하지 않는 것: 인식한 보스의 추천을 스스로 계산하기(결과가 없으면 "추천을 먼저 실행하라"고 알릴 뿐이다), 요격전 밖의
 화면 인식, 유니온 레이드 화면(P-014 보류), 오버레이 안에서 티어 계산 돌리기(결과 파일만 읽는다).
-이 앱은 네트워크 요청을 하지 않는다.
+
+**네트워크.** 오버레이 화면(웹뷰)과 이 앱의 Rust 코드는 네트워크 요청을 하지 않는다. 밖으로 나가는 것은 계정 탭에서 사용자가
+시킬 때의 둘뿐이다: 「blablalink 로그인」으로 여는 **로그인 창**이 보여 주는 페이지(blablalink와 로그인 제공자)와, 「계정 새로
+받기」가 실행하는 **엔진의 수집 스크립트**가 blablalink API에 하는 요청(§계정 받기).
 
 ## 준비
 
@@ -70,7 +75,7 @@ node src/cli.mjs compare --account data/samples/account.sample.json --condition 
 
 ## 화면(탭)
 
-제목 줄·오버레이 상태·게임 창 칸 아래에 탭 네 개가 있다. 탭을 옮겨도 그 화면의 입력·결과·도는 계산은 남는다(화면을 내리지
+제목 줄·오버레이 상태·게임 창 칸 아래에 탭 다섯 개가 있다. 탭을 옮겨도 그 화면의 입력·결과·도는 계산은 남는다(화면을 내리지
 않고 숨겨 둔다). 마지막으로 본 탭을 기억해 다음 실행 때 그 탭을 연다(실행 인자로 비교 결과 파일을 주면 추천·비교가 먼저다).
 유니온 레이드 화면은 없다(P-014 보류).
 
@@ -80,10 +85,12 @@ node src/cli.mjs compare --account data/samples/account.sample.json --condition 
 | 요격전 | 보스별 추천 | `intercept --json` | `recommendIntercept` |
 | 성장 | 성장 투자 비교 | `growth --json` | `compareGrowth` |
 | 티어 | (없음 — 읽기만) | `tier build --json` | (계산 없음. 상태 이름·판 번호는 `src/tier/evaluate.mjs`, 버스트 묶음은 `src/core/search.mjs`의 `burstOrderGroup`) |
+| 계정 | 쿠키 받기 · 계정 새로 받기 | (없음) | `importProfile` · `importReport`(`src/core/import-profile.mjs` — CLI의 `import-profile`과 같은 변환) |
 
 **계산 로직은 화면에 없다.** 실행은 `src/lib/compute.ts`가 파일을 읽어 루트의 함수에 런타임을 넘겨 부를 뿐이고(CLI와 같은 길),
-화면은 결과 문서의 값을 서식만 입혀 그린다(`tests/contract.test.ts`가 확인한다). 화면 넷을 위해 새 Rust 명령이나 권한은
-더하지 않았다 — 결과 파일은 기존 `read_json_file`로 읽는다(그 뒤에 더한 명령은 자동 추적의 둘뿐이다 — §자동 추적).
+화면은 결과 문서의 값을 서식만 입혀 그린다(`tests/contract.test.ts`가 확인한다). 앞의 화면 넷을 위해 새 Rust 명령이나 권한은
+더하지 않았다 — 결과 파일은 기존 `read_json_file`로 읽는다. 그 뒤에 더한 명령은 자동 추적의 둘(§자동 추적)과 계정 받기의
+아홉(§계정 받기 — 쿠키 파일·수집 프로세스·로그인 창을 다뤄야 해서)이다.
 
 세 실행 화면(추천·비교, 요격전, 성장)이 함께 쓰는 것 — 같은 코드다(`src/lib/engineRun.ts`, `RunStatus.vue`, `RunButtons.vue`):
 
@@ -679,6 +686,134 @@ cargo test --release --manifest-path app/src-tauri/Cargo.toml --test live_track 
 - 오버레이를 숨기면 추적이 쉰다 — 숨긴 채로는 보스를 따라가지 않고, 다시 보이는 순간 한 번 읽는다.
 - 기억해 둔 요격전 결과가 지금 계정·보스 값과 다른지는 여전히 알려 주지 않는다(§요격전).
 
+## 계정 받기
+
+터미널에서 손으로 하던 세 단계(쿠키를 파일에 저장 → `python vendor/nikke-calc/scraper/profile_fetch.py` →
+`node src/cli.mjs import-profile …`)를 **계정** 탭에서 한다(P-022). 화면에 1·2·3 단계가 차례로 있다.
+
+| 단계 | 하는 일 | 누가 |
+|---|---|---|
+| 1 쿠키 받기 | 로그인 창에서 「쿠키 가져오기」 **또는** 붙여넣기 칸에 넣고 「쿠키 저장」 → 엔진의 `scraper/.session_cookie`에 한 줄로 저장 | Rust(`cookie.rs`·`account_sync.rs`·`login_window.rs`) |
+| 2 계정 새로 받기 | 엔진의 `scraper/profile_fetch.py --name <이름>` 실행. 스크립트가 낸 줄을 오는 대로 보이고, 끝나면 모든 줄과 경고(`[!]`)를 보인다 | Rust(`account_sync.rs`) — 엔진 스크립트는 고치지 않고 그대로 쓴다 |
+| 3 변환·저장 | 받은 프로필 → 계정 상태(루트 `src/core/import-profile.mjs`의 `importProfile`) → `data/accounts/<이름>.json`. 요약(가져온 니케 수·건너뛴 항목·미확인 칸이 있는 니케·동기화 레벨)을 보이고, 추천·비교, 요격전, 성장 화면의 계정 칸에 그 경로를 넣는다 | 변환은 화면 쪽(`src/lib/accountSync.ts` → 루트 모듈), 파일 읽기·쓰기는 Rust |
+
+「계정 새로 받기」 한 번에 2 → 3이 이어진다. 이름(기본 `me`)이 엔진의 프로필 이름이자 계정 파일 이름이다. 같은 이름의 계정
+파일이 있으면 덮어쓰기 전에 `<이름>.json.bak`으로 한 벌 남긴다(손으로 고친 내용을 되찾을 수 있게 — 사본은 바로 앞의 한 벌뿐이다).
+계정 칸에는 경로만 넣는다 — 계산을 스스로 시작하지 않는다.
+
+### 쿠키 받는 법
+
+blablalink의 계정 데이터 API는 로그인 세션 쿠키를 요구한다. 받는 방법은 둘이고 서로 기대지 않는다. 어느 쪽으로 받든 저장된 뒤는
+같은 「계정 새로 받기」다.
+
+**가. 로그인 창** — 개발자 도구가 필요 없다.
+
+1. 「blablalink 로그인」을 누르면 별도 창이 뜬다(보통 창 — 테두리·제목 표시줄이 있고 작업 표시줄에 보인다).
+2. 그 창에서 **직접** 로그인하고 게임 계정을 연동한다. 아이디·비밀번호는 blablalink와 로그인 제공자의 페이지에 넣는다 — 앱은
+   입력을 읽지 않고 그 페이지에 스크립트를 넣지도 않는다.
+3. 「쿠키 가져오기」를 누른다. Rust가 그 창의 쿠키 저장소에서 `api.blablalink.com` 요청에 실릴 쿠키만 읽어, `game_token`과
+   `game_openid`가 있으면 Cookie 헤더 한 줄로 저장하고 창을 닫는다. 없으면 「아직 로그인되지 않았다」고 알리고 창은 그대로 둔다.
+
+로그인 창에서 로그인이 막히는 로그인 방식이 있을 수 있다(예: 구글 계정은 앱 안의 창을 거부할 수 있다 — **확인하지 않았다**).
+그때는 붙여넣기를 쓴다.
+
+**나. 붙여넣기**
+
+1. 브라우저(크롬·엣지)에서 blablalink.com에 로그인하고 게임 계정을 연동한다.
+2. F12 개발자 도구 → Network(네트워크) 탭 → 페이지를 새로 고친다.
+3. `api.blablalink.com`으로 가는 요청을 하나 눌러, Request Headers의 `Cookie` 값 전체를 복사한다.
+4. 계정 탭의 붙여넣기 칸에 붙여넣고 「쿠키 저장」을 누른다. Rust가 앞뒤 공백·줄바꿈을 정리해 한 줄로 만들고(맨 앞의 `Cookie:`는
+   뗀다), `game_token=`과 `game_openid=`가 없으면 한국어 오류로 거부한다.
+
+쿠키가 만료되면(수집이 `game not login`으로 실패한다) 같은 순서로 다시 받는다. 쿠키 문제로 실패하면 화면에 이 순서가 함께 보인다.
+
+### 보안 규칙
+
+세션 쿠키는 **계정 접근권**이다. 아래는 코드의 규칙이고 테스트가 확인한다(`src-tauri/tests/account_fetch.rs`,
+`tests/AccountFlow.test.ts`, `tests/contract.test.ts`).
+
+- **쓰는 곳은 하나다**: 엔진의 `scraper/.session_cookie`(엔진의 수집 스크립트가 거기서 읽는다 — 엔진 저장소가 gitignore로 둔 파일).
+  다른 파일·임시 파일·설정·웹뷰 저장소에 쓰지 않는다. 쿠키 값을 꺼내는 함수(`SessionCookie::header`)를 부르는 곳이 그 한 줄뿐이다.
+- **화면에 다시 보이지 않는다**: 붙여넣기 칸은 가려진 형식(`type="password"`)이고, 「쿠키 저장」을 누르면 Rust에 넘기기 전에
+  칸을 비운다(거부돼도 남기지 않는다). Rust는 쿠키를 돌려주지 않는다 — 돌려주는 것은 저장한 시각과 쿠키 개수, 「쿠키 저장됨/없음」뿐이다.
+  로그인 창으로 받을 때는 쿠키가 오버레이 화면을 지나가지도 않는다.
+- **로그·오류·이벤트·반환값·결과 문서·localStorage에 넣지 않는다**: 쿠키를 담는 Rust 타입은 `Debug`에서 값을 가리고 직렬화할 수
+  없다. 오류 문장에는 쿠키 이름(`game_token` 같은 정해진 이름)만 나온다. 수집 스크립트가 낸 줄은 **쿠키 값을 가린 뒤에** 화면으로
+  넘긴다(`(가림)`으로 바뀐다 — 쿠키 파일의 내용 전체, `이름=값` 조각, 6자 이상인 값. 스크립트가 계정 식별자 openid를 출력하는
+  줄도 이렇게 가려진다). 받은 프로필의 `_meta.openid`도 화면에 넘기지 않는다. 계정 받기 코드는 표준 출력·표준 오류에 아무것도
+  쓰지 않는다. 화면이 기억하는 것(localStorage)은 계정 이름과 계정 파일 경로뿐이다.
+- **앱은 쿠키를 네트워크로 보내지 않는다**: 이 앱에는 HTTP 코드가 없다. 쿠키를 보내는 것은 엔진의 수집 스크립트가 blablalink API에
+  하는 요청뿐이다(로그인 창 안에서는 브라우저가 자기 쿠키를 그 사이트에 보낸다 — 여느 브라우저와 같다).
+- **화면은 실행할 것을 정하지 못한다**: 수집 명령이 실행하는 것은 설정된 엔진 폴더(§엔진 설정 — 환경 변수 → 설정 파일 →
+  `vendor/nikke-calc`)의 `scraper/profile_fetch.py`뿐이고, 화면이 넘기는 것은 이름 하나다. 이름은 글자·숫자·밑줄·붙임표·낱말 사이
+  공백만 받는다(48자까지) — 점, 경로 구분자, 붙임표로 시작하는 이름(인자로 읽힌다)은 고치지 않고 거부한다. 계정 파일을 쓸 폴더
+  (환경 변수 `NIKKE_ACCOUNTS_DIR` → 저장소의 `data/accounts`, gitignore)도 화면이 정하지 못한다.
+
+### 로그인 창
+
+- **이 창은 앱 명령을 부를 수 없다.** capability(`src-tauri/capabilities/overlay.json`)의 창 목록에는 `main`(오버레이)뿐이고
+  로그인 창(`login`)은 없다. 원격 주소에 IPC를 여는 설정(`remote`)도 없다. 권한은 주소가 아니라 창 이름에 붙으므로, **로그인 창의
+  주소가 blablalink나 로그인 제공자가 아닌 곳으로 바뀌어도(광고·링크·리디렉션으로 어디로 가든) 앱 명령은 여전히 부를 수 없다** —
+  그 창에는 권한이 하나도 없다. 앱 명령은 모두 권한 목록(`build.rs`)에 올라 있어, 권한 없는 창에서는 거부된다.
+  이것은 설정과 코드를 읽는 계약 테스트로 확인했다. 실제 창에서 원격 페이지가 명령을 불러 거부되는 것을 본 것은 아니다.
+- 갈 수 있는 주소는 `https`뿐이다(`http`·`file`·그 밖의 주소로의 이동은 막는다). 로그인 제공자가 여럿이라 도메인은 묶지 않았다.
+- 쿠키는 그 창의 저장소에 「`https://api.blablalink.com/api/game/proxy/`로 가는 요청에 실릴 쿠키」만 묻는다(저장소 전체를 읽지
+  않는다). 받은 목록에서 도메인이 `api.blablalink.com`이나 그 윗도메인(`.blablalink.com`)인 것만 골라 `이름=값; 이름=값` 한 줄로
+  만든다 — 이 부분은 순수 함수다(`cookie.rs`의 `header_from_browser_cookies`).
+- 로그인 창의 저장 데이터(쿠키·로컬 저장소)는 오버레이와 다른 폴더에 둔다: `%LOCALAPPDATA%\local.nikke-companion.overlay\login-webview`.
+  그래서 로그인해 두면 다음에 창을 열 때 로그인 상태가 남아 있다.
+- **「로그인 세션 지우기」**: 그 폴더의 쿠키·저장 데이터를 지운다 — 다른 계정으로 바꾸거나 공용 PC에서 쓴 뒤에 누른다. 창이 열려
+  있으면 그 창의 데이터를 지우고 로그인 전 화면으로 되돌리고, 닫혀 있으면 폴더를 지운다(방금 닫았으면 브라우저 프로세스가 파일을
+  잠깐 쥐고 있어 2초까지 다시 해 본다). **엔진의 쿠키 파일은 지우지 않는다** — 그것까지 없애려면
+  `vendor/nikke-calc/scraper/.session_cookie`를 직접 지운다. 오버레이가 기억해 둔 것(탭·경로·결과)도 건드리지 않는다.
+
+Tauri에서 창의 쿠키를 읽는 API(`WebviewWindow::cookies_for_url`)와 저장 데이터를 지우는 API(`clear_all_browsing_data`)는 쓰는 판
+(tauri 2.12.5)의 문서(`cargo doc`으로 만든 것)에서 확인하고 컴파일했다. Windows에서는 화면 응답을 맡은 스레드에서 쿠키를 읽으면
+멈춘다고 문서에 적혀 있어 다른 스레드에서 읽는다.
+
+```bash
+cargo test --manifest-path app/src-tauri/Cargo.toml --test live_login_window -- --ignored --nocapture
+```
+
+`tests/live_login_window.rs`가 로그인 창을 실제로 띄워 본다(`#[ignore]` — 창이 몇 초 떴다 닫힌다. 네트워크가 필요하다). **임시 저장
+폴더와 가짜 엔진 폴더**를 써서 앱의 실제 로그인 세션과 엔진의 쿠키 파일은 건드리지 않고, 로그인은 하지 않는다. 돌려 본 결과
+(2026-11-12): 보통 창으로 뜨고(테두리 있음·항상 위 아님), blablalink 첫 페이지가 떠서 사이트가 심은 쿠키 하나(`OptanonConsent`)가
+저장소에 보였고, 쿠키 읽기가 다른 스레드에서 멈추지 않고 돌아왔고, 「아직 로그인되지 않았다」로 거부돼 쿠키 파일이 생기지 않았고,
+세션 지우기가 창이 열려 있을 때·닫혀 있을 때·지울 것이 없을 때 모두 됐다(저장 폴더가 사라졌다).
+
+### 실패의 안내
+
+수집이 실패하면 2단계 아래에 한국어 문장이 보이고, 스크립트가 그때까지 낸 줄도 그대로 보인다. 쿠키 문제일 때는 쿠키를 다시 받는
+순서가 함께 보인다.
+
+| 종류(`kind`) | 언제 | 쿠키 안내 |
+|---|---|---|
+| `cookie_missing` | 쿠키 파일이 없다(스크립트를 띄우기 전에 알린다) | ○ |
+| `cookie_invalid` | 저장된 쿠키에 `game_token`이 없다 | ○ |
+| `cookie_rejected` · `not_logged_in` | 붙여넣은 쿠키에 필수 쿠키가 없다 · 로그인 창에서 아직 로그인하지 않았다 | ○ |
+| `session_expired` | 스크립트가 `로그인 세션 만료 (game not login)`를 냈다. 또는 `캐릭터를 못 받았다. 세션 만료거나 비공개 계정` — 첫 요청이 거절되면 스크립트는 이 둘을 가르지 못한다 | ○ |
+| `network` | 스크립트가 파이썬의 네트워크 예외(`URLError`·`timed out` 등)나 HTTP 오류로 끝났다 | — |
+| `timeout` | 10분 안에 끝나지 않았다 — 스크립트와 그 자식 프로세스까지 끝낸다 | — |
+| `stopped` | 「중단」을 눌렀다 — 오류가 아니다. `중단됨`으로 보이고 계정 파일은 그대로다 | — |
+| `engine` · `name` · `script_failed` · `profile` · `account_file` · `login_window` | 엔진 폴더·python 문제, 쓸 수 없는 이름, 그 밖의 스크립트 실패(마지막 경고 줄이 함께 보인다), 프로필을 못 읽음, 계정 파일을 못 씀, 로그인 창 문제 | — |
+
+실패의 구분은 스크립트가 낸 문장에 기댄다(`account_sync.rs`의 `classify` — 엔진을 올릴 때 스크립트의 문장이 바뀌었는지 함께 본다).
+중단과 시간 초과는 엔진 계산 중단(§계산 중단)과 같은 방식이다: 프로세스를 Job Object에 넣어 자식까지 끝낸다.
+
+### 한계
+
+- **큐브는 장착 중인 것만 받는다.** blablalink API는 보유 큐브 목록을 주지 않는다 — 장착 중인 큐브에서 관찰된 것이 계정 파일의
+  `account.cubes`에 「보유 하한」으로 기록될 뿐이고, 계산은 엔진 기본 스펙 큐브로 한다(엔진의 `profile-sync` 문서와 같다).
+- 레벨은 받지 않는다(콘텐츠가 정한다). 동기화 레벨은 `account.synchro_level`로 옮겨져 레벨 상한이 있는 콘텐츠의 계산에 쓰인다.
+- 스크립트가 낸 경고는 그대로 옮겨 보일 뿐 해석하지 않는다. 뜻은 엔진의 `vendor/nikke-calc/.agent/skills/profile-sync/SKILL.md`에 있다
+  (`동기화 소대 밖 N종`은 미보유 판정이 아니다, `미매핑 오버로드 옵션 타입`은 그 옵션이 빠진 채 계산된다 등).
+- 가져온 값을 인게임과 대조하지 않는다. 변환이 옮기지 못한 칸은 미확인으로 남고, 계산할 때 미육성 값으로 채워져 실제보다 낮게
+  나올 수 있다(결과의 주의 문구).
+- 화면에 넘기는 줄은 2,000줄·줄마다 2,000자까지다(넘으면 알리는 줄 하나를 남긴다).
+- 수집 스크립트는 프로필 옆에 원시 응답(`profiles/<이름>.raw.json`)도 쓴다(엔진의 동작). 앱은 그 파일을 읽지 않는다.
+- **실제 계정으로는 돌려 보지 않았다** — 실제 쿠키·실제 수집·실제 로그인은 사람이 확인한다(§사람이 확인할 것). 자동 테스트는
+  지어낸 쿠키, 가짜 수집 스크립트, 검증용 샘플 프로필로만 한다.
+
 ## 빌드
 
 ```bash
@@ -781,6 +916,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml --test live_capture -- --ign
 cargo test --manifest-path app/src-tauri/Cargo.toml --test live_recognize -- --ignored   # 라벨 붙은 게임 캡처(data/captures/labels.json)가 필요하다
 cargo test --manifest-path app/src-tauri/Cargo.toml --test live_track -- --ignored --nocapture --test-threads=1   # 캡처 한 번에 걸리는 시간, 창 크기 변경·창 교체(자기 창 — 게임 창 측정 한 건은 게임이 떠 있어야 한다)
 cargo test --manifest-path app/src-tauri/Cargo.toml --test live_single_instance -- --ignored --nocapture        # 오버레이를 실제로 두 번 띄운다(떠 있는 오버레이는 끄고)
+cargo test --manifest-path app/src-tauri/Cargo.toml --test live_login_window -- --ignored --nocapture           # 로그인 창을 실제로 띄운다(임시 세션 — 로그인하지 않는다. 네트워크 필요)
 cargo clippy --all-targets --manifest-path app/src-tauri/Cargo.toml                       # 경고가 없어야 한다
 cargo run --quiet --manifest-path app/src-tauri/Cargo.toml --bin nikke-capture -- --info
 ```
@@ -819,6 +955,25 @@ id·이름만 실제 이상 개체 5종(`data/intercept/anomaly.json`)으로 바
 Rust의 `screen_track.rs` 단위 테스트는 읽는 조건과 "바뀔 때만 알린다"를, `overlay_state.rs`는 두 번째 실행의 보이기 규칙을 본다.
 `tests/live_track.rs`·`tests/live_single_instance.rs`는 화면이 필요해 `#[ignore]`다(§자동 추적 §걸리는 시간, §중복 실행 방지).
 
+계정 받기(§계정 받기)의 테스트는 **지어낸 쿠키, 가짜 수집 스크립트, 검증용 샘플 프로필**(`data/samples/profile.sample.json`)로만
+한다 — 실제 쿠키 파일·프로필·계정 파일을 읽지 않고, blablalink에 요청을 보내지 않는다:
+
+- `cargo test`의 `tests/account_fetch.rs`(몇 초, python이 필요하다): 임시 폴더에 가짜 엔진(`runner/sim.py` 자리 + 가짜
+  `scraper/profile_fetch.py`)을 만들어 엔진 폴더 설정을 그리로 돌린다. 성공(프로필 파일 생성, 스크립트가 낸 줄이 낸 차례대로 빠짐없이,
+  경고 줄 따로), 세션 만료, 네트워크 오류(파이썬 예외), 쿠키 파일 없음, 시간 초과, 중단(스크립트가 띄운 자식 프로세스까지 사라진다 —
+  Windows의 프로세스 목록으로 확인), 이름으로 다른 스크립트나 인자를 넘길 수 없음. **쿠키 비노출**: 가짜 스크립트가 쿠키를 세 군데
+  출력해도(헤더 전체·토큰·`이름=값`) 반환값·오류 문장·진행 줄에 가짜 쿠키가 없고, 같은 길을 따로 띄운 프로세스에서 밟았을 때 그
+  프로세스의 표준 출력·표준 오류에도 없다. 붙여넣기 길과 로그인 창 길(쿠키 목록 → 저장) 둘 다 본다.
+- Rust 단위 테스트: `cookie.rs`(붙여넣은 글자 정리·거부, 쿠키 목록 → 헤더 한 줄 — 도메인이 맞는 것만·필수 쿠키 확인·`이름=값` 형식,
+  값 가리기, `Debug`에 값이 없음), `account_sync.rs`(이름 검사, 쿠키를 쓰는 파일이 하나뿐임, 상태, 실패의 구분, 받은 프로필 읽기,
+  계정 파일 저장과 `.bak`), `login_window.rs`(https만 허용).
+- 프런트의 `tests/AccountFlow.test.ts`(Rust 쪽은 가짜, 변환은 루트의 실제 코드 + 실제 엔진 데이터): 1·2·3 단계의 모양, 붙여넣기 →
+  수집 → 변환 → 저장 → 다른 화면(열려 있던 화면과 처음 여는 화면)의 계정 칸, 저장 뒤 입력 칸이 비고 쿠키가 화면·입력 칸·localStorage
+  어디에도 없음, 로그인 창 길(로그인 전 안내 → 로그인 뒤 같은 흐름), 실패마다의 안내(쿠키 문제일 때만 쿠키 받는 순서), 중단, 변환·저장 실패.
+- `tests/contract.test.ts`: 쿠키를 쓰는 곳이 한 줄뿐임, 쿠키 타입이 직렬화되지 않음, 계정 받기 코드에 출력·네트워크 코드가 없음, 실행하는
+  스크립트가 정해져 있음, 로그인 창이 capability에 없고 원격 IPC 설정이 없음.
+- `tests/live_login_window.rs`는 창과 네트워크가 필요해 `#[ignore]`다(§계정 받기 §로그인 창).
+
 ### 테스트 입력(fixture)
 
 컴포넌트 테스트의 입력(`tests/fixtures/*.sample.json`)은 **실제 CLI가 실제 엔진으로 만든 결과**다. 엔진이나 샘플이 바뀌면 다시 만든다.
@@ -851,6 +1006,7 @@ npm --prefix app run fixture -- tier growth   # 고른 것만: compare · interc
 | `src/screens/InterceptScreen.vue` | 요격전 탭: 입력(계정·보스 묶음·표시 수·예산), 실행, 결과 파일 불러오기, 마지막 결과 기억, 자동 추적 칸과 "추천을 먼저 실행하라" 안내 |
 | `src/screens/GrowthScreen.vue` | 성장 탭: 입력(계정·조건·편성·기준 편성 이름·후보), 실행, 결과 파일 불러오기 |
 | `src/screens/TierScreen.vue` | 티어 탭: 결과 파일 불러오기(마지막 파일을 다시 연다). 계산하지 않는다 |
+| `src/screens/AccountScreen.vue` · `src/components/AccountFailure.vue` | 계정 탭: 1 쿠키 받기(로그인 창·붙여넣기) · 2 계정 새로 받기(진행 줄·경고·중단) · 3 변환·저장(요약·경로)과, 실패 안내(쿠키 문제면 쿠키를 다시 받는 순서) |
 | `src/components/ComputePanel.vue` | 추천·비교의 계산 실행 칸: 방식·파일·옵션 |
 | `src/components/RunStatus.vue` · `RunButtons.vue` | 계산의 진행 표시(보스·단계·건수·예산·경과 시간, `중단됨`)와 실행·중단 단추 — 세 실행 화면이 함께 쓴다 |
 | `src/components/PathField.vue` · `ResultLoader.vue` | 파일 경로 한 칸(+ `고르기`)과 결과 파일 불러오기 한 줄 |
@@ -872,6 +1028,8 @@ npm --prefix app run fixture -- tier growth   # 고른 것만: compare · interc
 | `src/lib/resultFile.ts` | 결과 파일 불러오기(경로 기억, 읽기 → 검사, 늦게 끝난 요청 버리기) |
 | `src/lib/remember.ts` | 마지막으로 쓴 값 기억(localStorage, `nikke-companion.` 접두사) |
 | `src/lib/screenTrack.ts` | 자동 추적의 화면 쪽: 언제 보스를 바꾸는지의 규칙(`followStep` — 순수 함수), 상태 한 줄 만들기, 스위치·주기·자동 이동을 기억하고 Rust에 알리는 상태 |
+| `src/lib/accountSync.ts` | 계정 받기의 뒷부분: 받은 프로필 읽기 → 루트의 `importProfile`·`importReport` 호출 → 계정 파일 저장. 변환 규칙은 없다. 쿠키는 지나가지 않는다 |
+| `src/lib/accountLink.ts` | 계정 화면이 저장한 계정 파일의 경로를 추천·비교, 요격전, 성장 화면의 계정 칸에 넣는 통로(경로만 — 계산을 시작하지 않는다) |
 | `scripts/fixtures.mjs` | 테스트 입력을 실제 CLI로 다시 만든다(`npm run fixture`) |
 | `src-tauri/src/overlay_state.rs` | 보임/숨김·클릭 통과의 전환 규칙(보일 때 활성화하지 않는다), 두 번째 실행의 보이기(`Show`), 시작 위치 계산. 창 API를 모른다 |
 | `src-tauri/src/overlay_win32.rs` | 오버레이 창만 다루는 Win32 호출: 활성화 없이 보이기(`SW_SHOWNA`)·숨기기, 파일 고르기 창과 그 부모 |
@@ -884,14 +1042,20 @@ npm --prefix app run fixture -- tier growth   # 고른 것만: compare · interc
 | `src-tauri/src/screen_track.rs` | 자동 추적의 규칙: 읽는 조건(켜짐·오버레이 보임·게임 창 떠 있음), 상태의 모양, 결과가 바뀔 때만 알리기. 창·캡처를 모른다 |
 | `src-tauri/src/game_win32.rs` | Win32 호출: 창 열거·창 정보 읽기, Windows.Graphics.Capture(Direct3D 장치와 캡처 대상은 다시 쓴다) |
 | `src-tauri/src/capture_cli.rs` · `src/bin/nikke-capture.rs` | 명령줄 도구 `nikke-capture`의 인자 해석·종료 코드(창 정보·캡처 저장·화면 인식)와 실행 파일 |
-| `src-tauri/src/lib.rs` | 창·전역 단축키·명령·게임 창 추적 스레드·화면 추적 스레드·중복 실행 방지를 잇는 접착 코드 |
+| `src-tauri/src/cookie.rs` | 세션 쿠키의 규칙(순수): 붙여넣은 글자 → Cookie 헤더 한 줄, 로그인 창의 쿠키 목록 → 헤더 한 줄(도메인·필수 쿠키 확인), 출력에서 쿠키 값 가리기. 값을 글자로 내보이지 않는 타입 |
+| `src-tauri/src/account_sync.rs` | 계정 받기: 이름 검사, 상태(파일의 유무·시각), 쿠키 파일 쓰기(쓰는 곳은 여기 하나), 엔진의 수집 스크립트 실행(진행 줄·경고·시간 제한·중단·실패의 구분), 받은 프로필 읽기, 계정 파일 저장(`.bak`). Tauri를 모른다 |
+| `src-tauri/src/login_window.rs` | blablalink 로그인 창: 열기(보통 창, https만, 따로 둔 저장 폴더), 쿠키 저장소 읽기, 세션 지우기. capability가 없는 창이다 |
+| `src-tauri/src/lib.rs` | 창·전역 단축키·명령·게임 창 추적 스레드·화면 추적 스레드·중복 실행 방지·계정 받기 명령을 잇는 접착 코드 |
 | `src-tauri/tests/live_game.rs` | 실제 게임을 상대로 한 테스트(`#[ignore]`) |
 | `src-tauri/tests/live_capture.rs` | 게임 없이 캡처 경로를 확인하는 테스트(`#[ignore]`) — 자기 창을 실제 WGC로 찍는다 |
 | `src-tauri/tests/live_recognize.rs` | 라벨 붙은 실제 게임 캡처로 화면 인식을 확인하는 테스트(`#[ignore]`) — 정답·단추 자리 회색 덧칠(요격 횟수 소진 흉내)·다시 샘플링·밝기/잡음·다른 화면 비율·걸린 시간 |
 | `src-tauri/tests/engine_cancel.rs` | 실제 엔진으로 배치 중단을 확인하는 테스트(평소 `cargo test`에서 돈다) |
 | `src-tauri/tests/live_track.rs` | 캡처 한 번에 걸리는 시간을 재고, 다시 쓰는 장치·캡처 대상이 창 크기 변경·창 교체에도 맞는지 보는 테스트(`#[ignore]`) |
 | `src-tauri/tests/live_single_instance.rs` | 오버레이를 실제로 세 번 띄워 중복 실행 방지를 확인하는 테스트(`#[ignore]`) |
-| `src-tauri/capabilities/overlay.json` | 화면에 허용한 권한: 이벤트 듣기, 창 끌기, 앱 명령 열여섯 개 |
+| `src-tauri/tests/account_fetch.rs` | 가짜 엔진 폴더·가짜 수집 스크립트로 계정 수집을 확인하는 테스트(평소 `cargo test`에서 돈다): 성공·세션 만료·네트워크 오류·시간 초과·중단, 쿠키 비노출 |
+| `src-tauri/tests/live_login_window.rs` | 로그인 창을 실제로 띄워 보는 테스트(`#[ignore]`) — 임시 세션, 로그인하지 않는다 |
+| `src-tauri/tests/windows-test.manifest` | 통합 테스트 실행 파일에 넣는 「공용 컨트롤 6」 선언(`build.rs`가 테스트 실행 파일에만 넣는다 — 없으면 Tauri 창을 쓰는 테스트가 시작하지 못한다) |
+| `src-tauri/capabilities/overlay.json` | 오버레이 창(`main`)에 허용한 권한: 이벤트 듣기, 창 끌기, 앱 명령 스물다섯 개. 로그인 창(`login`)은 없다 — 권한이 하나도 없다 |
 
 Rust 명령: `load_report(path)`, `overlay_status()`, `startup_report_path()`, `quit_app()`,
 `engine_catalog()`, `engine_version()`, `engine_run_batch(requests)`, `engine_cancel()`, `read_json_file(path)`, `pick_json_file(title)`,
@@ -899,12 +1063,33 @@ Rust 명령: `load_report(path)`, `overlay_status()`, `startup_report_path()`, `
 돌려준다 — 이미지는 저장하지도 화면에 넘기지도 않는다. 화면에서 부르는 곳은 없다 — 자동 추적은 아래 둘을 쓴다),
 `set_screen_tracking(enabled, interval_ms)`(자동 추적을 켜고 끄고 주기를 정한다 — 화면에서는 `intervalMs`),
 `screen_track_status()`(자동 추적의 지금 상태. 캡처하지 않는다).
+계정 받기(§계정 받기 — 실패하면 `{kind, message, cookie_help, lines, warnings}`로 거부한다):
+`account_sync_status(name)`(쿠키 파일이 있는지·언제 썼는지, 마지막으로 받은 시각, 계정 파일, 엔진 폴더·python 문제 — 쿠키의 내용은 없다),
+`account_save_cookie(cookie)`(붙여넣은 쿠키를 정리해 엔진의 쿠키 파일에 쓴다 — 돌려주는 것은 시각과 개수뿐),
+`account_fetch_profile(name)`(엔진의 수집 스크립트 실행 — 모든 줄과 경고를 돌려준다), `account_fetch_cancel()`(도는 수집을 멈춘다),
+`account_read_profile(name)`(받은 프로필과 엔진의 오버로드 옵션 표), `account_save_file(name, account)`(계정 파일 저장, 있던 파일은 `.bak`),
+`login_window_open()`, `login_window_take_cookie()`(로그인 창의 쿠키를 읽어 저장하고 창을 닫는다 — 쿠키는 돌려주지 않는다),
+`login_window_clear()`(로그인 창의 세션을 지운다).
 이벤트: `overlay-state`, `engine-progress`, `game-window`(게임 창 상태가 바뀔 때), `game-capture`(단축키로 저장한 결과),
-`screen-track`(자동 추적의 결과가 바뀔 때 — 이미지는 싣지 않는다).
+`screen-track`(자동 추적의 결과가 바뀔 때 — 이미지는 싣지 않는다), `account-fetch`(수집 스크립트가 줄을 낼 때 `{text, warning}` —
+쿠키 값은 가려져 있고 오버레이 창에만 보낸다).
 파일 고르기 창은 대화 상자 플러그인 없이 `pick_json_file` 명령 하나로만 연다(화면에 파일·대화 상자 권한을 주지 않는다).
 명령을 더하면 `src-tauri/build.rs`의 목록과 capability에도 적어야 화면에서 부를 수 있다.
 
 ## 사람이 확인할 것 (아직 확인하지 않았다)
+
+계정 받기(P-022) — **실제 쿠키·실제 수집·실제 로그인은 한 번도 해 보지 않았다**(자동 테스트는 지어낸 쿠키·가짜 스크립트·샘플
+프로필로만 한다. 로그인 창은 임시 세션으로 첫 페이지가 뜨는 것까지만 봤다). 계정 탭의 실제 모습도 창에서 보지 못했다:
+
+- 실제 쿠키를 붙여넣고 「계정 새로 받기」로 계정 파일이 만들어지는지. 스크립트의 줄이 오는 대로 보이는지, 경고가 빠짐없이 보이는지.
+- 쿠키가 만료됐을 때 안내가 맞게 나오는지(`세션 만료` — 실제 만료가 `game not login`으로 오는지, `캐릭터를 못 받았다`로 오는지 모른다).
+- 로그인 창에서 실제로 로그인하고 「쿠키 가져오기」 → 「계정 새로 받기」가 되는지. 로그인한 뒤의 쿠키에 `game_token`·`game_openid`가
+  `api.blablalink.com` 요청에 실리는 도메인으로 있는지(아니면 「아직 로그인되지 않았다」가 계속 나온다 — 그때는 붙여넣기).
+- 로그인 창에서 로그인이 막히는 로그인 방식이 있는지(구글 등). 로그인 제공자가 새 창(팝업)을 띄울 때 그 창이 제대로 뜨고 닫히는지.
+  막히면 붙여넣기로 되는지.
+- 「로그인 세션 지우기」 뒤에 로그인 창을 다시 열면 로그인 전 상태인지.
+- 계정 탭이 440px에서 넘치지 않고 읽히는지(탭 다섯 개가 한 줄에 들어가는지, 긴 경로·긴 경고 줄의 줄바꿈, 수집 줄 상자의 스크롤).
+- 받은 계정으로 요격전 추천을 돌린 수치가 인게임 기록과 맞는지.
 
 - 앱에서 샘플 계정으로 추천을 실행해 순위가 보이는지, `고르기` 창이 오버레이 위에 뜨는지.
 - 실제 계정 파일로 실행한 수치가 인게임 기록과 맞는지.
@@ -928,7 +1113,7 @@ Rust 명령: `load_report(path)`, `overlay_status()`, `startup_report_path()`, `
 요격전·성장 비교·티어 화면(P-017) — **실제 창에서는 하나도 보지 않았다.** 가짜 IPC 테스트(화면의 글자와 구조)까지만 확인했고,
 폭·줄바꿈·색은 브라우저로 그려 보지 못했다(CSS를 읽어 넘칠 곳을 점검한 것이 전부다):
 
-- 오버레이(기본 440px)에서 요격전·성장·티어 화면이 넘치지 않고 읽히는지: 탭 네 개가 한 줄에 들어가는지, 보스 단추 다섯 개의
+- 오버레이(기본 440px)에서 요격전·성장·티어 화면이 넘치지 않고 읽히는지: 탭(지금은 다섯 개)이 한 줄에 들어가는지, 보스 단추 다섯 개의
   줄바꿈, 멤버별 딜 표(이름이 긴 니케 + `약점` 표시), 티어 줄(이름·버스트·점수·상태 표시, `미지원 효과 있음`이 붙었을 때).
 - 요격전: 결과가 있을 때 창을 스크롤하지 않고 보스 이름·약점·1위 편성 5명이 보이는지(오버레이 상태·게임 창 칸·탭·접힌 입력 칸
   아래에 들어가야 한다). 실제 이상 개체 요격전 화면 옆에서 보스를 골라 가며 편성할 수 있는지.

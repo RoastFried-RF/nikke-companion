@@ -13,8 +13,17 @@
 //! - `overlay_win32`: 오버레이 창(이 앱의 창)만 다루는 Win32 호출 — 활성화 없이 보이기·숨기기, 파일 고르기 창의 부모
 //! - `engine_win32`(비공개): 이 앱이 띄운 엔진 프로세스를 묶어 끝내는 Job Object
 //!
+//! - `cookie`: 세션 쿠키의 규칙 — 붙여넣은 글자·로그인 창의 쿠키 목록을 Cookie 헤더 한 줄로, 출력에서 쿠키 값 가리기(순수)
+//! - `account_sync`: 계정 받기 — 쿠키 파일 쓰기, 엔진의 수집 스크립트 실행, 받은 프로필 읽기, 계정 파일 저장
+//! - `login_window`: blablalink 로그인 창(별도 창, 앱 명령을 부를 수 없다) — 열기, 쿠키 읽기, 세션 지우기
+//!
 //! 편성 비교·추천의 계산은 화면 쪽의 `src/core`(JS)가 하고, 여기서는 엔진 프로세스만 대신 띄운다.
-//! 네트워크 요청은 하지 않는다.
+//! 이 앱의 Rust 코드는 네트워크 요청을 하지 않는다. 밖으로 나가는 요청은 둘뿐이다: 사용자가 연 로그인 창이
+//! 보여 주는 페이지(blablalink와 로그인 제공자)와, 「계정 새로 받기」가 실행하는 엔진의 수집 스크립트가
+//! blablalink API에 하는 요청.
+//!
+//! 세션 쿠키는 계정 접근권이다: 엔진의 `scraper/.session_cookie` 한 곳에만 쓰고, 화면·이벤트·반환값·오류 문장·
+//! 표준 출력 어디에도 내보내지 않는다(`cookie.rs`·`account_sync.rs`의 규칙, `tests/account_fetch.rs`).
 //!
 //! 게임은 읽기만 한다: 게임 창을 옮기거나 크기를 바꾸거나 앞으로 가져오지 않고, 입력을 보내지 않는다.
 //! 붙이기가 옮기는 것은 오버레이 창뿐이다.
@@ -25,14 +34,17 @@
 //! 오버레이는 한 번만 뜬다(`tauri-plugin-single-instance`): 두 번째 실행은 창을 만들기 전에 끝나고, 이미 떠 있는
 //! 쪽이 숨겨져 있었다면 활성화 없이 보인다(`reveal_overlay`).
 
+pub mod account_sync;
 pub mod capture;
 pub mod capture_cli;
+pub mod cookie;
 pub mod engine;
 #[cfg(windows)]
 mod engine_win32;
 #[cfg(windows)]
 mod game_win32;
 pub mod game_window;
+pub mod login_window;
 pub mod overlay_state;
 #[cfg(windows)]
 pub mod overlay_win32;
@@ -52,6 +64,10 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewWindow};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+use account_sync::{
+    CookieSaved, FetchConfig, FetchLine, FetchOutcome, SavedAccount, SyncError, SyncFailure,
+    SyncStatus,
+};
 use capture::CaptureRecord;
 use game_window::{follow_move, follow_target, GameError, GameWindowInfo, GameWindowStatus};
 use overlay_state::{
@@ -80,6 +96,10 @@ pub const GAME_CAPTURE_EVENT: &str = "game-capture";
 /// 요격전 화면 자동 추적의 결과(켜짐·상태·인식한 화면과 보스)가 바뀔 때 화면으로 보내는 이벤트.
 /// 프런트의 `SCREEN_TRACK_EVENT`와 같아야 한다. 이미지는 싣지 않는다.
 pub const SCREEN_TRACK_EVENT: &str = "screen-track";
+
+/// 계정 수집 스크립트가 줄을 낼 때마다 오버레이 창으로 보내는 이벤트(`{text, warning}` — 쿠키 값은 가려져 있다).
+/// 프런트의 `ACCOUNT_FETCH_EVENT`와 같아야 한다.
+pub const ACCOUNT_FETCH_EVENT: &str = "account-fetch";
 
 /// 엔진 설정 파일 이름. 앱 설정 폴더(`%APPDATA%/<identifier>`)에 둔다.
 const SETTINGS_FILE: &str = "settings.json";
@@ -146,6 +166,10 @@ struct Overlay {
 /// 엔진 배치의 자리. 화면이 두 번 눌러도 엔진 프로세스를 겹쳐 띄우지 않고, 중단 명령이 도는 배치를 멈춘다.
 #[derive(Default)]
 struct EngineRun(engine::BatchSlot);
+
+/// 계정 수집의 자리. 수집 스크립트를 겹쳐 띄우지 않고, 중단 명령이 도는 수집을 멈춘다(엔진 배치와 같은 방식).
+#[derive(Default)]
+struct FetchRun(engine::BatchSlot);
 
 /// 캡처가 끝나면(오류로 끝나도) 표시를 내린다.
 struct BusyGuard<'a>(&'a AtomicBool);
@@ -344,6 +368,134 @@ fn pick_json_file_dialog(window: &WebviewWindow, title: &str) -> Result<Option<S
 #[cfg(not(windows))]
 fn pick_json_file_dialog(_window: &WebviewWindow, _title: &str) -> Result<Option<String>, String> {
     Err("파일 고르기 창은 Windows에서만 쓸 수 있다. 경로를 직접 넣어라".to_string())
+}
+
+// ── 계정 받기 ─────────────────────────────────────────────────────────────────
+//
+// 아래 명령들은 세션 쿠키를 다룬다. 쿠키 값은 `account_sync`·`cookie`·`login_window` 안에서만 흐르고,
+// 여기서는 반환값(`CookieSaved` — 시각과 개수뿐)과 한국어 오류만 화면으로 넘긴다. 쿠키를 출력하거나 이벤트에 싣지 않는다.
+
+/// 수집에 쓸 설정. 엔진 폴더·python은 엔진 계산과 같은 설정에서 나온다 — 화면이 실행할 스크립트를 정할 수 없다.
+fn fetch_config(app: &AppHandle) -> Result<FetchConfig, SyncFailure> {
+    engine_config(app)
+        .map(|config| FetchConfig::from_engine(&config))
+        .map_err(|detail| SyncError::Engine { detail }.into())
+}
+
+/// `blocking`과 같되 실패를 종류와 함께 넘긴다(계정 받기 명령용).
+async fn blocking_sync<T, F>(work: F) -> Result<T, SyncFailure>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, SyncFailure> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|e| {
+            SyncFailure::from(SyncError::Engine {
+                detail: format!("작업을 끝내지 못했다: {e}"),
+            })
+        })?
+}
+
+/// 계정 받기의 지금 상태: 쿠키 파일이 있는지(내용은 돌려주지 않는다)·언제 썼는지, 그 이름의 프로필을 마지막으로 받은 시각,
+/// 계정 파일, 로그인 창이 열려 있는지, 엔진 폴더·python 문제. 이름을 주지 않으면 `me`.
+#[tauri::command]
+async fn account_sync_status(app: AppHandle, name: Option<String>) -> Result<SyncStatus, SyncFailure> {
+    let engine = engine_config(&app).map(|config| FetchConfig::from_engine(&config));
+    let login_window_open = login_window::is_open(&app);
+    blocking_sync(move || {
+        let accounts = account_sync::default_accounts_dir();
+        let mut status = account_sync::status(
+            engine.as_ref().map_err(String::as_str),
+            accounts.as_deref(),
+            name.as_deref(),
+        );
+        status.login_window_open = login_window_open;
+        Ok(status)
+    })
+    .await
+}
+
+/// 붙여넣은 쿠키를 한 줄로 정리해 엔진의 쿠키 파일에 쓴다. `game_token=`·`game_openid=`가 없으면 한국어 오류로 거부한다.
+/// 돌려주는 것은 저장한 시각과 쿠키 개수뿐이다 — 쿠키의 내용은 돌려주지 않는다.
+#[tauri::command]
+async fn account_save_cookie(app: AppHandle, cookie: String) -> Result<CookieSaved, SyncFailure> {
+    let config = fetch_config(&app)?;
+    blocking_sync(move || Ok(account_sync::store_pasted_cookie(&config.engine_dir, &cookie)?)).await
+}
+
+/// 엔진의 수집 스크립트(`scraper/profile_fetch.py --name <이름>`)를 실행해 프로필을 받는다.
+/// 스크립트가 줄을 낼 때마다 `account-fetch` 이벤트를 오버레이 창으로 보내고(쿠키 값은 가려져 있다),
+/// 끝나면 모든 줄과 경고 줄(`[!]`)을 돌려준다. 도는 동안 `account_fetch_cancel`이 불리면 스크립트와 그 자식
+/// 프로세스까지 끝내고 '중단됨'으로 돌아온다. 시간 제한이 있다.
+#[tauri::command]
+async fn account_fetch_profile(app: AppHandle, name: String) -> Result<FetchOutcome, SyncFailure> {
+    let config = fetch_config(&app)?;
+    blocking_sync(move || {
+        let run = app.state::<FetchRun>();
+        // 표는 이 함수가 끝날 때(실패로 끝나도) 버려져 자리가 빈다 — 중단 뒤에 다시 받을 수 있다.
+        let ticket = run.0.begin().map_err(|_| SyncError::Busy)?;
+        let on_line = |line: &FetchLine| {
+            // 오버레이 창에만 보낸다. 진행 줄을 못 보내도 수집은 계속한다.
+            let _ = app.emit_to(MAIN_WINDOW, ACCOUNT_FETCH_EVENT, line.clone());
+        };
+        account_sync::fetch_profile(&config, &name, &on_line, ticket.signal())
+    })
+    .await
+}
+
+/// 도는 계정 수집을 멈춘다. 멈출 수집이 있었으면 true — 그 수집의 `account_fetch_profile`이 '중단됨'으로 돌아온다.
+#[tauri::command]
+fn account_fetch_cancel(run: State<'_, FetchRun>) -> bool {
+    run.0.stop()
+}
+
+/// 수집 스크립트가 쓴 프로필과 엔진의 오버로드 옵션 표를 읽는다: `{path, profile, option_table}`.
+/// 계정 상태로 바꾸는 것은 화면 쪽의 `src/core/import-profile.mjs`다(계산 로직을 여기 다시 쓰지 않는다).
+#[tauri::command]
+async fn account_read_profile(app: AppHandle, name: String) -> Result<Value, SyncFailure> {
+    let config = fetch_config(&app)?;
+    blocking_sync(move || Ok(account_sync::read_profile(&config.engine_dir, &name)?)).await
+}
+
+/// 계정 상태 문서를 계정 폴더(환경 변수 NIKKE_ACCOUNTS_DIR → 저장소의 data/accounts)의 `<이름>.json`에 쓴다.
+/// 이름은 파일 이름에 안전한 글자만 받고(경로를 벗어나는 이름은 거부), 있던 파일은 `.bak`으로 한 벌 남긴다.
+#[tauri::command]
+async fn account_save_file(name: String, account: Value) -> Result<SavedAccount, SyncFailure> {
+    blocking_sync(move || {
+        let dir = account_sync::default_accounts_dir()?;
+        Ok(account_sync::save_account(&dir, &name, &account)?)
+    })
+    .await
+}
+
+/// blablalink 로그인 창을 연다(이미 열려 있으면 앞으로 가져온다). 그 창은 앱 명령을 부를 수 없다.
+#[tauri::command]
+async fn login_window_open(app: AppHandle) -> Result<(), SyncFailure> {
+    Ok(login_window::open(&app)?)
+}
+
+/// 로그인 창의 쿠키 저장소에서 blablalink API 요청에 실릴 쿠키를 읽어 엔진의 쿠키 파일에 쓰고 창을 닫는다.
+/// `game_token`·`game_openid`가 없으면 「아직 로그인되지 않았다」로 거부하고 창은 그대로 둔다.
+/// 돌려주는 것은 저장한 시각과 쿠키 개수뿐이다 — 쿠키 값은 Rust 안에서만 흐른다.
+#[tauri::command]
+async fn login_window_take_cookie(app: AppHandle) -> Result<CookieSaved, SyncFailure> {
+    let config = fetch_config(&app)?;
+    blocking_sync(move || {
+        let window = login_window::window(&app).ok_or(SyncError::LoginWindowClosed)?;
+        let cookies = login_window::read_cookies(&window)?;
+        let saved = account_sync::store_login_cookies(&config.engine_dir, &cookies)?;
+        login_window::close(&window);
+        Ok(saved)
+    })
+    .await
+}
+
+/// 로그인 창의 세션(쿠키·저장 데이터)을 지운다. 한 일을 한국어 문장으로 돌려준다.
+/// 엔진의 쿠키 파일과 오버레이가 기억해 둔 것은 건드리지 않는다.
+#[tauri::command]
+async fn login_window_clear(app: AppHandle) -> Result<String, SyncFailure> {
+    blocking_sync(move || Ok(login_window::clear_session(&app)?.to_string())).await
 }
 
 /// 게임 화면을 찍어 캡처 폴더(환경 변수 NIKKE_CAPTURE_DIR → 저장소의 data/captures)에 저장한다.
@@ -795,6 +947,7 @@ pub fn run() {
         .manage(EngineRun::default())
         .manage(GameTracker::default())
         .manage(ScreenTracker::default())
+        .manage(FetchRun::default())
         .invoke_handler(tauri::generate_handler![
             load_report,
             overlay_status,
@@ -811,7 +964,16 @@ pub fn run() {
             capture_game,
             recognize_game_screen,
             set_screen_tracking,
-            screen_track_status
+            screen_track_status,
+            account_sync_status,
+            account_save_cookie,
+            account_fetch_profile,
+            account_fetch_cancel,
+            account_read_profile,
+            account_save_file,
+            login_window_open,
+            login_window_take_cookie,
+            login_window_clear
         ])
         .setup(|app| {
             let window = app

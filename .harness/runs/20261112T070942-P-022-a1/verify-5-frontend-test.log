@@ -1,0 +1,15 @@
+$ npm --prefix app test
+
+> nikke-companion-app@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.12 E:/code/nikke-companion/app
+
+
+ Test Files  14 passed (14)
+      Tests  333 passed (333)
+   Start at  16:53:10
+   Duration  4.26s (transform 5.63s, setup 0ms, import 11.95s, tests 7.44s, environment 6.97s)
+
+

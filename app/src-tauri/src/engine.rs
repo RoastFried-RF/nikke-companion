@@ -372,22 +372,23 @@ impl Drop for BatchTicket<'_> {
 /// Windows에서는 Job Object다(`engine_win32.rs`) — `python`이 다른 실행 파일을 띄우는 껍데기(가상 환경의 실행기 등)여도,
 /// 엔진이 도중에 다른 프로그램(git)을 띄웠어도 남기지 않는다. 다른 OS에서는 띄운 프로세스 하나만 끝낸다.
 #[cfg(windows)]
-use crate::engine_win32::ProcessGroup;
+pub(crate) use crate::engine_win32::ProcessGroup;
 
 #[cfg(not(windows))]
-struct ProcessGroup;
+pub(crate) struct ProcessGroup;
 
 #[cfg(not(windows))]
 impl ProcessGroup {
-    fn adopt(_child: &Child) -> Self {
+    pub(crate) fn adopt(_child: &Child) -> Self {
         Self
     }
 
-    fn terminate(&self) {}
+    pub(crate) fn terminate(&self) {}
 }
 
 /// 멈춘 엔진 프로세스를 남기지 않는다: 묶음을 끝내고, 띄운 프로세스가 죽은 것을 확인한다.
-fn kill_engine(child: &mut Child, group: &ProcessGroup) {
+/// 계정 수집 스크립트(`account_sync.rs`)도 같은 길로 끝낸다.
+pub(crate) fn kill_engine(child: &mut Child, group: &ProcessGroup) {
     group.terminate();
     let _ = child.kill();
     let _ = child.wait();
@@ -396,7 +397,7 @@ fn kill_engine(child: &mut Child, group: &ProcessGroup) {
 // ── 배치 실행 ─────────────────────────────────────────────────────────────────
 
 /// 창 없는 프로그램에서 띄운 콘솔 프로그램이 검은 창을 번쩍이지 않게 한다.
-fn hide_console(cmd: &mut Command) {
+pub(crate) fn hide_console(cmd: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

@@ -215,9 +215,10 @@ beforeEach(() => {
 });
 
 describe('탭', () => {
-  it('탭 네 개가 있고 처음에는 추천·비교가 보인다', async () => {
+  it('탭 다섯 개가 있고 처음에는 추천·비교가 보인다', async () => {
     const w = await render();
-    expect(w.findAll('[role="tab"]').map((t) => t.text())).toEqual(['추천·비교', '요격전', '성장', '티어']);
+    // 다섯째 탭(계정)은 P-022에서 더했다 — 그 화면의 흐름은 AccountFlow.test.ts가 본다.
+    expect(w.findAll('[role="tab"]').map((t) => t.text())).toEqual(['추천·비교', '요격전', '성장', '티어', '계정']);
     expect(at(w, 'tab-compare').attributes('aria-selected')).toBe('true');
     expect(at(w, 'screen-compare').exists()).toBe(true);
     for (const key of ['intercept', 'growth', 'tier']) expect(at(w, `screen-${key}`).exists()).toBe(false);

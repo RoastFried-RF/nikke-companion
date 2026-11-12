@@ -8,7 +8,7 @@ import { toEngineProfile, validateAccount } from '../../src/core/account.mjs';
 import { compareSquads } from '../../src/core/compare.mjs';
 import { toEngineBase } from '../../src/core/condition.mjs';
 import { runBatch, loadCatalog, nodeRuntime } from '../../src/runtime/node.mjs';
-import { importProfile } from '../../src/core/import-profile.mjs';
+import { importProfile } from '../../src/runtime/import-profile.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const sample = (f) => JSON.parse(fs.readFileSync(path.join(ROOT, 'data/samples', f), 'utf8'));

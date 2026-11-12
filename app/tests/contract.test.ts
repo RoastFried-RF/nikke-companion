@@ -2,6 +2,13 @@
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  ACCOUNT_FETCH_EVENT,
+  accountFetchCancel,
+  accountFetchProfile,
+  accountReadProfile,
+  accountSaveCookie,
+  accountSaveFile,
+  accountSyncStatus,
   captureGame,
   ENGINE_PROGRESS_EVENT,
   engineCancel,
@@ -13,6 +20,9 @@ import {
   GAME_WINDOW_EVENT,
   gameWindowStatus,
   loadReport,
+  loginWindowClear,
+  loginWindowOpen,
+  loginWindowTakeCookie,
   overlayStatus,
   OVERLAY_STATE_EVENT,
   pickJsonFile,
@@ -24,18 +34,22 @@ import {
   setFollowGame,
   setScreenTracking,
   startupReportPath,
+  syncFailure,
 } from '../src/lib/backend';
 import capability from '../src-tauri/capabilities/overlay.json';
 import tauriConf from '../src-tauri/tauri.conf.json';
 import buildRs from '../src-tauri/build.rs?raw';
 import cargoToml from '../src-tauri/Cargo.toml?raw';
+import accountSyncRs from '../src-tauri/src/account_sync.rs?raw';
 import captureRs from '../src-tauri/src/capture.rs?raw';
 import captureCliRs from '../src-tauri/src/capture_cli.rs?raw';
+import cookieRs from '../src-tauri/src/cookie.rs?raw';
 import engineRs from '../src-tauri/src/engine.rs?raw';
 import engineWin32Rs from '../src-tauri/src/engine_win32.rs?raw';
 import gameWin32Rs from '../src-tauri/src/game_win32.rs?raw';
 import gameWindowRs from '../src-tauri/src/game_window.rs?raw';
 import libRs from '../src-tauri/src/lib.rs?raw';
+import loginWindowRs from '../src-tauri/src/login_window.rs?raw';
 import overlayStateRs from '../src-tauri/src/overlay_state.rs?raw';
 import overlayWin32Rs from '../src-tauri/src/overlay_win32.rs?raw';
 import recognizeRs from '../src-tauri/src/recognize.rs?raw';
@@ -69,7 +83,42 @@ const COMMANDS = [
   'recognize_game_screen',
   'set_screen_tracking',
   'screen_track_status',
+  'account_sync_status',
+  'account_save_cookie',
+  'account_fetch_profile',
+  'account_fetch_cancel',
+  'account_read_profile',
+  'account_save_file',
+  'login_window_open',
+  'login_window_take_cookie',
+  'login_window_clear',
 ];
+
+/** 계정 받기(P-022)에서 더한 명령 아홉 개. */
+const ACCOUNT_COMMANDS = COMMANDS.slice(16);
+
+/** 지어낸 쿠키. 실제 계정의 값이 아니다. */
+const FAKE_COOKIE = 'game_token=FAKE-TOKEN-contract-0123456789; game_openid=55554444333322221111';
+const syncStatus = {
+  name: 'me',
+  cookie_saved: true,
+  cookie_saved_at: '2026-11-12T06:00:00.000Z',
+  profile_fetched_at: null,
+  account_file: null,
+  login_window_open: false,
+  problems: [],
+};
+const cookieSaved = { saved_at: '2026-11-12T06:00:00.000Z', count: 2 };
+const fetchOutcome = {
+  name: 'me',
+  profile_path: 'D:\\engine\\profiles\\me.json',
+  fetched_at: '2026-11-12T06:01:00.000Z',
+  lines: [{ text: '[+] 프로필 저장: profiles/me.json  (6종)', warning: false }],
+  warnings: [],
+  seconds: 12.5,
+};
+const fetchedProfile = { path: 'D:\\engine\\profiles\\me.json', profile: { chars: {} }, option_table: {} };
+const savedAccount = { path: 'D:\\repo\\data\\accounts\\me.json', backup: null };
 
 const gameWindow = {
   hwnd: 1,
@@ -127,6 +176,13 @@ describe('Rust 명령 호출', () => {
       if (cmd === 'engine_cancel') return true;
       if (cmd === 'recognize_game_screen') return recognition;
       if (cmd === 'set_screen_tracking' || cmd === 'screen_track_status') return trackStatus;
+      if (cmd === 'account_sync_status') return syncStatus;
+      if (cmd === 'account_save_cookie' || cmd === 'login_window_take_cookie') return cookieSaved;
+      if (cmd === 'account_fetch_profile') return fetchOutcome;
+      if (cmd === 'account_fetch_cancel') return true;
+      if (cmd === 'account_read_profile') return fetchedProfile;
+      if (cmd === 'account_save_file') return savedAccount;
+      if (cmd === 'login_window_clear') return '로그인 창의 쿠키·저장 데이터를 지웠다';
       return null;
     });
     await expect(loadReport('D:\\r.json')).resolves.toEqual({ schema_version: 1 });
@@ -145,6 +201,15 @@ describe('Rust 명령 호출', () => {
     await expect(recognizeGameScreen()).resolves.toEqual(recognition);
     await expect(setScreenTracking(true, 2000)).resolves.toEqual(trackStatus);
     await expect(screenTrackStatus()).resolves.toEqual(trackStatus);
+    await expect(accountSyncStatus('me')).resolves.toEqual(syncStatus);
+    await expect(accountSaveCookie(FAKE_COOKIE)).resolves.toEqual(cookieSaved);
+    await expect(accountFetchProfile('me')).resolves.toEqual(fetchOutcome);
+    await expect(accountFetchCancel()).resolves.toBe(true);
+    await expect(accountReadProfile('me')).resolves.toEqual(fetchedProfile);
+    await expect(accountSaveFile('me', { schema_version: 1, nikkes: {} })).resolves.toEqual(savedAccount);
+    await expect(loginWindowOpen()).resolves.toBeNull();
+    await expect(loginWindowTakeCookie()).resolves.toEqual(cookieSaved);
+    await expect(loginWindowClear()).resolves.toBe('로그인 창의 쿠키·저장 데이터를 지웠다');
     expect(calls.map((c) => c.cmd)).toEqual(COMMANDS);
     expect(calls[0].args).toEqual({ path: 'D:\\r.json' });
     expect(calls[6].args).toEqual({ requests: [{ squad: ['크라운'] }] });
@@ -157,6 +222,17 @@ describe('Rust 명령 호출', () => {
     // 자동 추적: 화면이 정하는 것은 켜짐과 주기뿐이다. 상태를 묻는 명령은 인자가 없다.
     expect(calls[14].args).toEqual({ enabled: true, intervalMs: 2000 });
     expect(calls[15].args).toEqual({});
+    // 계정 받기: 화면이 넘기는 것은 이름, 붙여넣은 쿠키(한 번), 계정 문서뿐이다 — 실행할 스크립트나 폴더는 없다.
+    expect(calls[16].args).toEqual({ name: 'me' });
+    expect(calls[17].args).toEqual({ cookie: FAKE_COOKIE });
+    expect(calls[18].args).toEqual({ name: 'me' });
+    expect(calls[19].args).toEqual({});
+    expect(calls[20].args).toEqual({ name: 'me' });
+    expect(calls[21].args).toEqual({ name: 'me', account: { schema_version: 1, nikkes: {} } });
+    // 로그인 창 명령은 화면에서 받는 인자가 없다(어떤 주소를 열지·어떤 쿠키를 읽을지 화면이 정하지 못한다).
+    expect(calls[22].args).toEqual({});
+    expect(calls[23].args).toEqual({});
+    expect(calls[24].args).toEqual({});
   });
 
   it('자동 추적의 주기를 주지 않으면 null을 넘긴다 — Rust가 기본값(2초)을 쓴다', async () => {
@@ -183,6 +259,16 @@ describe('Rust 명령 호출', () => {
     // 자동 추적: 화면의 intervalMs가 Rust의 interval_ms다(Tauri가 이름을 바꿔 준다).
     expect(libRs).toMatch(/fn set_screen_tracking\(app: AppHandle, enabled: bool, interval_ms: Option<u64>\) -> TrackStatus/);
     expect(libRs).toMatch(/fn screen_track_status\(tracker: State<'_, ScreenTracker>\) -> TrackStatus/);
+    // 계정 받기.
+    expect(libRs).toMatch(/async fn account_sync_status\(app: AppHandle, name: Option<String>\) -> Result<SyncStatus, SyncFailure>/);
+    expect(libRs).toMatch(/async fn account_save_cookie\(app: AppHandle, cookie: String\) -> Result<CookieSaved, SyncFailure>/);
+    expect(libRs).toMatch(/async fn account_fetch_profile\(app: AppHandle, name: String\) -> Result<FetchOutcome, SyncFailure>/);
+    expect(libRs).toMatch(/fn account_fetch_cancel\(run: State<'_, FetchRun>\) -> bool/);
+    expect(libRs).toMatch(/async fn account_read_profile\(app: AppHandle, name: String\) -> Result<Value, SyncFailure>/);
+    expect(libRs).toMatch(/async fn account_save_file\(name: String, account: Value\) -> Result<SavedAccount, SyncFailure>/);
+    expect(libRs).toMatch(/async fn login_window_open\(app: AppHandle\) -> Result<\(\), SyncFailure>/);
+    expect(libRs).toMatch(/async fn login_window_take_cookie\(app: AppHandle\) -> Result<CookieSaved, SyncFailure>/);
+    expect(libRs).toMatch(/async fn login_window_clear\(app: AppHandle\) -> Result<String, SyncFailure>/);
   });
 
   it('Rust가 거부한 한국어 문장을 그대로 넘긴다', async () => {
@@ -191,6 +277,27 @@ describe('Rust 명령 호출', () => {
     });
     const failure = await loadReport('x.json').catch((e: unknown) => errorMessage(e));
     expect(failure).toBe('schema_version이 맞지 않는다: 파일은 2, 이 앱이 읽는 판은 1이다: x.json');
+  });
+
+  it('계정 받기 명령이 거부한 값은 종류·문장·쿠키 안내 여부로 읽는다 — Rust가 준 것이 아니면 종류 없는 실패로 감싼다', async () => {
+    const rejected = { kind: 'session_expired', message: '로그인 세션이 만료됐다(game not login) — 쿠키를 다시 받아라', cookie_help: true, lines: [{ text: '[!] X', warning: true }], warnings: ['[!] X'] };
+    mockIPC(() => {
+      throw rejected;
+    });
+    const failure = await accountFetchProfile('me').catch((e: unknown) => syncFailure(e));
+    expect(failure).toEqual(rejected);
+    // 칸이 빠진 값도 화면이 그대로 쓸 수 있는 모양으로 채운다.
+    expect(syncFailure({ kind: 'busy', message: '이미 계정을 받는 중이다' })).toEqual({ kind: 'busy', message: '이미 계정을 받는 중이다', cookie_help: false, lines: [], warnings: [] });
+    // IPC 자체의 오류(문자열·Error)는 종류 없는 실패다 — 쿠키 안내를 붙이지 않는다.
+    expect(syncFailure('명령을 부를 수 없다')).toEqual({ kind: 'unknown', message: '명령을 부를 수 없다', cookie_help: false, lines: [], warnings: [] });
+    expect(syncFailure(new Error('끊겼다')).message).toBe('끊겼다');
+    expect(syncFailure(null).kind).toBe('unknown');
+    // Rust의 실패 타입과 화면의 타입이 같은 다섯 칸이다.
+    const rust = accountSyncRs.slice(accountSyncRs.indexOf('pub struct SyncFailure {'), accountSyncRs.indexOf('impl SyncFailure {'));
+    expect(rust.match(/^\s*pub (\w+):/gm)?.map((f) => f.trim())).toEqual(['pub kind:', 'pub message:', 'pub cookie_help:', 'pub lines:', 'pub warnings:']);
+    const types = sources['../src/types.ts'];
+    const front = types.slice(types.indexOf('export interface SyncFailure {'), types.indexOf('/** 받은 프로필과 변환에 쓸 엔진의 오버로드 옵션 표'));
+    expect(front.match(/^ {2}(\w+):/gm)?.map((f) => f.trim())).toEqual(['kind:', 'message:', 'cookie_help:', 'lines:', 'warnings:']);
   });
 
   it('errorMessage는 문자열·Error·그 밖의 값을 문장으로 바꾼다', () => {
@@ -212,6 +319,221 @@ describe('Rust 명령 호출', () => {
     expect(libRs).toContain(`GAME_WINDOW_EVENT: &str = "${GAME_WINDOW_EVENT}"`);
     expect(libRs).toContain(`GAME_CAPTURE_EVENT: &str = "${GAME_CAPTURE_EVENT}"`);
     expect(libRs).toContain(`SCREEN_TRACK_EVENT: &str = "${SCREEN_TRACK_EVENT}"`);
+    expect(libRs).toContain(`ACCOUNT_FETCH_EVENT: &str = "${ACCOUNT_FETCH_EVENT}"`);
+  });
+});
+
+describe('계정 받기 — 세션 쿠키의 길(Rust)', () => {
+  /** 주석을 뺀 코드. */
+  const code = (source: string) =>
+    source
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+  /** `#[cfg(test)]` 앞까지 — 테스트 코드를 뺀 부분. */
+  const beforeTests = (source: string) => source.slice(0, source.indexOf('#[cfg(test)]'));
+  const cookieCode = code(beforeTests(cookieRs));
+  const syncCode = code(beforeTests(accountSyncRs));
+  const loginCode = code(beforeTests(loginWindowRs));
+  /** lib.rs에서 계정 받기 명령들이 있는 부분. */
+  const glue = code(libRs.slice(libRs.indexOf('// ── 계정 받기'), libRs.indexOf('/// 게임 화면을 찍어 캡처 폴더(')));
+
+  it('(a) 쿠키를 쓰는 곳은 엔진의 scraper/.session_cookie 하나다', () => {
+    expect(accountSyncRs).toContain('pub const COOKIE_FILE: &str = "scraper/.session_cookie";');
+    // 쿠키 값을 꺼내는 길(header)을 부르는 곳은 쿠키 파일을 쓰는 한 줄뿐이다.
+    expect(cookieCode).toContain('pub(crate) fn header(&self) -> &str');
+    expect(syncCode.match(/\.header\(\)/g)).toHaveLength(1);
+    expect(syncCode).toMatch(/let path = cookie_path\(engine_dir\);\s*fs::write\(&path, format!\("\{\}\\n", cookie\.header\(\)\)\)/);
+    for (const [file, source] of Object.entries({ 'lib.rs': code(libRs), 'login_window.rs': loginCode })) {
+      expect(source, file).not.toMatch(/\.header\(\)/);
+    }
+    // 두 길(붙여넣기·로그인 창) 모두 그 한 곳으로 간다.
+    expect(syncCode.match(/write_cookie_file\(engine_dir, &cookie\)/g)).toHaveLength(2);
+    // 엔진의 수집 스크립트 옆이 아니면 쓰지 않는다.
+    expect(syncCode).toMatch(/fn write_cookie_file\([^)]*\) -> Result<CookieSaved, SyncError> \{[\s\S]*?if !script\.is_file\(\) \{\s*return Err\(SyncError::ScriptMissing/);
+  });
+
+  it('(b·c) 쿠키를 담는 타입은 값을 글자로 내보이지 않고, 화면에 넘기는 타입에는 쿠키가 없다', () => {
+    // 쿠키를 담는 두 타입은 Debug를 손으로 쓴다(값을 가린다). 직렬화(화면으로 넘기기)는 할 수 없다.
+    expect(cookieCode).toMatch(/#\[derive\(Clone, PartialEq, Eq\)\]\s*pub struct SessionCookie\(String\);/);
+    expect(cookieCode).toMatch(/#\[derive\(Clone, PartialEq, Eq\)\]\s*pub struct BrowserCookie \{/);
+    expect(cookieCode).toMatch(/#\[derive\(Clone, Default\)\]\s*pub struct Redactor \{/);
+    expect(cookieCode).not.toMatch(/Serialize|serde/);
+    // 화면에 넘기는 「쿠키 저장 결과」는 시각과 개수뿐이다.
+    const saved = accountSyncRs.slice(accountSyncRs.indexOf('pub struct CookieSaved {'), accountSyncRs.indexOf('/// 확인을 마친 쿠키를 엔진의 쿠키 파일에 쓴다'));
+    expect(saved.match(/^\s*pub (\w+):/gm)?.map((f) => f.trim())).toEqual(['pub saved_at:', 'pub count:']);
+    const types = sources['../src/types.ts'];
+    const front = types.slice(types.indexOf('export interface CookieSaved {'), types.indexOf('/** 수집 스크립트가 낸 줄 하나'));
+    expect(front.match(/^ {2}(\w+):/gm)?.map((f) => f.trim())).toEqual(['saved_at:', 'count:']);
+    // 상태에도 쿠키의 내용은 없다 — 있는지와 언제 썼는지뿐이다.
+    const status = accountSyncRs.slice(accountSyncRs.indexOf('pub struct SyncStatus {'), accountSyncRs.indexOf('/// python을 실행할 수 있는지 본다'));
+    expect(status.match(/^\s*pub (\w+):/gm)?.map((f) => f.trim())).toEqual([
+      'pub name:',
+      'pub cookie_saved:',
+      'pub cookie_saved_at:',
+      'pub profile_fetched_at:',
+      'pub account_file:',
+      'pub login_window_open:',
+      'pub problems:',
+    ]);
+  });
+
+  it('(c) 쿠키를 다루는 Rust 코드는 아무것도 출력하지 않고, 이벤트로 가는 것은 가린 진행 줄뿐이다', () => {
+    for (const [file, source] of Object.entries({ 'cookie.rs': cookieCode, 'account_sync.rs': syncCode, 'login_window.rs': loginCode, 'lib.rs(계정 받기)': glue })) {
+      expect(source, file).not.toMatch(/\b(println|eprintln|print|eprint|dbg)!|\blog::|\btracing::/);
+    }
+    // 계정 받기 명령이 보내는 이벤트는 하나다: 수집 스크립트의 줄(가려진 것)을 오버레이 창으로만.
+    expect(glue.match(/\.emit\w*\(/g)).toHaveLength(1);
+    expect(glue).toContain('app.emit_to(MAIN_WINDOW, ACCOUNT_FETCH_EVENT, line.clone())');
+    // 스크립트의 줄은 가린 뒤에야 모으고 알린다.
+    expect(syncCode).toMatch(/let line = FetchLine::new\(truncate\(&redactor\.redact\(text\), MAX_LINE_CHARS\)\);/);
+    expect(syncCode.match(/on_line\(/g)).toHaveLength(2);
+    expect(syncCode).toContain('let redactor = cookie_redactor(&config.engine_dir)?;');
+    // 받은 프로필의 계정 식별자(openid)도 화면에 넘기지 않는다.
+    expect(syncCode).toContain('meta.remove("openid");');
+  });
+
+  it('(d) 앱의 Rust 코드는 네트워크 요청을 하지 않는다 — HTTP 크레이트도 소켓도 없다', () => {
+    expect(cargoToml).not.toMatch(/^\s*(reqwest|ureq|hyper|curl|isahc|attohttpc|surf|tungstenite|tokio-tungstenite|tauri-plugin-http|tauri-plugin-websocket|tauri-plugin-upload)\s*=/m);
+    for (const [file, source] of Object.entries({ 'cookie.rs': cookieCode, 'account_sync.rs': syncCode, 'login_window.rs': loginCode, 'lib.rs': code(libRs) })) {
+      expect(source, file).not.toMatch(/std::net|TcpStream|UdpSocket|reqwest|ureq::/);
+    }
+    // 쿠키 규칙 모듈은 순수하다: 파일·프로세스·창에 닿지 않는다.
+    expect(cookieCode).not.toMatch(/std::fs|std::io|std::path|std::process|std::env|std::thread|tauri|windows::/);
+    expect(cookieCode.match(/^use /gm)).toHaveLength(1);
+  });
+
+  it('실행하는 것은 설정된 엔진 폴더의 scraper/profile_fetch.py뿐이다 — 화면은 이름만 넘긴다', () => {
+    expect(accountSyncRs).toContain('pub const FETCH_SCRIPT: &str = "scraper/profile_fetch.py";');
+    expect(syncCode).toMatch(/fn script\(&self\) -> PathBuf \{\s*self\.engine_dir\.join\(FETCH_SCRIPT\)/);
+    expect(syncCode).toMatch(/let mut cmd = Command::new\(&config\.python\);\s*cmd\.arg\(&script\)\s*\.arg\("--name"\)\s*\.arg\(&name\)/);
+    // 프로세스를 띄우는 곳은 둘뿐이다: 수집 스크립트와, 상태 조회의 `python --version`.
+    expect(syncCode.match(/Command::new\(/g)).toHaveLength(2);
+    expect(syncCode).toMatch(/let mut cmd = Command::new\(python\);\s*cmd\.arg\("--version"\)/);
+    // 이름은 스크립트를 띄우기 전에 확인한다.
+    const fetchBody = syncCode.slice(syncCode.indexOf('pub fn fetch_profile('), syncCode.indexOf('fn exit_of('));
+    expect(fetchBody.indexOf('let name = validate_name(name)?;')).toBeGreaterThan(-1);
+    expect(fetchBody.indexOf('let name = validate_name(name)?;')).toBeLessThan(fetchBody.indexOf('Command::new('));
+    // 엔진 폴더·python은 엔진 계산과 같은 설정에서 나온다(P-010) — 명령의 인자에는 없다.
+    expect(glue).toMatch(/fn fetch_config\(app: &AppHandle\) -> Result<FetchConfig, SyncFailure> \{\s*engine_config\(app\)\s*\.map\(\|config\| FetchConfig::from_engine\(&config\)\)/);
+    for (const [file, text] of Object.entries(sources)) {
+      expect(text, file).not.toMatch(/profile_fetch\.py|scraper\/|\.session_cookie|NIKKE_ACCOUNTS_DIR|accounts_dir|accountsDir/);
+    }
+  });
+
+  it('중단·시간 초과는 엔진 계산과 같은 방식으로 스크립트와 그 자식 프로세스까지 끝낸다', () => {
+    expect(libRs).toContain('struct FetchRun(engine::BatchSlot);');
+    expect(glue).toMatch(/let ticket = run\.0\.begin\(\)\.map_err\(\|_\| SyncError::Busy\)\?;/);
+    expect(glue).toMatch(/account_sync::fetch_profile\(&config, &name, &on_line, ticket\.signal\(\)\)/);
+    expect(glue).toMatch(/fn account_fetch_cancel\([^)]*\) -> bool \{\s*run\.0\.stop\(\)\s*\}/);
+    expect(syncCode).toContain('let group = ProcessGroup::adopt(&child);');
+    expect(syncCode).toContain('engine::kill_engine(&mut child, &group);');
+    expect(syncCode).toContain('pub const DEFAULT_FETCH_TIMEOUT: Duration = Duration::from_secs(10 * 60);');
+    expect(syncCode).toContain('Self::Stopped => write!(f, "{STOPPED_PREFIX}: 계정 수집을 멈췄다")');
+  });
+
+  it('계정 파일은 계정 폴더 안에만, 안전한 이름으로, 있던 파일은 .bak으로 남기고 쓴다', () => {
+    expect(accountSyncRs).toContain('pub const ENV_ACCOUNTS_DIR: &str = "NIKKE_ACCOUNTS_DIR";');
+    expect(accountSyncRs).toContain('pub const ACCOUNTS_SUBDIR: [&str; 2] = ["data", "accounts"];');
+    const save = syncCode.slice(syncCode.indexOf('pub fn save_account('));
+    expect(save.indexOf('let name = validate_name(name)?;')).toBeLessThan(save.indexOf('fs::create_dir_all(dir)'));
+    expect(save).toMatch(/let backup = if path\.is_file\(\) \{\s*let backup = dir\.join\(format!\("\{name\}\.json\.bak"\)\);\s*fs::copy\(&path, &backup\)/);
+    // 화면은 폴더를 정하지 못한다 — 이름과 문서만 넘긴다.
+    expect(glue).toMatch(/let dir = account_sync::default_accounts_dir\(\)\?;\s*Ok\(account_sync::save_account\(&dir, &name, &account\)\?\)/);
+    expect(gitignore.split(/\r?\n/)).toContain('data/accounts/');
+  });
+
+  it('프로필 → 계정 상태 변환을 Rust로 다시 쓰지 않았다 — 화면 쪽의 src/core/import-profile.mjs가 한다', () => {
+    for (const rust of [syncCode, glue]) {
+      expect(rust).not.toMatch(/skill_levels|breakthrough|core_enhancement|equip_skills|collection_stage|favorite_stage|synchro_level/);
+    }
+    const sync = sources['../src/lib/accountSync.ts'];
+    expect(sync).toMatch(/import \{ importProfile, importReport, optionTableFrom \} from '@core\/import-profile\.mjs'/);
+    expect(sync).toMatch(/const result = importProfile\(profile, \{/);
+    // 화면과 그 도우미에는 변환 규칙(칸 이름 다루기)이 없다. 동기화 레벨은 요약에 보이려고 읽기만 한다.
+    for (const file of ['../src/screens/AccountScreen.vue', '../src/components/AccountFailure.vue', '../src/lib/accountSync.ts', '../src/lib/accountLink.ts']) {
+      expect(sources[file], file).not.toMatch(/skill_levels|breakthrough|core_enhancement|equip_skills|collection_stage|favorite_stage|unknown\.push|\boverload\b/);
+    }
+    // 옵션 표 파일의 자리는 Rust와 루트 모듈이 같다.
+    expect(accountSyncRs).toContain('pub const OPTION_TABLE_FILE: &str = "data/base_stat_tables/equipment_skills.json";');
+  });
+});
+
+describe('로그인 창(Rust)', () => {
+  const code = (source: string) =>
+    source
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+  const beforeTests = (source: string) => source.slice(0, source.indexOf('#[cfg(test)]'));
+  const login = code(beforeTests(loginWindowRs));
+  const capabilityFiles = import.meta.glob('../src-tauri/capabilities/*.json');
+
+  it('오버레이와 다른 보통 창이다 — 테두리·제목 표시줄이 있고 작업 표시줄에 보인다', () => {
+    expect(loginWindowRs).toContain('pub const LOGIN_WINDOW: &str = "login";');
+    const build = login.slice(login.indexOf('WebviewWindowBuilder::new('), login.indexOf('.build()'));
+    expect(build).toContain('WebviewWindowBuilder::new(app, LOGIN_WINDOW, WebviewUrl::External(parse(LOGIN_URL)?))');
+    expect(build).toContain('.decorations(true)');
+    expect(build).toContain('.skip_taskbar(false)');
+    expect(build).toContain('.always_on_top(false)');
+    expect(build).not.toMatch(/\.transparent\(|\.visible\(false\)/);
+    // 창은 실행 중에 만든다 — 설정 파일의 창은 오버레이 하나뿐이다.
+    expect(tauriConf.app.windows.map((w) => w.label)).toEqual(['main']);
+    // 여는 주소는 정해져 있다. 화면이 주소를 넘기지 못한다.
+    expect(login).toMatch(/pub const LOGIN_URL: &str = "https:\/\/www\.blablalink\.com\/";/);
+    expect(libRs).toMatch(/async fn login_window_open\(app: AppHandle\) -> Result<\(\), SyncFailure> \{\s*Ok\(login_window::open\(&app\)\?\)/);
+  });
+
+  it('이 창은 앱 명령을 부를 수 없다 — capability가 없고, 원격 주소에 IPC를 여는 설정이 없다', () => {
+    // capability 파일은 하나이고, 그 창 목록에 로그인 창이 없다(이름을 묶어 맞추는 * 도 없다).
+    expect(Object.keys(capabilityFiles)).toEqual(['../src-tauri/capabilities/overlay.json']);
+    expect(capability.windows).toEqual(['main']);
+    expect(capability.windows).not.toContain('login');
+    for (const name of capability.windows) expect(name).not.toMatch(/[*?]/);
+    // 원격 주소에 권한을 주는 칸이 없다 — 창의 주소가 어디로 바뀌든 권한은 생기지 않는다.
+    expect(Object.keys(capability).sort()).toEqual(['$schema', 'description', 'identifier', 'permissions', 'windows']);
+    expect(JSON.stringify(capability.permissions)).not.toMatch(/remote|https?:/);
+    expect(tauriConf.app.security.capabilities).toEqual(['overlay']);
+    expect(JSON.stringify(tauriConf)).not.toMatch(/dangerousRemoteDomainIpcAccess|dangerousRemoteUrlIpcAccess|"remote"/);
+    // 앱 명령은 권한 목록(build.rs)에 올라 있다 — 올리지 않은 명령은 어느 창에서나 불린다.
+    for (const cmd of COMMANDS) expect(buildRs, cmd).toContain(`"${cmd}"`);
+    // 로그인 창에 스크립트를 넣거나 페이지에서 무엇을 실행하지 않는다.
+    expect(login).not.toMatch(/initialization_script|\.eval\(|on_page_load|on_web_resource_request|additional_browser_args|devtools\(true\)/);
+    // 갈 수 있는 주소는 https뿐이다.
+    expect(login).toContain('.on_navigation(navigation_allowed)');
+    expect(login).toMatch(/pub fn navigation_allowed\(url: &Url\) -> bool \{\s*url\.scheme\(\) == "https" \|\| url\.as_str\(\) == "about:blank"/);
+  });
+
+  it('쿠키는 Rust가 그 창의 저장소에서 직접 읽어 쿠키 파일로만 보낸다 — 로그인하지 않았으면 창을 둔다', () => {
+    // 읽는 것은 blablalink API로 가는 요청에 실릴 쿠키뿐이다(저장소 전체가 아니다).
+    expect(login).toMatch(/pub const COOKIE_URL: &str = "https:\/\/api\.blablalink\.com\/api\/game\/proxy\/";/);
+    expect(login).toContain('.cookies_for_url(parse(COOKIE_URL)?)');
+    expect(login).not.toMatch(/\.cookies\(\)/);
+    expect(cookieRs).toContain('pub const API_HOST: &str = "api.blablalink.com";');
+    // 읽기 → 저장(필수 쿠키가 없으면 여기서 거부되고 창은 그대로) → 창 닫기.
+    const take = code(libRs.slice(libRs.indexOf('async fn login_window_take_cookie('), libRs.indexOf('/// 로그인 창의 세션(쿠키·저장 데이터)을 지운다. 한 일을')));
+    expect(take).toMatch(
+      /let window = login_window::window\(&app\)\.ok_or\(SyncError::LoginWindowClosed\)\?;\s*let cookies = login_window::read_cookies\(&window\)\?;\s*let saved = account_sync::store_login_cookies\(&config\.engine_dir, &cookies\)\?;\s*login_window::close\(&window\);\s*Ok\(saved\)/,
+    );
+    expect(take).not.toMatch(/emit|format!|to_string\(\)/);
+    // 쿠키 목록 → 헤더 한 줄은 순수 함수다.
+    expect(cookieRs).toMatch(/pub fn header_from_browser_cookies\(\s*cookies: &\[BrowserCookie\],\s*host: &str,\s*\) -> Result<SessionCookie, CookieError>/);
+    expect(accountSyncRs).toContain('let cookie = cookie::header_from_browser_cookies(cookies, cookie::API_HOST)?;');
+    // Windows에서는 화면 응답을 맡은 스레드에서 쿠키를 읽으면 멈춘다 — 다른 스레드에서 읽는다.
+    expect(take).toMatch(/blocking_sync\(move \|\| \{/);
+  });
+
+  it('세션을 지울 수 있고, 로그인 창의 저장 데이터는 오버레이와 다른 폴더에 둔다', () => {
+    expect(loginWindowRs).toContain('pub const DATA_SUBDIR: &str = "login-webview";');
+    expect(login).toMatch(/pub fn open\(app: &AppHandle\) -> Result<\(\), SyncError> \{\s*open_in\(app, data_dir\(app\)\?\)/);
+    expect(login).toContain('.data_directory(data_directory)');
+    expect(login).toMatch(/fn data_dir\(app: &AppHandle\) -> Result<PathBuf, SyncError> \{\s*app\.path\(\)\s*\.app_local_data_dir\(\)\s*\.map\(\|dir\| dir\.join\(DATA_SUBDIR\)\)/);
+    const clear = login.slice(login.indexOf('pub fn clear_session('));
+    expect(clear).toMatch(/pub fn clear_session\(app: &AppHandle\) -> Result<&'static str, SyncError> \{\s*clear_session_in\(app, &data_dir\(app\)\?\)/);
+    expect(clear).toContain('.clear_all_browsing_data()');
+    expect(clear).toContain('fs::remove_dir_all(dir)');
+    // 지우는 것은 로그인 창의 폴더뿐이다 — 엔진의 쿠키 파일은 건드리지 않는다.
+    expect(login).not.toMatch(/session_cookie|COOKIE_FILE|cookie_path/);
   });
 });
 
@@ -229,6 +551,9 @@ describe('게임 창 추적·캡처(Rust)', () => {
     'capture_cli.rs': captureCliRs,
     'recognize.rs': recognizeRs,
     'screen_track.rs': screenTrackRs,
+    'account_sync.rs': accountSyncRs,
+    'cookie.rs': cookieRs,
+    'login_window.rs': loginWindowRs,
     'lib.rs': libRs,
   };
 
@@ -563,9 +888,12 @@ describe('엔진 호출(Rust)', () => {
   });
 
   it('새 화면을 위해 Rust 명령이나 권한을 더하지 않았다 — 결과 파일은 read_json_file로 읽는다', () => {
-    // 화면 넷(P-017)까지는 14개였다. 그 뒤에 더한 것은 자동 추적(P-021)의 둘뿐이다 — 켜기/끄기와 상태.
-    expect(COMMANDS).toHaveLength(16);
-    expect(COMMANDS.slice(14)).toEqual(['set_screen_tracking', 'screen_track_status']);
+    // 화면 넷(P-017)까지는 14개였다. 그 뒤에 더한 것은 자동 추적(P-021)의 둘 — 켜기/끄기와 상태 — 과
+    // 계정 받기(P-022)의 아홉이다(계정 화면은 쿠키 파일·수집 프로세스·로그인 창을 다뤄 명령이 필요하다).
+    expect(COMMANDS).toHaveLength(25);
+    expect(COMMANDS.slice(14, 16)).toEqual(['set_screen_tracking', 'screen_track_status']);
+    expect(ACCOUNT_COMMANDS).toHaveLength(9);
+    for (const cmd of ACCOUNT_COMMANDS) expect(cmd).toMatch(/^(account|login_window)_/);
     expect(sources['../src/lib/resultFile.ts']).toContain('await readJsonFile(target)');
     // Tauri API를 직접 부르는 곳은 여전히 lib/backend.ts 하나다.
     for (const [file, text] of Object.entries(sources)) {
