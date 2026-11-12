@@ -111,6 +111,23 @@ export interface SuggestionSummary {
   shown: number;
   /** 탐색 요약(시뮬 횟수·예산·단계별 건수). 배치 탐색이 생기기 전의 결과 파일에는 없다. */
   search?: SearchSummary;
+  /**
+   * 우선 속성 요약(docs/data-model.md §후보 생성 §우선 속성). 우선 속성을 준 추천에만 있다 — 요격전 추천이 보스의 약점 속성을 넘긴다.
+   * 단계(`"1"`·`"2"`·`"3"`)별 이름 목록: 풀에 든 우선 속성 니케 · 우선 속성 덕에 든 니케 · 밀려난 니케.
+   */
+  priority?: {
+    element: string;
+    min_per_stage: number;
+    score_bonus: number;
+    active: boolean;
+    owned: string[];
+    pool: Record<string, string[]>;
+    promoted: Record<string, string[]>;
+    displaced: Record<string, string[]>;
+    short: { stage: string; wanted: number; available: number }[];
+    guaranteed: number;
+    candidates: number;
+  };
 }
 
 export interface CompareReport {
@@ -305,8 +322,11 @@ export interface InterceptBoss {
   rejected: RejectedSquad[];
   failed: FailedSquad[];
   suggestion: SuggestionSummary | null;
-  /** 약점 속성 보유 니케가 후보 풀에 얼마나 들었나. 약점을 모르거나 계산하지 않았으면 null. */
-  weak_pool: { element: string; owned: string[]; pooled: string[]; not_pooled: string[] } | null;
+  /**
+   * 약점 속성 보유 니케가 후보 풀에 얼마나 들었나. 약점을 모르거나 계산하지 않았으면 null.
+   * `promoted`는 약점 속성 우선 덕에 풀에 든 니케(투자 점수만으로는 풀에 없었을 니케) — 그 기능이 생기기 전의 결과 파일에는 없다.
+   */
+  weak_pool: { element: string; owned: string[]; pooled: string[]; not_pooled: string[]; promoted?: string[] } | null;
   notes: string[];
   caveats: string[];
 }

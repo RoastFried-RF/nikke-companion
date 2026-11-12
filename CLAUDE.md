@@ -35,7 +35,11 @@ node src/cli.mjs compare --account data/samples/account.sample.json --condition 
 node src/cli.mjs intercept --account data/samples/account.sample.json                      # 보스 5종, 시뮬 예산 300건(보스당 60건) — 몇 분
 node src/cli.mjs intercept --account data/samples/account.sample.json --boss 크라켄 --budget 30 --top 3 --json intercept.json
 node src/cli.mjs intercept --account data/samples/account.sample.json --bosses data/samples/bosses.anomaly.sample.json --budget 25   # 검증용 보스 묶음
+node src/cli.mjs intercept --account data/samples/account.large.sample.json --boss 크라켄 --budget 20   # 보유 34명 시험 계정 — 약점 속성 니케가 후보에 드는 것을 본다
 ```
+
+요격전 추천은 보스마다 약점 속성 니케를 후보 풀에 단계당 최소 2명 넣고 후보 순서에서 앞에 둔다(`docs/data-model.md` §후보 생성 §우선 속성).
+`suggest`·`tier`의 후보는 그대로다.
 
 자동 티어(엔진 계산으로 티어표 — 방법·한계는 `docs/tier-method.md`, 기준 편성·등급 규칙은 `data/tier/`):
 

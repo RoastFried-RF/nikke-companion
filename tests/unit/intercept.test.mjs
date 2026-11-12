@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { validateAccount, toEngineProfile } from '../../src/core/account.mjs';
+import { generateCandidates } from '../../src/core/candidates.mjs';
 import { compareSquads, InputError } from '../../src/core/compare.mjs';
 import { CONTENTS, validateCondition, levelPlan, toEngineBase, assumptionsOf, levelCaveats } from '../../src/core/condition.mjs';
 import {
@@ -46,7 +47,7 @@ const now = () => new Date('2026-11-12T00:00:00Z');
  * 가짜 엔진. 멤버 딜 = 1000 × (적 속성에 우월하면 2) × 레벨/400 × 전투 시간/180 × 31784/방어력.
  * 요청마다 무엇을 받았는지 `log`에 남긴다.
  */
-function fakeEngine(log = []) {
+function fakeEngine(log = [], cat = catalog) {
   return async (requests) => {
     log.push(...requests);
     return requests.map((req) => {
@@ -54,7 +55,7 @@ function fakeEngine(log = []) {
       const level = req.profile_level === 'sync' ? req.profile._account.synchro_level : 400;
       const def = req.enemy?.def ?? 31784;
       const members = req.squad.map((name) => {
-        const superior = code !== null && ELEMENT_ADVANTAGE[catalog.nikkes[name].element_code] === code;
+        const superior = code !== null && ELEMENT_ADVANTAGE[cat.nikkes[name].element_code] === code;
         return { name, damage: Math.round(1000 * (superior ? 2 : 1) * (level / 400) * (req.sim.duration / 180) * (31784 / def)) };
       });
       const total = members.reduce((s, m) => s + m.damage, 0);
@@ -613,16 +614,27 @@ test('계정에 동기화 레벨이 있으면 상한까지 반영해 계산한�
   assert.equal(high.bosses[0].ranking[0].total_damage, assumed.bosses[0].ranking[0].total_damage);
 });
 
-test('약점 속성 니케가 후보 풀에 들었는지 보스마다 알린다', async () => {
-  // 수냉 니케를 둘 더 보유하지만 덜 키워서 3단계 후보 풀(5명)에 들지 못한다.
+// P-020으로 요구가 바뀌었다: 예전에는 후보 풀을 투자 점수로만 골라 덜 키운 약점 속성 니케가 풀에 없다고 알리기만 했다
+// (pooled 삼수 / not_pooled 삼수2·삼수3, 「약점 속성 니케를 따로 우선하지 않는다」). 이제는 약점 속성을 우선 속성으로 넘겨
+// 단계마다 최소 2명이 풀에 든다 — 그래서 기대값이 달라졌다.
+test('약점 속성 니케가 후보 풀에 들었는지 보스마다 알린다 — 덜 키운 니케도 단계마다 최소 2명까지 든다', async () => {
+  // 수냉 니케를 둘 더 보유하지만 덜 키웠다. 투자 점수만으로는 둘 다 3단계 후보 풀(5명)에 들지 못한다.
   const cat = { ...catalog, nikkes: { ...catalog.nikkes, 삼수2: nikke('3', '수냉'), 삼수3: nikke('3', '수냉') } };
   const acct = accountOf();
   acct.nikkes = { ...acct.nikkes, 삼수2: grown(2), 삼수3: {} };
-  const report = await recommendIntercept({ account: acct, bundle: REAL, boss: '하베스터' }, { budget: 10 }, { ...depsOf(), catalog: cat });
+  const plain = generateCandidates(acct, cat);
+  assert.deepEqual(plain.summary.pool[3], ['삼수', '삼작', '삼풍', '삼철', '삼전'], '우선 속성이 없으면 삼수2·삼수3은 풀 밖이다');
+
+  // 이제 삼수2가 엔진까지 가므로 가짜 엔진도 이 카탈로그로 속성을 읽는다.
+  const report = await recommendIntercept({ account: acct, bundle: REAL, boss: '하베스터' }, { budget: 10 }, { catalog: cat, runBatch: fakeEngine([], cat), now });
   const boss = report.bosses[0];
-  assert.deepEqual(boss.weak_pool, { element: '수냉', owned: ['삼수', '삼수2', '삼수3'], pooled: ['삼수'], not_pooled: ['삼수2', '삼수3'] });
-  assert.match(boss.notes.join('\n'), /약점 속성\(수냉\) 보유 니케 3명 중 2명은 후보 풀에 들지 못했다\(삼수2, 삼수3\)/);
-  assert.match(report.caveats.join('\n'), /보스의 약점 속성 니케를 따로 우선하지 않는다/);
+  assert.deepEqual(boss.weak_pool, { element: '수냉', owned: ['삼수', '삼수2', '삼수3'], pooled: ['삼수', '삼수2'], not_pooled: ['삼수3'], promoted: ['삼수2'] });
+  assert.match(boss.notes.join('\n'), /약점 속성\(수냉\) 우선으로 후보 풀에 넣은 니케: 삼수2 — 투자 점수만으로는 풀에 들지 못했을 니케다/);
+  assert.match(boss.notes.join('\n'), /약점 속성\(수냉\) 보유 니케 3명 중 1명은 후보 풀에 들지 못했다\(삼수3\) — 약점 속성 니케는 버스트 단계마다 최소 2명까지만 보장한다/);
+  assert.match(report.caveats.join('\n'), /후보 편성은 보스마다 다르다: 보스의 약점 속성 니케를 버스트 단계별 후보 풀에 최소 2명씩 넣고/);
+  assert.doesNotMatch(report.caveats.join('\n'), /약점 속성 니케를 따로 우선하지 않는다/);
+  // 덜 키운 삼수2가 든 편성이 실제로 계산됐고, 가짜 엔진(속성 우위 2배)에서 1위다.
+  assert.ok(boss.ranking[0].members.some((m) => m.name === '삼수2'), boss.ranking[0].members.map((m) => m.name).join(','));
 });
 
 test('같은 입력이면 같은 결과다 — 입력 문서도 바꾸지 않는다', async () => {

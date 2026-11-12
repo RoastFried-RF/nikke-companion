@@ -1119,9 +1119,19 @@
         "사용자 실제 계정으로 보스별 추천이 약점 속성 니케를 쓰는지, 인게임 모의전 대미지와 순위가 맞는지 확인한다"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261112T052740-P-020-a1",
+        "verified_tree": "d8f35c29d0ffcbcb1d5447422dd6fade90c74a33",
+        "verified_at": "2026-11-12T06:03:26.670Z",
+        "commit": null
+      }
     },
     {
       "id": "P-021",

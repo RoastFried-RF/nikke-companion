@@ -5,7 +5,7 @@
 // 전투 조건의 적 설정(enemy)으로 표현한다. **확인된 칸만 넣는다** — 확인하지 못한 칸은 비워 엔진 기본 적 값으로
 // 계산하고, 무엇이 미확인이고 무엇으로 계산했는지를 결과에 붙인다. 미확인을 0이나 확정값처럼 다루지 않는다.
 import { validateAccount } from './account.mjs';
-import { suggestSquads } from './candidates.mjs';
+import { DEFAULT_PRIORITY_MIN, suggestSquads } from './candidates.mjs';
 import { CAVEAT_NOT_VERIFIED, InputError } from './compare.mjs';
 import { CONDITION_SCHEMA_VERSION, DEFAULT_DURATION, ENEMY_KEYS, ENGINE_FIXED_LEVEL, LEVEL_MAX, levelPlan } from './condition.mjs';
 import { groupThousands } from './format.mjs';
@@ -290,19 +290,31 @@ function mergeCaveats(items) {
   return [...where].map(([text, names]) => (names.length === items.length ? text : `[${names.join(', ')}] ${text}`));
 }
 
-/** 약점 속성 니케가 후보 풀에 얼마나 들었나. 후보 풀은 투자 점수로만 고른다 — 약점 속성을 우선하지 않는다. */
+/**
+ * 약점 속성 니케가 후보 풀에 얼마나 들었나. 후보 생성기에 약점 속성을 우선 속성으로 넘기므로(src/core/candidates.mjs)
+ * 버스트 단계마다 최소 인원이 풀에 든다. `promoted`는 그 우선 덕에 든 니케(투자 점수만으로는 풀에 없었을 니케)다.
+ */
 function weakPool(element, account, catalog, suggestion) {
   if (!element.weak_to || !suggestion?.pool) return null;
   const elementOf = (name) => catalog.nikkes[name]?.element_code;
   if (!Object.keys(account.nikkes).some((n) => typeof elementOf(n) === 'string')) return null; // 카탈로그에 속성 정보가 없다
   const owned = Object.keys(account.nikkes).filter((n) => elementOf(n) === element.weak_to).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const pooled = new Set(Object.values(suggestion.pool).flat());
-  return { element: element.weak_to, owned, pooled: owned.filter((n) => pooled.has(n)), not_pooled: owned.filter((n) => !pooled.has(n)) };
+  const promoted = new Set(Object.values(suggestion.priority?.promoted ?? {}).flat());
+  return {
+    element: element.weak_to,
+    owned,
+    pooled: owned.filter((n) => pooled.has(n)),
+    not_pooled: owned.filter((n) => !pooled.has(n)),
+    promoted: owned.filter((n) => promoted.has(n)),
+  };
 }
 
 /**
  * 보스 묶음의 보스마다 보유 니케로 추천(suggestSquads — 멤버 조합 + 배치 탐색 + 캐시)을 돌린다.
  *
+ * - 보스마다 후보가 다르다: 그 보스의 약점 속성을 후보 생성의 우선 속성으로 넘긴다(`generateCandidates`의 `priorityElement` —
+ *   약점 속성 니케를 단계별 후보 풀에 최소 인원 보장하고 후보 순서에서 앞에 둔다). 적 속성을 모르는 보스는 우선 속성 없이 돌린다.
  * - 전체 시뮬 예산(`budget`, 기본 300)을 계산할 보스 수로 나눠 보스마다 그만큼만 쓴다(`splitBudget`).
  * - 보스마다 총딜 상위 `top`개(기본 3) 편성, 멤버별 딜, 1위 대비 비율.
  * - 미확인 칸이 있는 보스에는 무엇이 미확인이고 무엇으로 계산했는지(`unconfirmed`)가 붙는다. 보스 속성을 모르면
@@ -380,7 +392,11 @@ export async function recommendIntercept({ account, bundle, boss: selector }, op
     }
 
     onBoss({ index: i, total: selected.length, boss: { id: b.id, name: b.name }, budget: shares[i] });
-    const report = await suggestSquads({ account, condition }, { top, budget: shares[i] }, { ...deps, catalog });
+    // 후보 풀을 보스마다 다르게: 이 보스의 약점 속성(보스 속성에 우월한 속성)을 후보 생성의 우선 속성으로 넘긴다.
+    // 적 속성을 모르는 보스(`reflected: false`)는 우선 속성 없이 돌린다 — 투자 점수로만 고른 후보다.
+    const suggestOptions = { top, budget: shares[i] };
+    if (element.reflected && element.weak_to) suggestOptions.priorityElement = element.weak_to;
+    const report = await suggestSquads({ account, condition }, suggestOptions, { ...deps, catalog });
     evaluator ??= report.engine ?? null;
     caches.push(report.cache);
     item.sims = report.suggestion.search.sims;
@@ -391,11 +407,20 @@ export async function recommendIntercept({ account, bundle, boss: selector }, op
     item.suggestion = report.suggestion;
     item.caveats = report.caveats;
     item.weak_pool = weakPool(element, account, catalog, report.suggestion);
+    const priority = report.suggestion.priority ?? null;
+    if (item.weak_pool?.promoted.length) {
+      item.notes.push(
+        `약점 속성(${element.weak_to}) 우선으로 후보 풀에 넣은 니케: ${item.weak_pool.promoted.join(', ')} — 투자 점수만으로는 풀에 들지 못했을 니케다.`,
+      );
+    }
     if (item.weak_pool?.not_pooled.length) {
       item.notes.push(
         `약점 속성(${element.weak_to}) 보유 니케 ${item.weak_pool.owned.length}명 중 ${item.weak_pool.not_pooled.length}명은 후보 풀에 들지 못했다` +
-          `(${item.weak_pool.not_pooled.join(', ')}) — 후보 풀은 투자 점수로만 고르고 약점 속성을 우선하지 않는다.`,
+          `(${item.weak_pool.not_pooled.join(', ')}) — 약점 속성 니케는 버스트 단계마다 최소 ${priority?.min_per_stage ?? DEFAULT_PRIORITY_MIN}명까지만 보장한다.`,
       );
+    }
+    if (priority && priority.owned.length === 0) {
+      item.notes.push(`약점 속성(${element.weak_to}) 니케를 보유하지 않았다 — 후보는 투자 점수로만 골랐다.`);
     }
     bosses.push(item);
   }
@@ -422,7 +447,12 @@ export async function recommendIntercept({ account, bundle, boss: selector }, op
   }
   caveats.push(`전체 시뮬 예산 ${budget}건을 보스 ${selected.length}종에 ${shareText} 나눴다(보스마다 그 안에서 멤버 조합 → 배치 순으로 쓴다). 실제로 쓴 것은 ${used}건이다.`);
   if (skipped.length) caveats.push(`시뮬 예산 ${budget}건이 보스 수보다 적어 계산하지 못한 보스: ${skipped.map((b) => b.name).join(', ')}.`);
-  caveats.push('보스마다 후보 편성은 같다(투자 점수로 고른 후보 풀) — 보스의 약점 속성 니케를 따로 우선하지 않는다. 덜 키운 약점 속성 니케는 후보에 없을 수 있다.');
+  caveats.push(
+    `후보 편성은 보스마다 다르다: 보스의 약점 속성 니케를 버스트 단계별 후보 풀에 최소 ${DEFAULT_PRIORITY_MIN}명씩 넣고(보유 수가 모자라면 있는 만큼) ` +
+      '후보 순서에서도 앞에 둔다 — 덜 키운 약점 속성 니케도 후보에 든다(누가 그렇게 들었는지는 보스마다 적혀 있다). ' +
+      '시뮬 예산이 모자라면 후보 순서의 뒤쪽부터 계산하지 않으므로 약점 속성 니케가 든 후보가 먼저 잘리지 않는다. ' +
+      '우선은 어림 규칙이다 — 실제 순위는 엔진이 계산한 총딜로 정한다. 적 속성을 모르는 보스는 투자 점수로만 후보를 고른다.',
+  );
   caveats.push(...mergeCaveats(computed));
   caveats.push(...v.warnings);
 
