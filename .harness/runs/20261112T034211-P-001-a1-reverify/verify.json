@@ -1,0 +1,24 @@
+{
+  "task": "P-001",
+  "started_at": "2026-11-12T03:42:11.519Z",
+  "head": "a391a450f5864ae3a687ec4bf32b1691afd51097",
+  "tree": "e8d0b1644bf59b976303a4b3885010d5eb21ca18",
+  "dirty": true,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "integration",
+      "cmd": "node --test tests/integration/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 44530,
+      "log": "verify-1-integration.log"
+    }
+  ],
+  "passed": true,
+  "reason": null,
+  "env_skipped": [],
+  "env_only": false,
+  "tree_after": "e8d0b1644bf59b976303a4b3885010d5eb21ca18",
+  "finished_at": "2026-11-12T03:42:56.260Z"
+}

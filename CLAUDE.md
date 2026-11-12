@@ -6,6 +6,7 @@
 ## 읽는 순서
 
 1. `docs/spec.md` — 요구사항, 단계, 결정 기록, 미검증 가정
+   (요격전 작업이면 `docs/intercept.md`도 — 게임 화면에서 확인한 보스 정보와 모르는 것)
 2. `.harness/progress.md` — 지금 상황과 다음 행동
 3. `.harness/tasks.json` — 작업 목록(수락 조건·검증 명령·상태)
 4. 맡은 작업과 관련된 코드

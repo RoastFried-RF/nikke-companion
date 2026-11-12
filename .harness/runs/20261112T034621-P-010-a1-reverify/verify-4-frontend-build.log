@@ -1,0 +1,16 @@
+$ npm --prefix app run build
+
+> nikke-companion-app@0.1.0 build
+> vue-tsc --noEmit && vite build
+
+[36mvite v8.3.8 [32mbuilding client environment for production...[36m[39m
+transforming...
+✓ 42 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.40 kB │ gzip:  0.29 kB
+dist/assets/index-C7qlmhjg.css   10.30 kB │ gzip:  2.27 kB
+dist/assets/index-DVj0CwIA.js   119.80 kB │ gzip: 44.63 kB
+
+[32m✓ built in 262ms[39m
+

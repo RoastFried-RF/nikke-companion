@@ -1,0 +1,3 @@
+$ cargo run --quiet --manifest-path app/src-tauri/Cargo.toml --bin nikke-capture -- --info
+{"hwnd":331110,"pid":26248,"process_name":"nikke.exe","title":"NIKKE","client":{"x":-32000,"y":-32000,"width":0,"height":0},"frame":{"x":-31993,"y":-32000,"width":146,"height":28},"minimized":true,"foreground":false,"scale_factor":1.0}
+
