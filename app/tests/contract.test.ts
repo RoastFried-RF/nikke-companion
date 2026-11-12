@@ -54,10 +54,18 @@ import overlayStateRs from '../src-tauri/src/overlay_state.rs?raw';
 import overlayWin32Rs from '../src-tauri/src/overlay_win32.rs?raw';
 import recognizeRs from '../src-tauri/src/recognize.rs?raw';
 import screenTrackRs from '../src-tauri/src/screen_track.rs?raw';
+import stayOnTopRs from '../src-tauri/src/stay_on_top.rs?raw';
 import gitignore from '../../.gitignore?raw';
 import formatSource from '../src/lib/format.ts?raw';
 
 const sources = import.meta.glob<string>(['../src/**/*.{ts,vue,css}', '../index.html'], {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+});
+
+/** 앱의 Rust 소스 전부(src-tauri/src — 명령줄 도구 포함, 통합 테스트 제외). */
+const allRust = import.meta.glob<string>('../src-tauri/src/**/*.rs', {
   query: '?raw',
   import: 'default',
   eager: true,
@@ -551,12 +559,16 @@ describe('게임 창 추적·캡처(Rust)', () => {
     'capture_cli.rs': captureCliRs,
     'recognize.rs': recognizeRs,
     'screen_track.rs': screenTrackRs,
+    'stay_on_top.rs': stayOnTopRs,
     'account_sync.rs': accountSyncRs,
     'cookie.rs': cookieRs,
     'login_window.rs': loginWindowRs,
     'lib.rs': libRs,
   };
 
+  // 창 순서를 바꾸는 호출(SetWindowPos)은 여기 든 파일들 — 게임 창을 읽는 코드와 접착 코드 — 에 여전히 없다.
+  // 게임 위에 머물기(P-024)가 쓰는 그 호출은 오버레이 창 모듈 한 곳에만 있고 대상은 오버레이 자신의 창뿐이다
+  // (아래 「게임 위에 머물기(Rust)」가 확인한다).
   it('게임 창을 옮기거나 앞으로 가져오거나 입력을 보내는 호출이 없다', () => {
     const forbidden =
       /\b(SetWindowPos|MoveWindow|ShowWindow|ShowWindowAsync|SetForegroundWindow|BringWindowToTop|SetActiveWindow|SetFocus|SwitchToThisWindow|SetWindowPlacement|SetWindowLongW|SetWindowLongPtrW|SendInput|SendMessageW|SendMessageTimeoutW|PostMessageW|PostThreadMessageW|keybd_event|mouse_event|AttachThreadInput|SetCursorPos)\b/;
@@ -766,7 +778,19 @@ describe('화면 자동 추적(Rust)', () => {
     const rule = sources['../src/lib/screenTrack.ts'];
     expect(rule).toContain('export function followStep(state: FollowState, status: ScreenTrackStatus | null | undefined, switchOn: boolean): FollowStep');
     // 탭을 옮기는 것은 App.vue, 보스를 고르는 것은 InterceptView.vue — 둘 다 규칙이 따라가라고 할 때만.
-    expect(sources['../src/App.vue']).toMatch(/provideScreenTrack\(\(\) => \{\s*if \(track\.autoTab\.value && tab\.value !== 'intercept'\) select\('intercept'\);/);
+    // 언제 옮기고 언제 미루는지(계산 중)도 규칙(tabMoveStep)이 정한다(P-024): App.vue는 묻는 것에 답하고 시키는 대로 옮긴다.
+    expect(rule).toContain('export function tabMoveStep(state: TabMoveState, input: TabMoveInput): TabMoveStep');
+    const app = sources['../src/App.vue'];
+    expect(app).toMatch(
+      /provideScreenTrack\(\{\s*computing: \(\) => computingTab\.value !== null,\s*onIntercept: \(\) => tab\.value === 'intercept',\s*moveToIntercept: \(\) => select\('intercept'\),\s*\}\);/,
+    );
+    expect(app).toContain('watch([computingTab, tab], () => track.settle());');
+    // 요격전 탭으로 옮기는 곳은 그 한 줄뿐이고, App.vue는 자동 이동 설정을 직접 읽어 판단하지 않는다.
+    expect(app.match(/select\('intercept'\)/g)).toHaveLength(1);
+    expect(app).not.toMatch(/autoTab|tabMoveStep\(/);
+    expect(rule.match(/host\.moveToIntercept\(\)/g)).toHaveLength(1);
+    expect(rule).toMatch(/if \(step\.move\) host\.moveToIntercept\(\);/);
+    expect(app).toContain('계산이 끝나면 요격전 탭으로 옮긴다');
     expect(sources['../src/components/InterceptView.vue']).toContain('watch(() => track.target.value?.seq, followTarget);');
     for (const [file, text] of Object.entries(sources)) {
       if (file === '../src/lib/screenTrack.ts') continue;
@@ -958,17 +982,24 @@ describe('오버레이 창 — 활성화 없이 보이기, 파일 고르기 창�
     expect(win32).toContain('pub const HIDE_COMMAND: SHOW_WINDOW_CMD = SW_HIDE;');
     expect(win32).toContain('ShowWindowAsync(HWND(hwnd as _), command)');
     // 활성화하는 표시 방법과 포커스·전경을 바꾸는 호출이 없다.
+    // (P-024에서 요구가 바뀌었다: 창 순서를 올리는 SetWindowPos는 이제 쓴다 — 오버레이 자신의 창에만, 활성화 없이.
+    //  그 약속은 아래 「게임 위에 머물기(Rust)」가 따로 확인한다. 활성화·포커스·입력 호출은 여전히 없다.)
     expect(win32).not.toMatch(/\b(SW_SHOW|SW_SHOWNORMAL|SW_RESTORE|SW_SHOWDEFAULT|SW_SHOWMAXIMIZED|SW_SHOWMINIMIZED)\b/);
     expect(win32).not.toMatch(
-      /\b(SetForegroundWindow|BringWindowToTop|SetActiveWindow|SetFocus|SwitchToThisWindow|SetWindowPos|AttachThreadInput|SendInput|SendMessageW|PostMessageW|keybd_event|mouse_event)\b/,
+      /\b(SetForegroundWindow|BringWindowToTop|SetActiveWindow|SetFocus|SwitchToThisWindow|MoveWindow|SetWindowPlacement|AttachThreadInput|SendInput|SendMessageW|PostMessageW|keybd_event|mouse_event)\b/,
     );
   });
 
   it('오버레이 창 모듈은 오버레이 창의 핸들만 쓴다 — 다른 창을 찾지 않는다', () => {
     const win32 = code(overlayWin32Rs);
     expect(win32).toContain('.hwnd()');
-    expect(win32).not.toMatch(/\b(FindWindowW|FindWindowExW|EnumWindows|GetForegroundWindow|GetWindowThreadProcessId|WindowFromPoint)\b/);
+    expect(win32).not.toMatch(/\b(FindWindowW|FindWindowExW|EnumWindows|GetForegroundWindow|WindowFromPoint)\b/);
     expect(win32).not.toMatch(/game_window|game_win32|nikke\.exe/);
+    // 창의 주인을 읽는 호출은 한 곳뿐이다: 「이 창이 이 프로세스의 창인가」를 확인하는 데만 쓴다(P-024 — 다른 창을 찾는 데 쓰지 않는다).
+    expect(win32.match(/GetWindowThreadProcessId\(/g)).toHaveLength(1);
+    expect(win32).toMatch(
+      /fn belongs_to_this_process\(hwnd: isize\) -> bool \{[\s\S]*?GetWindowThreadProcessId\(HWND\(hwnd as _\), Some\(&mut pid\)\)[\s\S]*?thread != 0 && pid == std::process::id\(\)\s*\}/,
+    );
   });
 
   it('파일 고르기 창은 오버레이 창을 부모로 연다', () => {
@@ -980,6 +1011,147 @@ describe('오버레이 창 — 활성화 없이 보이기, 파일 고르기 창�
     expect(win32).toMatch(/rfd::FileDialog::new\(\)\s*\.set_title\(title\)\s*\.add_filter\("JSON", &\["json"\]\)\s*\.set_parent\(parent\)\s*\.pick_file\(\)/);
     // 대화 상자를 띄우는 곳은 한 곳뿐이다.
     expect((code(libRs) + win32).match(/rfd::/g)).toHaveLength(1);
+  });
+});
+
+describe('게임 위에 머물기(Rust)', () => {
+  /** 주석을 뺀 코드. */
+  const code = (source: string) =>
+    source
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+  const beforeTests = (source: string) => source.slice(0, source.indexOf('#[cfg(test)]'));
+  const win32 = code(beforeTests(overlayWin32Rs));
+  const rule = code(beforeTests(stayOnTopRs));
+  const keep = code(libRs.slice(libRs.indexOf('fn keep_overlay_on_top('), libRs.indexOf('/// Windows가 아니면 게임 창을 읽지 못하므로')));
+  const trackLoop = code(libRs.slice(libRs.indexOf('fn track_game('), libRs.indexOf('fn wake_game_tracker(')));
+
+  it('창 순서를 바꾸는 호출은 앱 전체에서 한 곳뿐이다 — 오버레이 창 모듈의, 우리 창만 받는 함수 안이다', () => {
+    const files = Object.entries(allRust);
+    expect(files.length).toBeGreaterThan(12);
+    for (const [file, source] of files) {
+      const calls = code(source).match(/\bSetWindowPos\(/g) ?? [];
+      expect(calls, file).toHaveLength(file.endsWith('/overlay_win32.rs') ? 1 : 0);
+      // 창 순서·자리·활성 상태를 바꾸는 다른 호출은 어디에도 없다(보임/숨김의 ShowWindowAsync는 오버레이 창 모듈에만 있다).
+      expect(code(source), file).not.toMatch(
+        /\b(DeferWindowPos|BeginDeferWindowPos|BringWindowToTop|SetForegroundWindow|SetActiveWindow|SwitchToThisWindow|MoveWindow|SetWindowPlacement)\b/,
+      );
+    }
+    // 그 한 곳: `OverlayWindow`의 메서드이고, 대상은 self(이 프로세스의 창)다. 활성화 없이 맨 위로만 올린다.
+    expect(win32).toMatch(
+      /pub fn raise_without_activating\(&self\) -> bool \{\s*unsafe \{ SetWindowPos\(HWND\(self\.0 as _\), Some\(HWND_TOPMOST\), 0, 0, 0, 0, RAISE_FLAGS\) \}\.is_ok\(\)\s*\}/,
+    );
+    expect(win32).toMatch(
+      /pub const RAISE_FLAGS: SET_WINDOW_POS_FLAGS = SET_WINDOW_POS_FLAGS\(\s*SWP_NOMOVE\.0 \| SWP_NOSIZE\.0 \| SWP_NOACTIVATE\.0 \| SWP_ASYNCWINDOWPOS\.0,\s*\);/,
+    );
+    // 숨긴 창을 보이게 하거나 크기·자리를 바꾸는 표시는 쓰지 않는다.
+    expect(win32).not.toMatch(/\b(SWP_SHOWWINDOW|SWP_HIDEWINDOW|SWP_FRAMECHANGED|HWND_TOP\b|HWND_BOTTOM|HWND_NOTOPMOST)/);
+  });
+
+  it('올릴 수 있는 창은 이 프로세스의 창뿐이다 — 다른 프로그램(게임)의 창 핸들로는 OverlayWindow를 만들 수 없다', () => {
+    // 안의 핸들은 비공개이고, 만드는 길은 둘뿐이며 둘 다 「이 프로세스의 창인가」를 거친다.
+    expect(win32).toMatch(/pub struct OverlayWindow\(isize\);/);
+    expect(win32.match(/Self\(hwnd\)/g)).toHaveLength(1);
+    // 타입 선언 말고는 `OverlayWindow(…)`로 직접 만드는 곳이 없다.
+    expect(win32.match(/OverlayWindow\(/g)).toHaveLength(1);
+    expect(win32).toMatch(/pub fn own\(hwnd: isize\) -> Option<Self> \{\s*belongs_to_this_process\(hwnd\)\.then_some\(Self\(hwnd\)\)\s*\}/);
+    expect(win32).toMatch(/pub\(crate\) fn of\(window: &WebviewWindow\) -> Result<Self, String> \{\s*Self::own\(overlay_handle\(window\)\?\)/);
+    // 창 순서는 읽기만 한다: 우리 창에서 위쪽으로 따라 올라가며 핸들 값을 모은다.
+    expect(win32).toMatch(/pub fn windows_above\(&self\) -> Option<Vec<isize>>/);
+    expect(win32.match(/GetWindow\(/g)).toHaveLength(1);
+    expect(win32).toContain('GetWindow(current, GW_HWNDPREV)');
+  });
+
+  it('접착 코드는 오버레이 창(main)으로만 OverlayWindow를 만들고, 규칙이 올리라고 할 때만 올린다', () => {
+    const glue = code(libRs);
+    expect(glue.match(/OverlayWindow::of\(/g)).toHaveLength(1);
+    expect(glue).not.toMatch(/OverlayWindow::own\(/);
+    expect(keep).toMatch(
+      /\.get_webview_window\(MAIN_WINDOW\)\s*\.and_then\(\|window\| overlay_win32::OverlayWindow::of\(&window\)\.ok\(\)\);/,
+    );
+    expect(glue.match(/raise_without_activating\(\)/g)).toHaveLength(1);
+    expect(keep).toMatch(
+      /let decision = rule\.step\(overlay_visible, status, \|\| own\.windows_above\(\)\);\s*if decision == stay_on_top::Decision::Raise && !own\.raise_without_activating\(\) \{/,
+    );
+    // 게임 창의 핸들은 규칙에 넘기는 창 정보 안의 수일 뿐이다 — 그 핸들로 부르는 호출이 없다.
+    expect(keep).not.toMatch(/hwnd|HWND|game_win32/);
+    // 추적 스레드가 주기마다 본다 — 붙이기와 무관하게. 오버레이가 보이는지는 오버레이 상태에서 읽는다.
+    expect(trackLoop).toContain('let overlay_visible = lock(&app.state::<Overlay>().state).visible;');
+    expect(trackLoop).toContain('keep_overlay_on_top(&app, &mut on_top, &mut overlay_window, overlay_visible, &status);');
+    expect(trackLoop).toContain('let pause = stay_on_top::watch_interval(follow, overlay_visible, &status);');
+    expect(trackLoop).toContain('thread::park_timeout(pause);');
+  });
+
+  it('언제 올릴지의 규칙은 순수하다 — 창·프로세스·스레드에 닿지 않고, 확인 주기는 0.3초 안쪽이다', () => {
+    expect(rule).not.toMatch(/windows::|HWND|std::fs|std::io|std::path|std::process|std::net|std::env|std::thread|game_win32|overlay_win32|tauri/);
+    expect(rule).toContain('pub fn stacking(above_overlay: Option<&[isize]>, game: isize) -> Stacking');
+    expect(rule).toContain('pub fn gate(overlay_visible: bool, game: &GameWindowStatus) -> Result<&GameWindowInfo, Leave>');
+    expect(rule).toContain('pub fn watch_interval(follow: bool, overlay_visible: bool, game: &GameWindowStatus) -> Duration');
+    expect(stayOnTopRs).toContain('pub const WATCH_INTERVAL: Duration = Duration::from_millis(100);');
+    expect(stayOnTopRs).toContain('pub const FOLLOW_INTERVAL: Duration = Duration::from_millis(50);');
+    expect(stayOnTopRs).toContain('pub const MAX_DELAY: Duration = Duration::from_millis(300);');
+    // 이벤트를 듣는 방식(창 훅)은 쓰지 않는다 — 다른 프로세스에 무엇을 넣지 않는다.
+    for (const [file, source] of Object.entries(allRust)) {
+      expect(code(source), file).not.toMatch(/\b(SetWinEventHook|SetWindowsHookExW|SetWindowsHookExA|RegisterShellHookWindow)\b/);
+    }
+  });
+
+  it('붙이기의 가장자리 규칙도 순수 함수다 — 최소화된 창의 자리로는 따라가지 않고, 게임이 없으면 기다린다', () => {
+    expect(gameWindowRs).toContain('pub const PARKED_COORDINATE: i32 = -30000;');
+    expect(gameWindowRs).toContain('pub fn follow_step(target: Option<(i32, i32)>, last_applied: Option<(i32, i32)>) -> FollowStep');
+    expect(code(gameWindowRs)).toMatch(/if window\.minimized \|\| window\.client\.is_empty\(\) \|\| is_parked\(window\.client\) \{\s*return None;/);
+    const follow = code(libRs.slice(libRs.indexOf('fn follow_game('), libRs.indexOf('/// 게임 위에 머물기에 쓰는 오버레이 창.')));
+    expect(follow).toContain('match (follow_step(target, applied), window) {');
+    // 붙이기가 옮기는 것은 오버레이 창(main)뿐이다. 붙이기 스위치는 규칙이 끄지 않는다(게임이 없어도 켜진 채 기다린다).
+    expect(follow).toContain('app.get_webview_window(MAIN_WINDOW)');
+    expect(follow.match(/\.set_position\(/g)).toHaveLength(1);
+    expect(follow).not.toMatch(/follow\.store|tracker\.follow/);
+  });
+});
+
+describe('종료 시 정리(Rust)', () => {
+  /** 주석을 뺀 코드. */
+  const code = (source: string) =>
+    source
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+  const beforeTests = (source: string) => source.slice(0, source.indexOf('#[cfg(test)]'));
+  const job = code(beforeTests(engineWin32Rs));
+  const glue = code(libRs);
+
+  it('프로세스 묶음(Job Object)은 닫히면 안의 프로세스를 끝낸다 — 앱이 어떻게 끝나든 엔진·수집 프로세스가 함께 끝난다', () => {
+    expect(job).toContain('info.basic.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;');
+    expect(job).toMatch(/SetInformationJobObject\(\s*job,\s*JobObjectExtendedLimitInformation,/);
+    // 프로세스를 넣기 전에 건다.
+    const adopt = job.slice(job.indexOf('pub(crate) fn adopt('), job.indexOf('pub(crate) fn terminate('));
+    expect(adopt.indexOf('kill_on_close(job)')).toBeGreaterThan(-1);
+    expect(adopt.indexOf('kill_on_close(job)')).toBeLessThan(adopt.indexOf('AssignProcessToJobObject('));
+    // Job은 이름이 없고 기본 보안 속성으로 만든다 — 핸들을 자식에게 물려주지 않고, 다른 프로세스가 열 수 없다.
+    expect(job).toContain('CreateJobObjectW(None, PCWSTR::null())');
+    // 엔진 계산과 계정 수집 모두 띄운 프로세스를 이 묶음에 넣는다.
+    expect(code(engineRs)).toContain('let group = ProcessGroup::adopt(&child);');
+    expect(code(accountSyncRs)).toContain('let group = ProcessGroup::adopt(&child);');
+    // 다른 프로세스를 여는 호출이 딸린 기능은 여전히 켜지 않았다(구조체 모양을 직접 적었다).
+    expect(cargoToml).not.toMatch(/Win32_System_Threading/);
+  });
+
+  it('앱이 끝나는 길에서 도는 엔진 계산과 계정 수집을 멈추고 끝나기를 잠깐 기다린다', () => {
+    expect(engineRs).toContain('pub fn stop_all_and_wait(slots: &[&BatchSlot], grace: Duration) -> bool');
+    expect(engineRs).toContain('pub const EXIT_GRACE: Duration = Duration::from_secs(3);');
+    expect(glue).toMatch(
+      /fn stop_running_work\(app: &AppHandle\) \{\s*let engine_run = app\.state::<EngineRun>\(\);\s*let fetch_run = app\.state::<FetchRun>\(\);\s*if !engine::stop_all_and_wait\(&\[&engine_run\.0, &fetch_run\.0\], engine::EXIT_GRACE\)/,
+    );
+    // 끝내기 단추(quit_app → app.exit)와 창 닫기 모두 앱의 종료 이벤트를 지난다.
+    const run = glue.slice(glue.indexOf('pub fn run()'));
+    expect(run).toMatch(/if let tauri::RunEvent::Exit = event \{\s*stop_running_work\(app\);\s*\}/);
+    expect(run).toMatch(
+      /if window\.label\(\) == MAIN_WINDOW && matches!\(event, tauri::WindowEvent::Destroyed\) \{\s*window\.app_handle\(\)\.exit\(0\);/,
+    );
+    expect(glue).toMatch(/fn quit_app\(app: AppHandle\) \{\s*app\.exit\(0\);\s*\}/);
+    // 프로세스를 곧바로 끝내는 호출(종료 처리를 건너뛴다)은 접착 코드에 없다.
+    expect(glue).not.toMatch(/std::process::exit|process::abort/);
   });
 });
 

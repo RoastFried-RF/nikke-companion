@@ -2,7 +2,8 @@
 //
 // 게임 화면을 읽고 인식하는 일은 Rust가 한다(src-tauri/src/screen_track.rs·lib.rs의 추적 스레드). 여기에는
 //   1) 인식 결과에 따라 **언제 보스를 바꾸고 언제 그대로 두는지**의 규칙(`followStep` — 순수 함수),
-//   2) 스위치·주기·자동 이동 설정을 기억하고 Rust에 알리는 상태(`provideScreenTrack`)
+//   2) 보스를 따라갈 때 **언제 요격전 탭으로 옮기고 언제 미루는지**의 규칙(`tabMoveStep` — 순수 함수),
+//   3) 스위치·주기·자동 이동 설정을 기억하고 Rust에 알리는 상태(`provideScreenTrack`)
 // 가 있다. 이미지는 오지 않는다 — 인식 결과(화면 종류·보스·근거 문장)만 온다.
 //
 // 따라가기 규칙(`followStep`):
@@ -16,6 +17,13 @@
 //   손으로 고른 보스를 되돌리지 않는다.
 // - `other`(이상 개체 화면이 아님)에서도 고른 보스는 바꾸지 않는다. 다만 이상 개체 화면을 떠난 것이므로 마지막으로
 //   따라간 것은 잊는다 — 다시 들어오면 같은 보스여도 새로 따라간다.
+//
+// 탭 이동 규칙(`tabMoveStep`) — 보스를 따라갈 때 요격전 탭으로 옮길지:
+// - 「인식하면 요격전 탭으로」가 꺼져 있거나 이미 요격전 탭이면 옮기지 않는다.
+// - **어느 탭에서든 계산이 도는 동안에는 옮기지 않는다**(보고 있던 화면이 갑자기 바뀌지 않게). 보스는 요격전 화면의
+//   선택에 반영되고, 탭 이동만 미뤄 둔다 — 화면에 「계산이 끝나면 요격전 탭으로 옮긴다」가 보인다.
+// - 계산이 끝나면 그때 한 번 옮긴다. 그 전에 사용자가 요격전 탭을 직접 열었거나, 자동 이동·스위치를 껐거나,
+//   게임이 이상 개체 화면을 떠났으면(`other`) 미뤄 둔 이동은 버린다.
 
 import { inject, onBeforeUnmount, onMounted, provide, ref, type InjectionKey, type Ref } from 'vue';
 import { errorMessage, onScreenTrack, screenTrackStatus, setScreenTracking } from './backend';
@@ -79,6 +87,48 @@ export function followStep(state: FollowState, status: ScreenTrackStatus | null 
   // 같은 결과가 이어진다: 화면을 다시 건드리지 않는다.
   if (key === state.followed) return { state, boss: null };
   return { state: { followed: key }, boss: { id: boss.id, name: boss.name } };
+}
+
+// ── 탭 이동 규칙(순수) ───────────────────────────────────────────────────────
+
+/** 탭 이동 상태: 계산이 끝나면 요격전 탭으로 옮기려고 미뤄 둔 이동이 있는가. */
+export interface TabMoveState {
+  readonly pending: boolean;
+}
+
+/** 미뤄 둔 이동이 없다. */
+export const NO_TAB_MOVE: TabMoveState = Object.freeze({ pending: false });
+
+export interface TabMoveInput {
+  /** 이번에 보스를 새로 따라갔다(`followStep`이 보스를 돌려줬다). */
+  followed: boolean;
+  /** 지금 따라가는 중이다: 스위치가 켜져 있고 마지막으로 따라간 것을 잊지 않았다. */
+  following: boolean;
+  /** 「인식하면 요격전 탭으로」가 켜져 있다. */
+  autoTab: boolean;
+  /** 어느 탭에서든 계산이 돌고 있다. */
+  computing: boolean;
+  /** 이미 요격전 탭을 보고 있다. */
+  onIntercept: boolean;
+}
+
+export interface TabMoveStep {
+  state: TabMoveState;
+  /** 지금 요격전 탭으로 옮긴다. */
+  move: boolean;
+}
+
+/**
+ * 요격전 탭으로 옮길지 정한다. 입력을 바꾸지 않는다. 보스를 따라갈 때뿐 아니라 계산이 시작·끝나거나 사용자가 탭을
+ * 옮기거나 설정을 바꿀 때에도 부른다(`followed: false`) — 미뤄 둔 이동을 그때 옮기거나 버린다.
+ */
+export function tabMoveStep(state: TabMoveState, input: TabMoveInput): TabMoveStep {
+  // 옮길 이유가 없다: 자동 이동이 꺼졌거나, 따라가는 것이 없거나(스위치 꺼짐·이상 개체 화면을 떠남), 이미 요격전 탭이다.
+  if (!input.autoTab || !input.following || input.onIntercept) return { state: NO_TAB_MOVE, move: false };
+  if (!input.followed && !state.pending) return { state: NO_TAB_MOVE, move: false };
+  // 계산이 도는 동안에는 탭을 옮기지 않고 미뤄 둔다.
+  if (input.computing) return { state: state.pending ? state : { pending: true }, move: false };
+  return { state: NO_TAB_MOVE, move: true };
 }
 
 /** 결과의 보스 가운데 인식한 보스: id가 같은 것, 없으면 이름이 같은 것. 없으면 undefined. */
@@ -163,28 +213,44 @@ export interface ScreenTrack {
   problem: Ref<string>;
   /** 마지막으로 따라간 보스. 스위치를 끄면 null. */
   target: Ref<TrackTarget | null>;
+  /** 계산이 도는 중이라 요격전 탭으로 옮기는 것을 미뤄 뒀다 — 계산이 끝나면 옮긴다. */
+  pendingMove: Ref<boolean>;
   setEnabled(on: boolean): Promise<void>;
   setAutoTab(on: boolean): void;
   setIntervalSec(sec: unknown): Promise<void>;
   /** 지금 상태를 Rust에 물어 반영한다(읽은 시각·근거가 최신이 된다). 꺼져 있으면 아무것도 하지 않는다. */
   refresh(): Promise<void>;
+  /** 계산이 시작·끝났거나 탭이 바뀌었다: 미뤄 둔 탭 이동을 다시 본다(`tabMoveStep`). */
+  settle(): void;
+}
+
+/** 자동 추적이 탭을 옮길 때 묻고 시키는 것(App.vue가 준다). */
+export interface TrackHost {
+  /** 어느 탭에서든 계산이 돌고 있는가. */
+  computing(): boolean;
+  /** 요격전 탭을 보고 있는가. */
+  onIntercept(): boolean;
+  /** 요격전 탭으로 옮긴다. */
+  moveToIntercept(): void;
 }
 
 const KEY: InjectionKey<ScreenTrack> = Symbol('screen-track');
 
 /**
- * 자동 추적 상태를 만든다. `onFollow`는 보스를 따라갈 때마다 불린다(App.vue가 탭을 옮긴다).
+ * 자동 추적 상태를 만든다. 보스를 따라갈 때 탭을 옮길지는 `tabMoveStep`이 정하고, 옮기는 것은 `host`(App.vue)가 한다.
  * `start`는 기억해 둔 스위치가 켜져 있으면 Rust의 추적을 켠다. `dispose`는 이벤트 구독을 끊는다.
  */
-export function createScreenTrack(onFollow: (boss: RecognizedBoss) => void): { track: ScreenTrack; start: () => Promise<void>; dispose: () => void } {
+export function createScreenTrack(host: TrackHost): { track: ScreenTrack; start: () => Promise<void>; dispose: () => void } {
   const enabled = ref(recall(TRACK_ENABLED) === '1');
   const autoTab = ref(recall(TRACK_AUTO_TAB) !== '0');
   const intervalSec = ref(clampIntervalSec(recall(TRACK_INTERVAL) || DEFAULT_INTERVAL_SEC));
   const status = ref<ScreenTrackStatus | null>(null);
   const problem = ref('');
   const target = ref<TrackTarget | null>(null);
+  const pendingMove = ref(false);
 
   let follow: FollowState = NOT_FOLLOWING;
+  let tabMove: TabMoveState = NO_TAB_MOVE;
   let seq = 0;
   /** 설정을 Rust에 알린 횟수. 늦게 돌아온 응답이 그 뒤의 설정을 덮지 않게 한다. */
   let generation = 0;
@@ -192,16 +258,33 @@ export function createScreenTrack(onFollow: (boss: RecognizedBoss) => void): { t
   let listening: Promise<void> | null = null;
   let disposed = false;
 
+  /** 탭 이동 규칙을 한 번 돌린다: 옮기라고 하면 옮기고, 미뤄 둔 이동이 있는지를 화면에 알린다. */
+  function stepTabMove(followed: boolean): void {
+    const step = tabMoveStep(tabMove, {
+      followed,
+      following: enabled.value && follow.followed !== null,
+      autoTab: autoTab.value,
+      computing: host.computing(),
+      onIntercept: host.onIntercept(),
+    });
+    tabMove = step.state;
+    pendingMove.value = step.state.pending;
+    if (step.move) host.moveToIntercept();
+  }
+
   /** 상태 하나를 반영한다: 표시를 바꾸고, 규칙이 따라가라고 하면 따라간다. */
   function accept(next: ScreenTrackStatus | null | undefined): void {
     if (!next) return;
     status.value = next;
     const step = followStep(follow, next, enabled.value);
     follow = step.state;
-    if (!step.boss) return;
-    remember(LAST_BOSS, step.boss.id);
-    target.value = { ...step.boss, seq: ++seq };
-    onFollow(step.boss);
+    if (step.boss) {
+      // 보스는 탭을 옮기지 못하는 동안(계산 중)에도 요격전 화면의 선택에 반영한다.
+      remember(LAST_BOSS, step.boss.id);
+      target.value = { ...step.boss, seq: ++seq };
+    }
+    // 따라가지 않았어도 돌린다 — 이상 개체 화면을 떠났으면 미뤄 둔 이동을 버린다.
+    stepTabMove(step.boss !== null);
   }
 
   /** 이벤트 구독을 한 번만 건다. 꺼져 있는 동안 온 이벤트는 버린다. */
@@ -244,6 +327,7 @@ export function createScreenTrack(onFollow: (boss: RecognizedBoss) => void): { t
       // 끄면 따라가던 것을 잊는다 — 다시 켜면 지금 화면부터 새로 따라간다.
       follow = NOT_FOLLOWING;
       target.value = null;
+      stepTabMove(false);
     }
     await push();
   }
@@ -251,6 +335,8 @@ export function createScreenTrack(onFollow: (boss: RecognizedBoss) => void): { t
   function setAutoTab(on: boolean): void {
     autoTab.value = on;
     remember(TRACK_AUTO_TAB, on ? '1' : '0');
+    // 끄면 미뤄 둔 이동을 버린다.
+    stepTabMove(false);
   }
 
   async function setIntervalSec(sec: unknown): Promise<void> {
@@ -272,7 +358,7 @@ export function createScreenTrack(onFollow: (boss: RecognizedBoss) => void): { t
   }
 
   return {
-    track: { enabled, autoTab, intervalSec, status, problem, target, setEnabled, setAutoTab, setIntervalSec, refresh },
+    track: { enabled, autoTab, intervalSec, status, problem, target, pendingMove, setEnabled, setAutoTab, setIntervalSec, refresh, settle: () => stepTabMove(false) },
     start: async () => {
       if (enabled.value) await push();
     },
@@ -285,8 +371,8 @@ export function createScreenTrack(onFollow: (boss: RecognizedBoss) => void): { t
 }
 
 /** App.vue가 부른다: 상태를 만들어 아래 화면들에 내려 주고, 기억해 둔 스위치가 켜져 있으면 추적을 켠다. */
-export function provideScreenTrack(onFollow: (boss: RecognizedBoss) => void): ScreenTrack {
-  const { track, start, dispose } = createScreenTrack(onFollow);
+export function provideScreenTrack(host: TrackHost): ScreenTrack {
+  const { track, start, dispose } = createScreenTrack(host);
   provide(KEY, track);
   onMounted(start);
   onBeforeUnmount(dispose);

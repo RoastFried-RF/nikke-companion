@@ -12,14 +12,18 @@ import {
   clockTime,
   findBoss,
   followStep,
+  NO_TAB_MOVE,
   NOT_FOLLOWING,
   summarize,
+  tabMoveStep,
   type FollowState,
+  type TabMoveInput,
+  type TabMoveState,
 } from '../src/lib/screenTrack';
 import type { InterceptReport, ScreenKind, ScreenRecognition, ScreenTrackState, ScreenTrackStatus } from '../src/types';
 import anomalyBundle from '../../data/intercept/anomaly.json';
 import interceptFixture from './fixtures/intercept.sample.json';
-import { ACCOUNT_PATH, BOSSES_PATH, catalog, documents, FAKE_EVALUATOR, fakeRow } from './helpers/fakeEngine';
+import { ACCOUNT_PATH, BOSSES_PATH, catalog, CONDITION_PATH, documents, FAKE_EVALUATOR, fakeRow } from './helpers/fakeEngine';
 
 vi.mock('../src/lib/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/backend')>()),
@@ -744,6 +748,245 @@ describe('주기', () => {
 
     await toggle(w, true);
     expect(api.setScreenTracking.mock.calls).toEqual([[true, 3000]]);
+  });
+});
+
+// ── 계산 중 자동 이동 ────────────────────────────────────────────────────────
+
+describe('탭 이동 규칙(tabMoveStep)', () => {
+  /** 기본 입력: 다른 탭을 보고 있고, 따라가는 중이고, 자동 이동이 켜져 있고, 계산은 돌지 않는다. */
+  const input = (more: Partial<TabMoveInput> = {}): TabMoveInput => ({
+    followed: false,
+    following: true,
+    autoTab: true,
+    computing: false,
+    onIntercept: false,
+    ...more,
+  });
+  const PENDING: TabMoveState = { pending: true };
+
+  it('계산이 돌지 않을 때 보스를 따라가면 바로 옮긴다', () => {
+    expect(tabMoveStep(NO_TAB_MOVE, input({ followed: true }))).toEqual({ state: NO_TAB_MOVE, move: true });
+  });
+
+  it('계산이 도는 동안 보스를 따라가면 옮기지 않고 미뤄 둔다 — 어느 탭의 계산이든 같다', () => {
+    expect(tabMoveStep(NO_TAB_MOVE, input({ followed: true, computing: true }))).toEqual({ state: PENDING, move: false });
+    // 계산이 이어지는 동안에는 계속 미뤄 둔다(보스를 또 따라가도, 아무 일이 없어도).
+    expect(tabMoveStep(PENDING, input({ computing: true }))).toEqual({ state: PENDING, move: false });
+    expect(tabMoveStep(PENDING, input({ followed: true, computing: true }))).toEqual({ state: PENDING, move: false });
+  });
+
+  it('계산이 끝나면 그때 한 번 옮긴다 — 그 뒤에는 다시 옮기지 않는다', () => {
+    const done = tabMoveStep(PENDING, input());
+    expect(done).toEqual({ state: NO_TAB_MOVE, move: true });
+    expect(tabMoveStep(done.state, input())).toEqual({ state: NO_TAB_MOVE, move: false });
+    // 미뤄 둔 것이 없으면 계산이 끝나도 옮기지 않는다.
+    expect(tabMoveStep(NO_TAB_MOVE, input())).toEqual({ state: NO_TAB_MOVE, move: false });
+    expect(tabMoveStep(NO_TAB_MOVE, input({ computing: true }))).toEqual({ state: NO_TAB_MOVE, move: false });
+  });
+
+  it('자동 이동이 꺼져 있으면 옮기지도 미루지도 않는다 — 미뤄 둔 것도 버린다', () => {
+    for (const computing of [false, true]) {
+      expect(tabMoveStep(NO_TAB_MOVE, input({ followed: true, autoTab: false, computing }))).toEqual({ state: NO_TAB_MOVE, move: false });
+      expect(tabMoveStep(PENDING, input({ autoTab: false, computing }))).toEqual({ state: NO_TAB_MOVE, move: false });
+    }
+  });
+
+  it('이미 요격전 탭이면 옮길 것이 없다 — 계산 중에 사용자가 요격전 탭을 직접 열었으면 미뤄 둔 이동을 버린다', () => {
+    expect(tabMoveStep(NO_TAB_MOVE, input({ followed: true, onIntercept: true }))).toEqual({ state: NO_TAB_MOVE, move: false });
+    const opened = tabMoveStep(PENDING, input({ computing: true, onIntercept: true }));
+    expect(opened).toEqual({ state: NO_TAB_MOVE, move: false });
+    // 그 뒤 다른 탭으로 가 있다가 계산이 끝나도 옮기지 않는다.
+    expect(tabMoveStep(opened.state, input())).toEqual({ state: NO_TAB_MOVE, move: false });
+  });
+
+  it('따라가는 것이 없어지면(스위치를 껐다·이상 개체 화면을 떠났다) 미뤄 둔 이동을 버린다', () => {
+    const left = tabMoveStep(PENDING, input({ following: false, computing: true }));
+    expect(left).toEqual({ state: NO_TAB_MOVE, move: false });
+    expect(tabMoveStep(left.state, input({ following: false }))).toEqual({ state: NO_TAB_MOVE, move: false });
+  });
+
+  it('입력을 바꾸지 않는다', () => {
+    const state = Object.freeze({ pending: true });
+    const frozen = Object.freeze(input({ computing: true }));
+    expect(() => tabMoveStep(state, frozen)).not.toThrow();
+    expect(Object.isFrozen(NO_TAB_MOVE)).toBe(true);
+  });
+});
+
+describe('계산 중에는 탭을 옮기지 않는다', () => {
+  /** 엔진 배치를 붙든다: 풀어 줄 때까지 계산이 끝나지 않는다. */
+  function holdEngine(): { release: () => void } {
+    const waiting: Array<() => void> = [];
+    let open = false;
+    api.engineRunBatch.mockImplementation(
+      (requests) =>
+        new Promise((resolve) => {
+          const finish = () => resolve(requests.map((r) => fakeRow(r)));
+          if (open) finish();
+          else waiting.push(finish);
+        }),
+    );
+    return {
+      release: () => {
+        open = true;
+        for (const finish of waiting.splice(0)) finish();
+      },
+    };
+  }
+
+  /** 계산이 엔진에 닿을 때까지 기다린다(붙들어 둔 엔진에서 멈춰 있다). */
+  async function reachEngine(): Promise<void> {
+    await vi.waitFor(() => {
+      if (api.engineRunBatch.mock.calls.length === 0) throw new Error('계산이 아직 엔진에 닿지 않았다');
+    });
+    await flushPromises();
+  }
+
+  /** 추천·비교 탭에서 추천 계산을 시작한다. */
+  async function startCompare(w: Wrapper): Promise<void> {
+    await at(w, 'account-path').setValue(ACCOUNT_PATH);
+    await at(w, 'condition-path').setValue(CONDITION_PATH);
+    await at(w, 'run-compute').trigger('click');
+    await reachEngine();
+  }
+
+  /** 계산이 끝날 때까지 기다린다(탭의 「계산 중」 점이 사라진다). */
+  async function finish(w: Wrapper, engine: { release: () => void }): Promise<void> {
+    engine.release();
+    await vi.waitFor(
+      () => {
+        if (at(w, 'tab-busy').exists()) throw new Error('아직 계산 중이다');
+      },
+      { timeout: 5000 },
+    );
+    await flushPromises();
+  }
+
+  it('보고 있는 탭에서 계산이 도는 동안에는 그 탭에 머문다 — 한 줄로 알리고, 계산이 끝나면 요격전 탭으로 옮긴다', async () => {
+    const engine = holdEngine();
+    const w = await renderTracking({ report: realReport, tab: 'compare' });
+    await startCompare(w);
+    expect(at(w, 'tab-busy').exists()).toBe(true);
+    expect(at(w, 'track-pending-move').exists()).toBe(false);
+
+    await emit(read('anomaly_select', 'kraken'));
+    expect(selectedTab(w)).toBe('tab-compare');
+    expect(at(w, 'compute-progress').exists()).toBe(true); // 보고 있던 계산 화면 그대로다
+    const note = at(w, 'track-pending-move').text();
+    expect(note).toContain('게임에서 보고 있는 보스: 크라켄');
+    expect(note).toContain('계산이 끝나면 요격전 탭으로 옮긴다');
+    // 보스는 요격전 화면의 선택에 반영됐다(탭만 그대로다).
+    expect(localStorage.getItem('nikke-companion.intercept.boss')).toBe('kraken');
+    expect(localStorage.getItem('nikke-companion.tab')).toBe('compare');
+
+    // 계산 중에 게임에서 보스를 넘겨도 탭은 그대로이고, 안내의 보스만 바뀐다.
+    await emit(read('anomaly_select', 'ultra'));
+    expect(selectedTab(w)).toBe('tab-compare');
+    expect(at(w, 'track-pending-move').text()).toContain('게임에서 보고 있는 보스: 울트라');
+
+    await finish(w, engine);
+    expect(selectedTab(w)).toBe('tab-intercept');
+    expect(at(w, 'boss-name').text()).toBe('울트라');
+    expect(at(w, 'track-pending-move').exists()).toBe(false);
+    // 한 번만 옮긴다: 다른 탭으로 가면 그대로 둔다.
+    await openTab(w, 'compare');
+    await emit(read('anomaly_select', 'ultra'));
+    expect(selectedTab(w)).toBe('tab-compare');
+  });
+
+  it('다른 탭의 계산이 도는 동안에도 옮기지 않는다 — 요격전 계산을 돌려 놓고 성장 탭을 보는 경우', async () => {
+    const engine = holdEngine();
+    const w = await renderTracking({ report: realReport, tab: 'intercept' });
+    await at(w, 'toggle-inputs').trigger('click');
+    await at(w, 'account-path').setValue(ACCOUNT_PATH);
+    await at(w, 'bosses-path').setValue(BOSSES_PATH);
+    await at(w, 'intercept-budget').setValue('10');
+    await at(w, 'run-compute').trigger('click');
+    await reachEngine();
+    await openTab(w, 'growth');
+
+    await emit(read('anomaly_squad', 'harvester'));
+    expect(selectedTab(w)).toBe('tab-growth');
+    expect(at(w, 'track-pending-move').text()).toContain('계산이 끝나면 요격전 탭으로 옮긴다');
+
+    await finish(w, engine);
+    expect(selectedTab(w)).toBe('tab-intercept');
+    expect(at(w, 'track-pending-move').exists()).toBe(false);
+  });
+
+  it('계산 중에 게임이 이상 개체 화면을 떠나면 미뤄 둔 이동을 버린다 — 계산이 끝나도 탭은 그대로다', async () => {
+    const engine = holdEngine();
+    const w = await renderTracking({ report: realReport, tab: 'compare' });
+    await startCompare(w);
+    await emit(read('anomaly_select', 'kraken'));
+    expect(at(w, 'track-pending-move').exists()).toBe(true);
+
+    await emit(read('other'));
+    expect(at(w, 'track-pending-move').exists()).toBe(false);
+    await finish(w, engine);
+    expect(selectedTab(w)).toBe('tab-compare');
+  });
+
+  it('잠깐 모르게 된 화면(unknown)·읽지 못한 상태에서는 미뤄 둔 이동을 버리지 않는다', async () => {
+    const engine = holdEngine();
+    const w = await renderTracking({ report: realReport, tab: 'compare' });
+    await startCompare(w);
+    await emit(read('anomaly_select', 'kraken'));
+    await emit(read('unknown'));
+    await emit(failed(1));
+    expect(at(w, 'track-pending-move').exists()).toBe(true);
+    await finish(w, engine);
+    expect(selectedTab(w)).toBe('tab-intercept');
+  });
+
+  it('계산 중에 사용자가 요격전 탭을 직접 열어 봤으면 계산이 끝나도 다시 옮기지 않는다', async () => {
+    const engine = holdEngine();
+    const w = await renderTracking({ report: realReport, tab: 'compare' });
+    await startCompare(w);
+    await emit(read('anomaly_select', 'kraken'));
+    expect(at(w, 'track-pending-move').exists()).toBe(true);
+
+    await openTab(w, 'intercept');
+    expect(at(w, 'track-pending-move').exists()).toBe(false);
+    expect(at(w, 'boss-name').text()).toBe('크라켄');
+    await openTab(w, 'tier');
+    await finish(w, engine);
+    expect(selectedTab(w)).toBe('tab-tier');
+  });
+
+  it('자동 이동을 꺼 뒀으면 계산 중에도 끝난 뒤에도 옮기지 않고, 안내도 없다', async () => {
+    localStorage.setItem(TRACK_AUTO_TAB, '0');
+    const engine = holdEngine();
+    const w = await renderTracking({ report: realReport, tab: 'compare' });
+    await startCompare(w);
+    await emit(read('anomaly_select', 'kraken'));
+    expect(at(w, 'track-pending-move').exists()).toBe(false);
+    await finish(w, engine);
+    expect(selectedTab(w)).toBe('tab-compare');
+    expect(localStorage.getItem('nikke-companion.intercept.boss')).toBe('kraken');
+  });
+
+  it('계산 중에 스위치를 끄면 미뤄 둔 이동을 버린다', async () => {
+    const engine = holdEngine();
+    const w = await renderTracking({ report: realReport, tab: 'intercept' });
+    await at(w, 'toggle-inputs').trigger('click');
+    await at(w, 'account-path').setValue(ACCOUNT_PATH);
+    await at(w, 'bosses-path').setValue(BOSSES_PATH);
+    await at(w, 'intercept-budget').setValue('10');
+    await at(w, 'run-compute').trigger('click');
+    await reachEngine();
+    await openTab(w, 'tier');
+    await emit(read('anomaly_select', 'kraken'));
+    expect(at(w, 'track-pending-move').exists()).toBe(true);
+
+    // 스위치는 요격전 화면에 있다 — 열면 미뤄 둔 이동은 이미 버려진다. 끄고 다른 탭으로 간다.
+    await openTab(w, 'intercept');
+    await toggle(w, false);
+    await openTab(w, 'tier');
+    expect(at(w, 'track-pending-move').exists()).toBe(false);
+    await finish(w, engine);
+    expect(selectedTab(w)).toBe('tab-tier');
   });
 });
 

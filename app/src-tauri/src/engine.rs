@@ -354,6 +354,34 @@ impl BatchSlot {
     }
 }
 
+/// 앱이 끝날 때 도는 일을 정리하려고 기다려 주는 시간의 기본값.
+pub const EXIT_GRACE: Duration = Duration::from_secs(3);
+
+/// 앱이 끝날 때 부른다: 자리마다 도는 일(엔진 배치, 계정 수집)을 멈추라고 하고, 모두 끝나 자리가 빌 때까지 —
+/// 곧 띄운 프로세스와 그 자식들을 끝낼 때까지 — 최대 `grace` 동안 기다린다. 모두 비었으면 `true`.
+///
+/// 도는 일이 없으면 기다리지 않고 곧바로 `true`다. 시간 안에 비지 않으면 `false`로 돌아오고 앱은 그대로 끝난다 —
+/// Windows에서는 그때에도 프로세스 묶음(`engine_win32.rs`의 Job Object)이 앱과 함께 닫히면서 남은 프로세스를 끝낸다.
+pub fn stop_all_and_wait(slots: &[&BatchSlot], grace: Duration) -> bool {
+    let mut stopping = false;
+    for slot in slots {
+        stopping |= slot.stop();
+    }
+    if !stopping {
+        return true;
+    }
+    let deadline = Instant::now() + grace;
+    loop {
+        if slots.iter().all(|slot| !slot.is_running()) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 impl BatchTicket<'_> {
     /// 이 배치를 멈추는 신호. `run_batch_with_stop`에 넘긴다.
     pub fn signal(&self) -> &StopSignal {
@@ -912,6 +940,47 @@ mod tests {
         assert!(!slot.stop());
         let second = slot.begin().expect("중단 뒤 다시 실행");
         assert!(!second.signal().is_stopped());
+    }
+
+    #[test]
+    fn at_exit_running_work_is_stopped_and_waited_for() {
+        // 도는 일이 없으면 기다리지 않는다.
+        let (engine, fetch) = (BatchSlot::default(), BatchSlot::default());
+        let started = Instant::now();
+        assert!(stop_all_and_wait(&[&engine, &fetch], Duration::from_secs(5)));
+        assert!(started.elapsed() < Duration::from_secs(1));
+
+        // 도는 일이 둘이면 둘 다 멈추라고 하고, 둘 다 자리를 비울 때까지 기다린다.
+        thread::scope(|scope| {
+            let (engine, fetch) = (&engine, &fetch);
+            let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
+            for (slot, slow) in [(engine, 30u64), (fetch, 120u64)] {
+                let ready = ready_tx.clone();
+                scope.spawn(move || {
+                    let ticket = slot.begin().expect("자리");
+                    ready.send(()).expect("준비 알림");
+                    // 멈추라고 할 때까지 돈다(엔진 배치가 신호를 보는 것과 같다). 멈춘 뒤 정리에 시간이 조금 든다.
+                    while !ticket.signal().is_stopped() {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    thread::sleep(Duration::from_millis(slow));
+                });
+            }
+            ready_rx.recv().expect("첫 일");
+            ready_rx.recv().expect("둘째 일");
+            assert!(engine.is_running() && fetch.is_running());
+            assert!(stop_all_and_wait(&[engine, fetch], Duration::from_secs(5)));
+            assert!(!engine.is_running() && !fetch.is_running(), "자리가 비기 전에 돌아왔다");
+        });
+
+        // 시간 안에 끝나지 않으면 false로 돌아온다(앱은 그대로 끝난다) — 멈추라는 신호는 가 있다.
+        let stuck = BatchSlot::default();
+        let ticket = stuck.begin().expect("자리");
+        let started = Instant::now();
+        assert!(!stop_all_and_wait(&[&stuck], Duration::from_millis(80)));
+        assert!(started.elapsed() >= Duration::from_millis(80));
+        assert!(ticket.signal().is_stopped());
+        assert!(EXIT_GRACE >= Duration::from_secs(1) && EXIT_GRACE <= Duration::from_secs(5));
     }
 
     #[test]

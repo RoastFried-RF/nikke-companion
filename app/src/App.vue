@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 오버레이 화면의 틀: 제목 줄, 오버레이 상태, 게임 창 칸, 탭(추천·비교 / 요격전 / 성장 / 티어 / 계정).
 // 탭마다 화면 하나(src/screens)다. 탭을 옮겨도 화면의 상태(입력·결과·도는 계산)는 남는다(KeepAlive).
-import { KeepAlive, onBeforeUnmount, onMounted, ref } from 'vue';
+import { KeepAlive, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import GamePanel from './components/GamePanel.vue';
 import OverlayStatus from './components/OverlayStatus.vue';
 import { provideAccountLink } from './lib/accountLink';
@@ -52,10 +52,16 @@ function select(key: TabKey): void {
 
 // 요격전 화면 자동 추적: 게임에서 이상 개체 보스를 보고 있으면 그 보스의 추천을 보인다(스위치는 요격전 화면에 있다).
 // 보스를 고르는 것은 요격전 화면이 하고, 여기서는 다른 탭을 보고 있을 때 요격전 탭으로 옮기기만 한다(끌 수 있다).
-// 같은 인식이 이어지는 동안에는 다시 불리지 않는다 — 사용자가 다른 탭으로 가면 그대로 둔다(lib/screenTrack.ts).
-const track = provideScreenTrack(() => {
-  if (track.autoTab.value && tab.value !== 'intercept') select('intercept');
+// 언제 옮기는지는 lib/screenTrack.ts의 규칙(tabMoveStep)이 정한다: 같은 인식이 이어지는 동안에는 다시 옮기지 않고,
+// 어느 탭에서든 계산이 도는 동안에는 옮기지 않고 미뤄 뒀다가 계산이 끝나면 한 번 옮긴다. 여기서는 묻는 것에 답하고
+// 시키는 대로 옮길 뿐이다.
+const track = provideScreenTrack({
+  computing: () => computingTab.value !== null,
+  onIntercept: () => tab.value === 'intercept',
+  moveToIntercept: () => select('intercept'),
 });
+// 계산이 시작·끝나거나 탭이 바뀌면 미뤄 둔 이동을 다시 보게 한다(계산이 끝났으면 그때 옮긴다).
+watch([computingTab, tab], () => track.settle());
 
 async function quit(): Promise<void> {
   try {
@@ -126,6 +132,12 @@ onBeforeUnmount(() => {
     </nav>
 
     <p v-if="error" class="screen__error" role="alert" data-testid="error">{{ error }}</p>
+
+    <!-- 계산 중에는 자동 추적이 탭을 옮기지 않는다. 어느 탭을 보고 있든 보이게 탭 줄 바로 아래에 둔다. -->
+    <p v-if="track.pendingMove.value" class="screen__hint screen__hint--track" role="status" data-testid="track-pending-move">
+      게임에서 보고 있는 보스: <strong>{{ track.target.value?.name }}</strong> — 계산이 끝나면 요격전 탭으로 옮긴다(계산 중에는 탭을 옮기지
+      않는다).
+    </p>
 
     <template v-if="ready">
       <KeepAlive>

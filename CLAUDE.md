@@ -72,6 +72,17 @@ cargo test --manifest-path app/src-tauri/Cargo.toml --test live_track -- --ignor
 cargo test --manifest-path app/src-tauri/Cargo.toml --test live_single_instance -- --ignored --nocapture        # 오버레이를 실제로 두 번 띄워 창이 하나인지 본다(떠 있는 오버레이는 끄고 돌린다)
 ```
 
+오버레이는 **게임 위에 머문다**(P-024): 니케 게임 창이 항상 위 창이라 게임을 누르면 오버레이를 덮는다 — 오버레이가 0.1초마다 창
+순서를 읽어, 게임이 위로 올라왔으면 **자기 창만** 활성화 없이 다시 올린다(규칙 `src-tauri/src/stay_on_top.rs`, 호출은
+`overlay_win32.rs`의 `OverlayWindow` 한 곳 — 게임 창은 읽기만 한다). 앱이 끝나면(끝내기·창 닫기·프로세스 종료) 돌던 엔진·계정 수집
+프로세스가 자식까지 끝난다(`engine_win32.rs`의 Job Object). 계산이 도는 동안에는 자동 추적이 탭을 옮기지 않는다
+(`app/src/lib/screenTrack.ts`의 `tabMoveStep`). 자세한 것은 `app/README.md` §게임 위에 머물기·§종료 시 정리.
+
+```bash
+cargo test --manifest-path app/src-tauri/Cargo.toml --test live_stay_on_top -- --ignored --nocapture --test-threads=1   # 항상 위 창에 덮인 자기 창을 포커스 없이 다시 올린다(게임 불필요. 테스트 창 하나가 잠깐 활성화된다)
+cargo test --manifest-path app/src-tauri/Cargo.toml --test exit_cleanup                                         # 가짜 엔진을 띄운 실행 파일을 끝내면 자식 프로세스가 남지 않는다(평소 cargo test에도 들어 있다)
+```
+
 오버레이의 **계정** 탭에서 계정을 받는다(터미널의 세 단계 — 쿠키 저장 → `profile_fetch.py` → `import-profile` — 를 대신한다):
 1 쿠키 받기(blablalink 로그인 창의 「쿠키 가져오기」 또는 붙여넣기) → 2 계정 새로 받기(엔진의 수집 스크립트 실행) → 3 변환·저장
 (`data/accounts/<이름>.json`, 있던 파일은 `.bak`) → 추천·비교, 요격전, 성장 화면의 계정 칸에 들어간다. 자세한 것은 `app/README.md` §계정 받기.

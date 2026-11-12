@@ -9,9 +9,11 @@
 //! - `capture_cli`: 명령줄 도구 `nikke-capture`의 동작
 //! - `recognize`: 요격전 화면 인식 — 캡처한 프레임이 이상 개체의 어느 화면·어느 보스인지(색만 본다, 창·파일을 모른다)
 //! - `screen_track`: 요격전 화면 자동 추적의 규칙 — 언제 읽고 언제 읽지 않는지, 무엇이 바뀌면 화면에 알리는지
+//! - `stay_on_top`: 게임 위에 머물기의 규칙 — 게임 창이 오버레이보다 위로 올라왔을 때만 오버레이를 다시 올린다
 //! - `game_win32`(비공개): 위 규칙에 값을 대 주는 Win32 호출 — 창 열거, 창 사각형, Windows.Graphics.Capture
-//! - `overlay_win32`: 오버레이 창(이 앱의 창)만 다루는 Win32 호출 — 활성화 없이 보이기·숨기기, 파일 고르기 창의 부모
-//! - `engine_win32`(비공개): 이 앱이 띄운 엔진 프로세스를 묶어 끝내는 Job Object
+//! - `overlay_win32`: 오버레이 창(이 앱의 창)만 다루는 Win32 호출 — 활성화 없이 보이기·숨기기·다시 맨 위로 올리기,
+//!   파일 고르기 창의 부모
+//! - `engine_win32`(비공개): 이 앱이 띄운 엔진 프로세스를 묶어 끝내는 Job Object(앱이 끝나면 함께 끝난다)
 //!
 //! - `cookie`: 세션 쿠키의 규칙 — 붙여넣은 글자·로그인 창의 쿠키 목록을 Cookie 헤더 한 줄로, 출력에서 쿠키 값 가리기(순수)
 //! - `account_sync`: 계정 받기 — 쿠키 파일 쓰기, 엔진의 수집 스크립트 실행, 받은 프로필 읽기, 계정 파일 저장
@@ -26,9 +28,12 @@
 //! 표준 출력 어디에도 내보내지 않는다(`cookie.rs`·`account_sync.rs`의 규칙, `tests/account_fetch.rs`).
 //!
 //! 게임은 읽기만 한다: 게임 창을 옮기거나 크기를 바꾸거나 앞으로 가져오지 않고, 입력을 보내지 않는다.
-//! 붙이기가 옮기는 것은 오버레이 창뿐이다.
+//! 붙이기가 옮기는 것도, 게임 위에 머물기가 창 순서를 올리는 것도 오버레이 창뿐이다.
 //!
-//! 스레드는 둘이다: 게임 창 추적(`track_game` — 창 상태·붙이기)과 화면 추적(`track_screen` — 켜 둔 동안 주기적으로
+//! 앱이 끝날 때(끝내기 단추, 오버레이 창 닫기) 돌던 엔진 계산과 계정 수집을 멈추고 그 프로세스가 끝나기를 잠깐
+//! 기다린다(`stop_running_work`). 앱이 정리할 틈 없이 죽어도 프로세스 묶음(Job Object)이 함께 닫히며 끝낸다.
+//!
+//! 스레드는 둘이다: 게임 창 추적(`track_game` — 창 상태·붙이기·게임 위에 머물기)과 화면 추적(`track_screen` — 켜 둔 동안 주기적으로
 //! 게임 화면을 찍어 인식만 한다. 찍은 프레임은 그 자리에서 버린다). 캡처가 붙이기를 늦추지 않게 따로 둔다.
 //!
 //! 오버레이는 한 번만 뜬다(`tauri-plugin-single-instance`): 두 번째 실행은 창을 만들기 전에 끝나고, 이미 떠 있는
@@ -51,6 +56,7 @@ pub mod overlay_win32;
 pub mod recognize;
 pub mod report;
 pub mod screen_track;
+pub mod stay_on_top;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -69,7 +75,9 @@ use account_sync::{
     SyncStatus,
 };
 use capture::CaptureRecord;
-use game_window::{follow_move, follow_target, GameError, GameWindowInfo, GameWindowStatus};
+use game_window::{
+    follow_step, follow_target, FollowStep, GameError, GameWindowInfo, GameWindowStatus,
+};
 use overlay_state::{
     top_right_position, OverlayAction, OverlayState, Transition, VisibilityChange,
 };
@@ -110,11 +118,8 @@ const SCREEN_MARGIN: f64 = 24.0;
 /// 붙이기를 켰을 때 게임 화면 가장자리에서 띄우는 거리(논리 픽셀).
 const ATTACH_MARGIN: f64 = 12.0;
 
-/// 붙이기가 켜져 있을 때 게임 창의 위치를 다시 읽는 간격.
-const FOLLOW_INTERVAL: Duration = Duration::from_millis(50);
-/// 붙이기가 꺼져 있을 때 게임 창 상태를 다시 읽는 간격.
-const IDLE_INTERVAL: Duration = Duration::from_millis(1000);
-/// 붙이기 중에 창 목록을 처음부터 다시 훑는 간격(그 사이에는 찾아 둔 창만 다시 읽는다).
+/// 창 목록을 처음부터 다시 훑는 간격(그 사이에는 찾아 둔 창만 가볍게 다시 읽는다).
+/// 게임 창을 다시 보는 간격은 `stay_on_top::watch_interval`이 정한다.
 const RESCAN_INTERVAL: Duration = Duration::from_millis(1000);
 
 /// 전역 단축키. 모두 Alt+Shift 조합이다.
@@ -595,21 +600,98 @@ fn overlay_metrics(window: &WebviewWindow) -> Option<(u32, u32)> {
     Some((width, (ATTACH_MARGIN * scale).round().max(0.0) as u32))
 }
 
-/// 게임 창을 지켜본다: 상태가 바뀌면 화면에 알리고, 붙이기가 켜져 있으면 오버레이를 게임 창에 맞춰 옮긴다.
-/// 게임 창은 읽기만 한다.
+/// 붙이기의 한 주기: 오버레이가 있어야 할 자리를 구해, 규칙(`follow_step`)이 옮기라고 하면 옮긴다.
+/// 돌려주는 것은 「마지막으로 옮긴 자리」다. 옮기는 것은 오버레이 창뿐이다.
+fn follow_game(
+    app: &AppHandle,
+    follow: bool,
+    status: &GameWindowStatus,
+    applied: Option<(i32, i32)>,
+) -> Option<(i32, i32)> {
+    // 꺼져 있으면 오버레이 창을 읽지도 않는다 — 자리가 없으니 규칙이 「기다린다」로 답한다.
+    let window = follow
+        .then(|| app.get_webview_window(MAIN_WINDOW))
+        .flatten();
+    let target = window
+        .as_ref()
+        .and_then(overlay_metrics)
+        .and_then(|(width, margin)| follow_target(follow, status, width, margin));
+    match (follow_step(target, applied), window) {
+        (FollowStep::MoveTo(x, y), Some(window)) => {
+            match window.set_position(PhysicalPosition::new(x, y)) {
+                Ok(()) => Some((x, y)),
+                Err(e) => {
+                    eprintln!("오버레이를 게임 창에 맞춰 옮기지 못했다: {e}");
+                    applied
+                }
+            }
+        }
+        (FollowStep::Stay, _) => applied,
+        // 붙일 곳이 없다(꺼짐·게임 없음·최소화): 오버레이는 그 자리에 두고, 게임 창이 다시 뜨면 새로 붙는다.
+        (FollowStep::Wait, _) | (FollowStep::MoveTo(..), None) => None,
+    }
+}
+
+/// 게임 위에 머물기에 쓰는 오버레이 창. 한 번 얻어 두고 다시 쓴다(창 핸들은 창이 사는 동안 바뀌지 않는다).
+#[cfg(windows)]
+type OverlayOnTop = Option<overlay_win32::OverlayWindow>;
+#[cfg(not(windows))]
+type OverlayOnTop = ();
+
+/// 게임 위에 머물기의 한 주기: 게임 창이 오버레이보다 위로 올라왔으면 오버레이 **자기 창**을 활성화 없이 다시
+/// 맨 위로 올린다(언제 올릴지는 `stay_on_top`의 규칙). 게임 창은 건드리지 않는다 — 누가 위인지 읽을 뿐이다.
+#[cfg(windows)]
+fn keep_overlay_on_top(
+    app: &AppHandle,
+    rule: &mut stay_on_top::StayOnTop,
+    overlay: &mut OverlayOnTop,
+    overlay_visible: bool,
+    status: &GameWindowStatus,
+) {
+    if overlay.is_none() {
+        *overlay = app
+            .get_webview_window(MAIN_WINDOW)
+            .and_then(|window| overlay_win32::OverlayWindow::of(&window).ok());
+    }
+    let Some(own) = *overlay else {
+        return;
+    };
+    let decision = rule.step(overlay_visible, status, || own.windows_above());
+    if decision == stay_on_top::Decision::Raise && !own.raise_without_activating() {
+        // 창이 없어졌을 수 있다 — 다음 주기에 오버레이 창을 다시 얻는다.
+        *overlay = None;
+    }
+}
+
+/// Windows가 아니면 게임 창을 읽지 못하므로 올릴 일도 없다.
+#[cfg(not(windows))]
+fn keep_overlay_on_top(
+    _app: &AppHandle,
+    _rule: &mut stay_on_top::StayOnTop,
+    _overlay: &mut OverlayOnTop,
+    _overlay_visible: bool,
+    _status: &GameWindowStatus,
+) {
+}
+
+/// 게임 창을 지켜본다: 상태가 바뀌면 화면에 알리고, 붙이기가 켜져 있으면 오버레이를 게임 창에 맞춰 옮기고,
+/// 게임 창이 오버레이를 덮으면 오버레이를 다시 올린다. 게임 창은 읽기만 한다.
 fn track_game(app: AppHandle) {
     let tracker = app.state::<GameTracker>();
     let mut emitted: Option<GameSnapshot> = None;
     let mut applied: Option<(i32, i32)> = None;
     let mut known: Option<GameWindowInfo> = None;
     let mut scanned_at: Option<Instant> = None;
+    let mut on_top = stay_on_top::StayOnTop::new();
+    let mut overlay_window = OverlayOnTop::default();
     loop {
         let follow = tracker.follow.load(Ordering::Acquire);
-        // 붙이기 중에는 찾아 둔 창만 가볍게 다시 읽고, 가끔 창 목록을 처음부터 훑는다.
+        let overlay_visible = lock(&app.state::<Overlay>().state).visible;
+        // 찾아 둔 창만 가볍게 다시 읽고, 가끔 창 목록을 처음부터 훑는다.
         let fresh = scanned_at.is_some_and(|at| at.elapsed() < RESCAN_INTERVAL);
         let refreshed = known
             .as_ref()
-            .filter(|_| follow && fresh)
+            .filter(|_| fresh)
             .and_then(game_window::refresh_game_window);
         let status = match refreshed {
             Some(window) => GameWindowStatus::from_window(window),
@@ -620,20 +702,11 @@ fn track_game(app: AppHandle) {
         };
         known = status.window.clone();
 
-        if !follow {
-            // 꺼져 있는 동안에는 옮기지 않는다. 다시 켜면 처음부터 자리를 잡는다.
-            applied = None;
-        } else if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
-            let target = overlay_metrics(&window)
-                .and_then(|(width, margin)| follow_target(follow, &status, width, margin));
-            if let Some((x, y)) = follow_move(target, applied) {
-                match window.set_position(PhysicalPosition::new(x, y)) {
-                    Ok(()) => applied = Some((x, y)),
-                    Err(e) => eprintln!("오버레이를 게임 창에 맞춰 옮기지 못했다: {e}"),
-                }
-            }
-        }
+        applied = follow_game(&app, follow, &status, applied);
+        // 붙이기로 옮긴 뒤에 본다 — 붙이기를 켜지 않았어도 본다.
+        keep_overlay_on_top(&app, &mut on_top, &mut overlay_window, overlay_visible, &status);
 
+        let pause = stay_on_top::watch_interval(follow, overlay_visible, &status);
         let snapshot = GameSnapshot { status, follow };
         if emitted.as_ref() != Some(&snapshot) {
             if let Err(e) = app.emit(GAME_WINDOW_EVENT, snapshot.clone()) {
@@ -641,11 +714,15 @@ fn track_game(app: AppHandle) {
             }
             emitted = Some(snapshot);
         }
-        thread::park_timeout(if follow {
-            FOLLOW_INTERVAL
-        } else {
-            IDLE_INTERVAL
-        });
+        thread::park_timeout(pause);
+    }
+}
+
+/// 게임 창 추적 스레드를 깨운다(오버레이가 다시 보였다) — 주기를 기다리지 않고 바로 창 순서를 다시 본다.
+fn wake_game_tracker(app: &AppHandle) {
+    let thread = lock(&app.state::<GameTracker>().thread).clone();
+    if let Some(thread) = thread {
+        thread.unpark();
     }
 }
 
@@ -788,9 +865,21 @@ fn startup_report_path() -> Option<String> {
 }
 
 /// 앱을 끝낸다. 테두리도 작업 표시줄 단추도 없어서 화면의 닫기 단추가 이것을 부른다.
+/// 돌던 엔진 계산·계정 수집은 앱이 끝나는 길(`run`의 종료 처리 — `stop_running_work`)에서 멈춘다.
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
+}
+
+/// 앱이 끝날 때: 돌던 엔진 계산과 계정 수집을 멈추고, 그 프로세스들(자식까지)이 끝나 자리가 빌 때까지 잠깐 기다린다.
+/// 끝내기 단추·오버레이 창 닫기 어느 길로 끝나든 여기를 지난다. 시간 안에 끝나지 않아도 앱은 끝난다 — 그때와
+/// 앱이 여기를 지나지 못하고 죽었을 때(프로세스 종료·충돌)는 프로세스 묶음(`engine_win32.rs`)이 앱과 함께 닫히며 끝낸다.
+fn stop_running_work(app: &AppHandle) {
+    let engine_run = app.state::<EngineRun>();
+    let fetch_run = app.state::<FetchRun>();
+    if !engine::stop_all_and_wait(&[&engine_run.0, &fetch_run.0], engine::EXIT_GRACE) {
+        eprintln!("앱을 끝내는 동안 엔진·수집 프로세스가 제때 끝나지 않았다 — 프로세스 묶음이 닫히며 끝난다");
+    }
 }
 
 /// 전환 결과에서 바뀐 것만 창에 반영한다. 어느 변화도 창을 활성화하지 않는다(게임의 키보드 포커스를 건드리지 않는다).
@@ -857,6 +946,8 @@ fn handle_action(app: &AppHandle, action: OverlayAction) {
     }
     // 숨기면 화면 추적이 쉬고, 다시 보이면 주기를 기다리지 않고 바로 읽는다.
     wake_screen_tracker(app);
+    // 다시 보였을 때 게임이 위에 있으면 곧바로 올린다(숨긴 동안에는 올리지 않는다).
+    wake_game_tracker(app);
 }
 
 /// 오버레이를 한 번 더 실행했을 때 이미 떠 있는 쪽이 하는 일: 숨겨져 있었다면 보인다 — 활성화 없이
@@ -885,6 +976,8 @@ fn reveal_overlay(app: &AppHandle) {
         }
         wake_screen_tracker(app);
     }
+    // 보이게 한 창이 게임 아래에 있으면 곧바로 올린다.
+    wake_game_tracker(app);
 }
 
 /// 전역 단축키를 등록한다. 하나가 실패해도 나머지는 등록하고, 실패는 화면에 보이도록 남긴다.
@@ -991,6 +1084,19 @@ pub fn run() {
             start_screen_tracker(app.handle());
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("니케 컴패니언 오버레이를 시작하지 못했다");
+        .on_window_event(|window, event| {
+            // 오버레이 창이 닫히면(Alt+F4 등) 앱을 끝낸다 — 로그인 창이 떠 있어도 오버레이 없이 남지 않는다.
+            // 돌던 계산·수집은 아래 종료 처리에서 멈춘다.
+            if window.label() == MAIN_WINDOW && matches!(event, tauri::WindowEvent::Destroyed) {
+                window.app_handle().exit(0);
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("니케 컴패니언 오버레이를 시작하지 못했다")
+        .run(|app, event| {
+            // 앱이 끝나는 모든 길(끝내기 단추, 창 닫기)이 여기를 지난다. 프로세스가 끝나기 직전이다.
+            if let tauri::RunEvent::Exit = event {
+                stop_running_work(app);
+            }
+        });
 }

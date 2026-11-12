@@ -369,8 +369,21 @@ pub fn attach_position(client: ScreenRect, overlay_width: u32, margin: u32) -> (
     top_right_position(client.x, client.y, client.width, overlay_width, margin)
 }
 
+/// 이 좌표보다 왼쪽·위에 있는 창은 화면 밖으로 치워진 창이다. Windows는 최소화한 창을 (-32000, -32000)에 둔다 —
+/// 모니터를 왼쪽·위로 여러 대 이어 붙여도 가상 화면의 좌표가 여기까지 가지는 않는다.
+pub const PARKED_COORDINATE: i32 = -30000;
+
+/// 화면 밖으로 치워진 자리인가(최소화된 창의 자리).
+pub fn is_parked(rect: ScreenRect) -> bool {
+    rect.x <= PARKED_COORDINATE || rect.y <= PARKED_COORDINATE
+}
+
 /// 붙이기가 켜져 있을 때 오버레이가 있어야 할 자리. 붙일 수 없으면(꺼짐·게임 없음·최소화·영역 없음) `None` —
 /// 그때 오버레이는 있던 자리에 머문다.
+///
+/// 최소화된 게임 창은 상태로 걸러지지만(`capturable`), 창 정보를 읽는 사이에 최소화가 시작돼 「최소화 아님」으로
+/// 읽힌 창이 화면 밖 좌표를 갖고 있을 수 있다 — 그 좌표로는 따라가지 않는다(`is_parked`).
+/// 게임 창이 다른 모니터로 가면 그 모니터의 좌표(음수일 수 있다)로 그대로 따라간다.
 pub fn follow_target(
     follow: bool,
     status: &GameWindowStatus,
@@ -381,10 +394,31 @@ pub fn follow_target(
         return None;
     }
     let window = status.capturable()?;
-    if window.client.is_empty() {
+    if window.minimized || window.client.is_empty() || is_parked(window.client) {
         return None;
     }
     Some(attach_position(window.client, overlay_width, margin))
+}
+
+/// 붙이기의 한 주기에 할 일.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FollowStep {
+    /// 오버레이를 이 자리로 옮긴다(옮긴 뒤 이 자리를 「마지막으로 옮긴 자리」로 기억한다).
+    MoveTo(i32, i32),
+    /// 그대로 둔다: 게임 창이 가만히 있다. 사용자가 오버레이를 끌어 둔 자리를 되돌리지 않는다.
+    Stay,
+    /// 붙일 곳이 없다(붙이기 꺼짐·게임 없음·최소화): 오버레이는 마지막 자리에 머물고, 「마지막으로 옮긴 자리」는
+    /// 잊는다 — 게임 창이 다시 뜨면 같은 자리여도 새로 붙는다. 붙이기 자체는 켜진 채로 기다린다.
+    Wait,
+}
+
+/// 붙이기의 한 주기: 있어야 할 자리(`follow_target`)와 마지막으로 옮긴 자리로 할 일을 정한다.
+pub fn follow_step(target: Option<(i32, i32)>, last_applied: Option<(i32, i32)>) -> FollowStep {
+    match target {
+        None => FollowStep::Wait,
+        Some(t) if Some(t) == last_applied => FollowStep::Stay,
+        Some((x, y)) => FollowStep::MoveTo(x, y),
+    }
 }
 
 /// 오버레이를 옮겨야 하는가. 목표가 마지막으로 옮긴 자리와 같으면 옮기지 않는다
@@ -739,6 +773,185 @@ mod tests {
             ..CLIENT
         };
         assert_eq!(at(resized), Some((100 + 1280 - 452, 62)));
+    }
+
+    // ── 붙이기의 가장자리 처리 ────────────────────────────────────────────────
+
+    /// 붙이기를 켠 채 게임 창 상태가 차례로 바뀔 때, 주기마다 할 일과 오버레이가 놓인 자리를 따라가 본다.
+    /// 접착 코드(`lib.rs`의 `track_game`)가 하는 것과 같은 순서다: 자리 계산 → 할 일 → 옮겼으면 기억.
+    fn follow_through(statuses: &[GameWindowStatus]) -> (Vec<FollowStep>, Option<(i32, i32)>) {
+        let mut applied = None;
+        let mut overlay_at = None;
+        let mut steps = Vec::new();
+        for status in statuses {
+            let step = follow_step(follow_target(true, status, 440, 12), applied);
+            match step {
+                FollowStep::MoveTo(x, y) => {
+                    applied = Some((x, y));
+                    overlay_at = Some((x, y));
+                }
+                FollowStep::Stay => {}
+                FollowStep::Wait => applied = None,
+            }
+            steps.push(step);
+        }
+        (steps, overlay_at)
+    }
+
+    fn found_at(client: ScreenRect) -> GameWindowStatus {
+        GameWindowStatus::from_window(info(client, false))
+    }
+
+    #[test]
+    fn a_minimized_game_leaves_the_overlay_where_it_was() {
+        // Windows는 최소화한 창을 (-32000, -32000)에 둔다. 그 좌표로 따라가지 않는다.
+        let parked = ScreenRect {
+            x: -32000,
+            y: -32000,
+            width: 0,
+            height: 0,
+        };
+        let minimized = GameWindowStatus::from_window(info(parked, true));
+        let (steps, overlay_at) = follow_through(&[found_at(CLIENT), minimized.clone(), minimized]);
+        assert_eq!(
+            steps,
+            vec![FollowStep::MoveTo(1568, 62), FollowStep::Wait, FollowStep::Wait]
+        );
+        assert_eq!(overlay_at, Some((1568, 62)), "최소화 뒤에도 마지막 자리 그대로다");
+
+        // 읽는 사이에 최소화가 시작돼 「최소화 아님」으로 읽혔어도, 화면 밖 좌표로는 가지 않는다.
+        let racing = found_at(ScreenRect {
+            x: -32000,
+            y: -32000,
+            width: 160,
+            height: 28,
+        });
+        assert_eq!(follow_target(true, &racing, 440, 12), None);
+        let (steps, overlay_at) = follow_through(&[found_at(CLIENT), racing]);
+        assert_eq!(steps[1], FollowStep::Wait);
+        assert_eq!(overlay_at, Some((1568, 62)));
+        // 상태는 「찾음」인데 창 정보가 최소화인 경우도 같다.
+        let mut flagged = found_at(CLIENT);
+        if let Some(window) = flagged.window.as_mut() {
+            window.minimized = true;
+        }
+        assert_eq!(follow_target(true, &flagged, 440, 12), None);
+
+        assert!(is_parked(parked));
+        assert!(is_parked(ScreenRect { x: 10, y: -32000, ..CLIENT }));
+        assert!(!is_parked(CLIENT));
+        // 왼쪽·위에 붙인 모니터의 음수 좌표는 화면 밖이 아니다.
+        assert!(!is_parked(ScreenRect { x: -7680, y: -2160, ..CLIENT }));
+    }
+
+    #[test]
+    fn the_overlay_comes_back_when_a_minimized_game_is_restored() {
+        let minimized = GameWindowStatus::from_window(info(ScreenRect::default(), true));
+        let (steps, overlay_at) = follow_through(&[found_at(CLIENT), minimized, found_at(CLIENT)]);
+        // 같은 자리로 돌아와도 새로 붙는다(그 사이에 오버레이를 끌어 뒀더라도 게임 화면 안으로 돌아온다).
+        assert_eq!(
+            steps,
+            vec![
+                FollowStep::MoveTo(1568, 62),
+                FollowStep::Wait,
+                FollowStep::MoveTo(1568, 62)
+            ]
+        );
+        assert_eq!(overlay_at, Some((1568, 62)));
+    }
+
+    #[test]
+    fn the_overlay_follows_the_game_to_another_monitor() {
+        // 주 모니터(0,0 2560×1440)의 오른쪽 모니터, 왼쪽 위 모니터(음수 좌표)로 차례로 옮긴다.
+        let right = ScreenRect {
+            x: 2560 + 200,
+            y: 120,
+            ..CLIENT
+        };
+        let left_up = ScreenRect {
+            x: -1920,
+            y: -1080,
+            width: 1920,
+            height: 1080,
+        };
+        let (steps, overlay_at) = follow_through(&[
+            found_at(CLIENT),
+            found_at(right),
+            found_at(right),
+            found_at(left_up),
+        ]);
+        assert_eq!(
+            steps,
+            vec![
+                FollowStep::MoveTo(1568, 62),
+                FollowStep::MoveTo(2760 + 1920 - 452, 132),
+                FollowStep::Stay,
+                FollowStep::MoveTo(-1920 + 1920 - 452, -1068),
+            ]
+        );
+        assert_eq!(overlay_at, Some((-452, -1068)));
+
+        // 배율이 다른 모니터로 가면 오버레이의 너비·여백(물리 픽셀)이 달라진다 — 같은 게임 자리에서도 다시 맞춘다.
+        let at_150 = follow_target(true, &found_at(right), 660, 18);
+        assert_eq!(at_150, Some((2760 + 1920 - 660 - 18, 138)));
+        assert_eq!(
+            follow_step(at_150, Some((2760 + 1920 - 452, 132))),
+            FollowStep::MoveTo(2760 + 1920 - 678, 138)
+        );
+    }
+
+    #[test]
+    fn attach_waits_while_the_game_is_gone_and_reattaches_when_it_returns() {
+        let missing = GameWindowStatus::from_error(&GameError::NotRunning);
+        let launcher = GameWindowStatus::from_error(&GameError::LauncherOnly);
+        let moved = ScreenRect {
+            x: 300,
+            y: 200,
+            ..CLIENT
+        };
+        // 게임이 꺼졌다 → 런처만 → 같은 자리에 다시 떴다 / 다른 자리에 다시 떴다.
+        for (back, expected) in [(CLIENT, (1568, 62)), (moved, (300 + 1920 - 452, 212))] {
+            let (steps, overlay_at) = follow_through(&[
+                found_at(CLIENT),
+                missing.clone(),
+                launcher.clone(),
+                missing.clone(),
+                found_at(back),
+                found_at(back),
+            ]);
+            assert_eq!(
+                steps,
+                vec![
+                    FollowStep::MoveTo(1568, 62),
+                    FollowStep::Wait,
+                    FollowStep::Wait,
+                    FollowStep::Wait,
+                    FollowStep::MoveTo(expected.0, expected.1),
+                    FollowStep::Stay,
+                ]
+            );
+            assert_eq!(overlay_at, Some(expected));
+        }
+        // 붙이기를 켰는데 처음부터 게임이 없으면 옮기지 않고 기다린다 — 뜨면 붙는다.
+        let (steps, overlay_at) = follow_through(&[missing.clone(), missing, found_at(CLIENT)]);
+        assert_eq!(
+            steps,
+            vec![FollowStep::Wait, FollowStep::Wait, FollowStep::MoveTo(1568, 62)]
+        );
+        assert_eq!(overlay_at, Some((1568, 62)));
+    }
+
+    #[test]
+    fn follow_step_moves_only_when_the_target_changes() {
+        assert_eq!(follow_step(Some((10, 20)), None), FollowStep::MoveTo(10, 20));
+        // 게임 창이 가만히 있으면 그대로 둔다(사용자가 끌어 둔 자리를 되돌리지 않는다).
+        assert_eq!(follow_step(Some((10, 20)), Some((10, 20))), FollowStep::Stay);
+        assert_eq!(follow_step(Some((30, 20)), Some((10, 20))), FollowStep::MoveTo(30, 20));
+        // 붙일 곳이 없으면 옮기지 않는다(붙이기를 껐을 때도 같다).
+        assert_eq!(follow_step(None, Some((10, 20))), FollowStep::Wait);
+        assert_eq!(follow_step(None, None), FollowStep::Wait);
+        let found = found_at(CLIENT);
+        assert_eq!(follow_step(follow_target(false, &found, 440, 12), Some((1568, 62))), FollowStep::Wait);
     }
 
     #[test]
