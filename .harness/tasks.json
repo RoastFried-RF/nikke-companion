@@ -1074,6 +1074,118 @@
       }
     },
     {
+      "id": "P-020",
+      "title": "요격전 후보 생성: 보스의 약점 속성 니케를 후보에 넣기",
+      "description": "지금 요격전 추천(src/core/intercept.mjs)은 보스마다 같은 후보 편성을 쓴다 — 후보 풀을 투자 점수(육성 정도)로만 고르기 때문이다(src/core/candidates.mjs). 그래서 보유 니케가 많은 실제 계정에서는 덜 키운 약점 속성 니케가 후보에 들지 못하고, 보스 사이의 차이는 같은 편성의 딜 차이로만 나온다(P-018 메모, 결과의 weak_pool). 보스별로 후보 풀이 달라지게 한다: 보스의 약점 속성(그 보스 속성에 우월한 속성) 니케를 버스트 단계별 후보 풀에 일정 수 보장하고, 투자 점수 순위에도 속성 우위를 반영한다. 속성 우위 여부는 P-018이 엔진에서 옮긴 상성 표를 쓴다. 니케의 속성은 엔진 카탈로그에서 읽는다. 추측으로 니케 속성을 적지 마라.",
+      "deps": [
+        "P-018"
+      ],
+      "acceptance": [
+        "후보 생성기에 선택 사항으로 \"우선 속성\"을 줄 수 있다. 주지 않으면 결과가 지금과 완전히 같다(기존 테스트 그대로 통과, suggest·tier 결과 불변)",
+        "우선 속성을 주면: 버스트 단계별 후보 풀에 그 속성 니케가 있으면 최소 인원(기본 단계당 2명, 보유 수가 모자라면 있는 만큼)이 들어간다. 투자 점수가 낮아 원래는 빠졌을 니케도 들어간다 — 무엇이 이렇게 들어갔는지 결과(caveats 또는 풀 정보)에 이름과 함께 남긴다",
+        "요격전 추천은 보스마다 그 보스의 약점 속성을 우선 속성으로 넘긴다. 적 속성을 모르는 보스는 우선 속성 없이 돌린다",
+        "시뮬 예산은 그대로 지킨다. 예산이 모자라 후보를 줄일 때 약점 속성 니케가 든 후보가 먼저 잘리지 않게 한다(예산 배분 규칙을 문서에 적는다). 같은 입력이면 같은 결과다",
+        "단위 테스트(가짜 런타임): 덜 키운 약점 속성 니케가 후보에 들어가고, 가짜 엔진이 속성 우위에 보너스를 주면 그 니케가 든 편성이 1위가 된다. 우선 속성이 없으면 기존 결과와 같다. 보유 수가 모자란 단계의 처리",
+        "통합 테스트(실제 엔진): 보유 니케가 많은 시험 계정(data/samples/account.large.sample.json — is_test_data: true, 엔진 카탈로그의 실제 이름 25명 이상, 속성과 버스트 단계가 고르게, 육성 정도를 일부러 다르게)을 만들어, 속성이 다른 두 보스의 1위 편성 멤버가 서로 다르게 나오는 것을 확인한다(예산을 작게 잡아 3분 안쪽)",
+        "docs/data-model.md의 후보 생성·요격전 추천 절을 갱신한다. 오버레이(app/)는 계산 함수를 그대로 부르므로 화면 변경은 필요 없지만, app의 fixture와 테스트가 계속 통과해야 한다"
+      ],
+      "verify": [
+        {
+          "name": "unit",
+          "cmd": "node --test tests/unit/"
+        },
+        {
+          "name": "integration",
+          "cmd": "node --test tests/integration/",
+          "timeout_minutes": 30
+        },
+        {
+          "name": "install",
+          "cmd": "npm --prefix app install",
+          "timeout_minutes": 20
+        },
+        {
+          "name": "frontend-build",
+          "cmd": "npm --prefix app run build",
+          "timeout_minutes": 10
+        },
+        {
+          "name": "frontend-test",
+          "cmd": "npm --prefix app test",
+          "timeout_minutes": 10
+        }
+      ],
+      "manual_checks": [
+        "사용자 실제 계정으로 보스별 추천이 약점 속성 니케를 쓰는지, 인게임 모의전 대미지와 순위가 맞는지 확인한다"
+      ],
+      "protected": [],
+      "status": "pending",
+      "attempts": 0,
+      "agent_errors": 0
+    },
+    {
+      "id": "P-021",
+      "title": "오버레이: 인식한 요격전 보스의 추천을 자동으로 보여 주기 + 중복 실행 방지",
+      "description": "게임에서 이상 개체 요격전 화면(보스 선택·편성)을 보고 있으면 오버레이가 그 보스의 추천 편성을 스스로 보여 준다. P-019의 인식(recognize.rs, 앱 명령 recognize_game_screen)과 P-017의 요격전 화면(InterceptScreen)을 잇는다. 게임 창 추적 스레드(lib.rs의 track_game)가 이미 있다 — 인식도 Rust 쪽에서 주기적으로 돌리고 결과가 바뀔 때만 화면에 이벤트로 알린다. 게임은 읽기만 한다(P-011과 같은 규칙: 입력·창 조작·메모리 접근 없음). 캡처한 이미지는 저장하지도 화면에 넘기지도 않는다. 덧붙여 결함 하나를 고친다: 오버레이를 두 번 실행하면 두 번째 창이 단축키 등록 실패 오류를 띄운다 — 이미 실행 중이면 두 번째 실행은 조용히 끝나고 기존 창을 보이게 한다(게임 포커스를 뺏지 않는 P-016의 보이기 방식으로).",
+      "deps": [
+        "P-017",
+        "P-019"
+      ],
+      "acceptance": [
+        "자동 추적 켜기/끄기: 요격전 화면에 스위치가 있고 상태를 기억한다(기본 꺼짐). 켜져 있고 게임 창이 떠 있을 때만 주기적으로(기본 2초, 설정 가능) 게임 화면을 읽어 인식한다. 꺼져 있거나 게임이 없거나 최소화돼 있거나 오버레이가 숨겨져 있으면 캡처하지 않는다",
+        "인식 결과가 이상 개체 화면 + 보스이면: 오버레이가 요격전 탭이 아니어도 요격전 탭으로 옮기고(이 자동 이동도 끌 수 있다) 그 보스를 고른다. 추천 결과가 이미 있으면 그 보스의 편성이 바로 보인다. 결과가 없으면 \"추천을 먼저 실행하라\"는 안내가 보인다 — 자동으로 계산을 시작하지 않는다",
+        "인식 결과가 unknown이거나 other이면 고른 보스를 바꾸지 않는다(마지막 보스 유지). 같은 결과가 이어지는 동안에는 화면을 다시 건드리지 않는다 — 사용자가 손으로 다른 보스를 고르면 인식 결과가 바뀔 때까지 그대로 둔다",
+        "화면에 인식 상태가 보인다: 지금 인식한 화면·보스, 마지막으로 읽은 시각, 인식 못 함/게임 없음 같은 이유. 틀린 인식을 알아챌 수 있게 근거 한 줄을 펼쳐 볼 수 있다",
+        "연속 캡처가 실패하면(게임 종료·최소화·캡처 오류) 오류를 쌓지 않고 상태로만 보이며, 게임이 다시 뜨면 스스로 이어진다. 추적 스레드가 죽지 않는다",
+        "상태 전환 규칙(언제 보스를 바꾸고 언제 그대로 두는지)은 순수 함수로 두고 단위 테스트한다(Rust 또는 TS 한쪽에). 화면 테스트(가짜 backend): 인식 이벤트가 오면 탭·보스가 바뀌고, unknown에서는 안 바뀌고, 손으로 고른 보스가 유지되고, 스위치를 끄면 이벤트를 무시한다",
+        "캡처 주기 동안 캡처 한 번에 걸리는 시간을 재서 app/README.md에 적는다. 캡처할 때마다 Direct3D 장치와 세션을 새로 만들어 느리다면 그 사실과 측정값을 적는다(재사용은 필요하면 하되 P-011의 테스트가 계속 통과해야 한다)",
+        "중복 실행 방지: 두 번째 실행은 창을 만들지 않고 끝난다. 기존 창이 숨겨져 있었다면 보이게 한다. 단위 테스트 또는 실행 파일을 두 번 띄우는 통합 테스트로 확인한다(화면이 필요한 테스트는 #[ignore]로 두고 README에 명령을 적는다). capability에는 새로 쓰는 것만 더한다",
+        "기존 테스트가 계속 통과하고 cargo clippy --all-targets에 경고가 없다. app/README.md와 루트 CLAUDE.md를 갱신한다"
+      ],
+      "verify": [
+        {
+          "name": "unit",
+          "cmd": "node --test tests/unit/"
+        },
+        {
+          "name": "install",
+          "cmd": "npm --prefix app install",
+          "timeout_minutes": 20
+        },
+        {
+          "name": "frontend-build",
+          "cmd": "npm --prefix app run build",
+          "timeout_minutes": 10
+        },
+        {
+          "name": "frontend-test",
+          "cmd": "npm --prefix app test",
+          "timeout_minutes": 10
+        },
+        {
+          "name": "rust-test",
+          "cmd": "cargo test --manifest-path app/src-tauri/Cargo.toml",
+          "timeout_minutes": 40
+        },
+        {
+          "name": "labeled-captures",
+          "cmd": "cargo test --manifest-path app/src-tauri/Cargo.toml --test live_recognize -- --ignored",
+          "timeout_minutes": 20,
+          "requires": "라벨 붙은 캡처(data/captures/labels.json)",
+          "requires_cmd": "node -e \"process.exit(require('fs').existsSync('data/captures/labels.json')?0:1)\""
+        }
+      ],
+      "manual_checks": [
+        "실제 게임에서 이상 개체 보스를 넘기면 오버레이가 2~3초 안에 그 보스의 추천으로 바뀐다",
+        "자동 추적을 켠 채 게임을 해도 끊김이 느껴지지 않는다",
+        "오버레이를 두 번 실행해도 창이 하나다"
+      ],
+      "protected": [],
+      "status": "pending",
+      "attempts": 0,
+      "agent_errors": 0
+    },
+    {
       "id": "P-014",
       "title": "유니온 레이드: 5덱 배분",
       "description": "보유 니케를 겹치지 않게 여러 덱(기본 5)에 나눠 합계 총딜이 큰 배분을 찾는다. src/core/union.mjs + CLI `union --account <계정> --condition <조건> [--decks 5] [--budget <시뮬 횟수>] [--locked <고정.json>]`. 후보 덱은 기존 후보 생성기(더 큰 limit)로 만들고 시뮬한 뒤, 겹치지 않는 덱 묶음 중 합계가 가장 큰 것을 고른다. 조건은 모든 덱에 같은 조건 하나, 또는 덱별 조건 배열을 받는다. 일부 덱이나 일부 자리를 미리 고정(locked)할 수 있다. 샘플 계정은 8명뿐이라 data/samples/account.large.sample.json(is_test_data: true, 엔진 카탈로그의 실제 이름 30명 안팎, 버스트 단계 고르게)을 새로 만든다.",
