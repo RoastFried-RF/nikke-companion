@@ -300,9 +300,21 @@ export async function runFetch(manifest, options) {
     queue.push({ entry, target });
   }
 
-  let nextStart = 0; // 다음 요청을 시작해도 되는 시각 — 일꾼들이 함께 쓴다(요청 사이의 간격).
+  // 요청 사이의 간격 — 일꾼들이 함께 쓴다. 차례를 한 줄로 세우고, 앞 요청이 **실제로 나간 시각**에서 간격을 잰다.
+  // (예정 시각으로 재면 타이머가 늦게 깬 요청 바로 뒤의 요청이 간격보다 일찍 나간다.)
+  let turn = Promise.resolve();
+  let lastStart = -Infinity;
   let consecutive = 0;
   let halted = false;
+
+  function waitTurn() {
+    const mine = turn.then(async () => {
+      for (let wait = lastStart + gap - Date.now(); wait > 0; wait = lastStart + gap - Date.now()) await sleep(wait);
+      lastStart = Date.now();
+    });
+    turn = mine;
+    return mine;
+  }
 
   async function fetchOne({ entry, target }) {
     const response = await fetchImpl(entry.url, { redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
@@ -327,9 +339,7 @@ export async function runFetch(manifest, options) {
     while (queue.length > 0) {
       if (halted) return;
       const job = queue.shift();
-      const wait = nextStart - Date.now();
-      nextStart = Math.max(Date.now(), nextStart) + gap;
-      if (wait > 0) await sleep(wait);
+      await waitTurn();
       if (halted) {
         queue.unshift(job);
         return;
