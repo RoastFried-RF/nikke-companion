@@ -1,6 +1,6 @@
 # 진행 상황
 
-마지막 갱신: 2026-11-12 밤 (자율 실행 — P-030 덱 빌더)
+마지막 갱신: 2026-11-12 밤 (자율 실행 — P-031 육성 효율표)
 
 ## 지금 상태
 
@@ -32,7 +32,12 @@
   (이상 개체 5종 · 솔로 레이드 프리셋 · 속성만 정하기)를 골라 바로 계산한다. 「내 계정 육성」 대 「모두 최대 육성」(엔진 기본 스펙), 한 명을
   바꾼다면(12명까지), 자리 순서 비교(24가지까지), 내 편성 저장(01~05 + 이름 붙인 목록 — 계정 폴더), 요격전 추천의 「덱 빌더에서 열기」,
   편성 복사(클립보드 — 쓰기만). 자동 검증과 실제 엔진·실제 클립보드까지 확인했고, 실제 계정·실제 창에서는 사람이 본다
-  (`app/README.md` §덱 빌더 §한계). 다음 작업은 P-031(육성 효율표·오버로드/큐브 바꿔 보기).
+  (`app/README.md` §덱 빌더 §한계).
+- **육성 효율표(P-031)**: 편성 도구의 「육성 효율」 탭 — 기준 편성(덱 빌더의 지금 편성 · 요격전 1위 편성)과 상대를 고르면 한 단계 올릴 수
+  있는 것(스킬 1·2·버스트, 돌파, 코어 강화, 소장품, 오버로드 줄)을 스스로 후보로 만들어 총딜 증가율 순으로 보인다(60개까지). 오버로드
+  옵션 바꿔 보기(부위 넷 × 줄 셋 — 계정은 그대로), 큐브 바꿔 보기와 「이 편성에 맞는 큐브」(80건까지). **비용은 모른다**고 화면·결과에
+  적는다. 자동 검증과 실제 엔진까지 확인했고, 실제 계정·실제 창에서는 사람이 본다(`app/README.md` §육성 효율표 §한계).
+  다음 작업은 P-032(버스트 흐름 타임라인).
 - **요격전 화면 인식(P-019)**: 캡처한 프레임에서 화면 종류(이상 개체 보스 선택·편성·그 밖·모름)와 선택된 보스를 알아낸다 —
   Rust 모듈·`nikke-capture --recognize`/`--recognize-live`·앱 명령 `recognize_game_screen`까지. 오버레이 화면 연동은 아직 없다
   (`app/README.md` §화면 인식). 요격전 밖의 화면(로스트 섹터·니케 목록 등)은 인식하지 않는다.
@@ -352,3 +357,6 @@ CLI가 보고한 값이다(구독 사용 시 실제 청구액과 다를 수 있�
 - P-030 (2026-11-12): **덱 빌더**. 순수 모듈 `src/core/deck.mjs`(자리에 넣고 빼기·맞바꾸기, 버스트 구성 `burstCheck`, 상대 → 전투 조건 `resolveOpponent`(보스는 `bossCondition`·`unconfirmedOf` 그대로 — 미확인 칸이 요격전과 같다), `evaluateDeck`·`swapOne`·`compareOrders`(전부 `compareSquads` 호출 — 자리 변형은 `search.mjs`의 것), 내 편성 문서, 복사 글) + `compare.mjs`에 편성별 육성 기준 `growth: "engine_default"`(엔진 기본 스펙 = `profile {base: "default", chars: {}}` — 주지 않으면 결과가 종전과 같다) + Rust 명령 셋 `load_decks`·`save_decks`(계정 폴더의 `<계정>.decks.json`)·`copy_text`(`clipboard.rs` — 쓰기만, 명령 50 → 53·앱 창 권한 44 → 47) + 화면(`app/src/lib/deck.ts`, `views/DeckBuilder.vue`·`DeckOpponent.vue`·`DeckRoster.vue`·`DeckBook.vue`, 편성 도구의 「덱 빌더」 탭, 요격전 편성의 「덱 빌더에서 열기」, 설정 > 계산 도구의 자동 계산 스위치). 문서: `docs/data-model.md` §덱 빌더, `docs/ui-redesign.md` §4d, `app/README.md` §덱 빌더, `CLAUDE.md`.
 - 검증: 루트 단위 312건(+19 새 `deck.test.mjs`), 통합 +4(새 `deck.engine.test.mjs` — 실제 엔진 약 20초: 두 기준·캐시·한 명 바꾸기·자리 순서, 엔진 기본 스펙 = 프로필 없이 돌린 값과 같음), 앱 빌드·**681건**(+20 새 `DeckBuilder.test.ts`, +1 `contract`의 클립보드 약속), Rust 단위 297(+6: 편성 파일 2·`clipboard` 4) + 통합, `cargo clippy --all-targets` 경고 없음, `live_clipboard`(실제 클립보드에 쓰고 되읽기 — 한 번 돌려 통과). **요구가 바뀌어 고친 기존 단언**: `contract.test.ts`(명령 50 → 53·앱 창 44 → 47, `PLAN_COMMANDS`를 끝까지가 아니라 48~50번째로 자름). `core-runtime.test.mjs`의 순수 모듈 목록에 `deck`, `Wording.test.ts`의 검사 대상에 새 그림 넷을 더했다(강화). `tasks.json`·`runs/`·실제 계정 폴더는 건드리지 않았다.
 - 남은 문제: 클립보드는 처음에 `GlobalAlloc`으로 썼다가 `contract.test.ts`의 「`Win32_System_Memory`를 켜지 않는다」에 걸려 **COM 메모리 스트림(`CreateStreamOnHGlobal`)으로 덩이를 만드는 방식**으로 바꿨다(그 약속은 그대로 뒀다. WinRT 클립보드는 작업 스레드에서 쓸 수 없어 버렸다). 「모두 최대 육성」은 엔진 기본 스펙이라 **코어 강화 0** — 전부 최대가 아니다(화면·결과에 적는다). 솔로 레이드 프리셋의 약점 속성은 화면이 모른다(카탈로그에 이름뿐). 상한 12명·24가지는 어림, 「한 명을 바꾼다면」의 순서는 투자 점수라 덜 키운 강한 니케가 밀릴 수 있다(이름을 적는다). 캐시는 앱이 켜져 있는 동안의 메모리뿐이다. 실제 창에서 끌어다 놓기·좁은 창의 모습, 실제 계정에서의 납득 여부는 보지 못했다(`manual_checks`). 편성 도구의 비교·성장 탭은 그대로다(고급에서 고른다).
+- P-031 (2026-11-12): 육성 효율표. 순수 모듈 `src/core/efficiency.mjs`(한 단계 후보 만들기 `upgradeCandidates` → `efficiencyTable`, 오버로드 줄을 부위 넷 × 줄 셋에 놓고 바꿔 보기 `tryOverload`, 큐브 `compareCubes`와 「이 편성에 맞는 큐브」 — 전부 `compareGrowth`·`applyUpgrade` 호출이라 계정은 그대로) + 카탈로그에 큐브 목록 `cubes`(Node `loadCatalog`·Rust `engine.rs`의 `cube_catalog` — 엔진의 `cube.json`에서. 명령·권한은 더하지 않았다) + 화면(편성 도구의 새 탭 「육성 효율」: `views/GrowthLab.vue`·`EfficiencyList.vue`·`OverloadEditor.vue`·`CubeBoard.vue`, `lib/efficiency.ts`, 덱 빌더의 지금 편성을 내 편성 상태의 `working`으로 나눠 봄). **큐브는 바꿀 수 있다**: 엔진이 육성 칸 `cube`로 받는 것을 엔진 문서·코드와 실제 엔진으로 확인했다(18종 중 2종은 엔진이 효과를 계산하지 못해 「지원하지 않음」). 문서: `docs/data-model.md` §육성 효율표, `docs/ui-redesign.md` §4e, `app/README.md` §육성 효율표, `CLAUDE.md`, `docs/spec.md` 결정 기록 한 줄.
+- 검증: 루트 단위 332건(+20 새 `efficiency.test.mjs`), 통합 35건(+4 새 `efficiency.engine.test.mjs` — 실제 엔진 약 25초, 전체 78초), 앱 빌드·**700건**(+19 새 `GrowthLab.test.ts`), Rust 단위 298(+1 큐브 목록) + 통합(`engine_batch`가 큐브 목록을 Node 런타임과 대조), `cargo clippy --all-targets` 경고 없음. 강화한 기존 단언: `core-runtime.test.mjs`의 순수 모듈 목록에 `efficiency`, `Wording.test.ts`의 검사 대상에 새 그림 넷, `engine_batch.rs`·`node_runtime_reference.mjs`에 `cubes`. 약하게 만든 것은 없다. `tasks.json`·`runs/`·실제 계정 폴더는 건드리지 않았다.
+- 남은 문제: **비용을 모른다**(재화·수량 표가 없다 — 순위는 증가율뿐, 화면·결과에 적는다. R4의 재화 제약은 여전히 못 만든다). 오버로드의 부위는 화면의 자리일 뿐이다(계정은 옵션별 줄 수·레벨만 담는다) — 「한 옵션은 부위마다 한 줄」·새 줄 레벨 10은 가정. 보유 큐브·한 큐브를 몇 명이 낄 수 있는지 모른다(큐브는 같은 레벨로 종류만 견준다). 후보로 만들지 않는 칸(호감도·애장품·장비 강화·콘솔·소장품 없는 니케)이 있다. 상한 60개·80건은 어림. 빌드 묶음이 500kB를 조금 넘어 크기 안내가 뜬다(오류 아님). 실제 창·실제 계정에서는 보지 못했다(`manual_checks`). 성장 탭(손으로 적은 선택지)은 그대로다.

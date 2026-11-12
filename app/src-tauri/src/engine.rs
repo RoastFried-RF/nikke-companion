@@ -236,7 +236,42 @@ fn read_engine_json(engine_dir: &Path, relative: &str) -> Result<Value, EngineEr
     })
 }
 
-/// 엔진이 아는 니케와 보스 프리셋: `{nikkes, bosses}`. Node 런타임의 `loadCatalog`와 같은 값이다
+/// 엔진의 큐브 표(엔진 폴더 기준 경로). 카탈로그의 `cubes`가 여기서 나온다.
+const CUBE_TABLE_FILE: &str = "data/base_stat_tables/cube.json";
+
+/// 엔진의 큐브 표 → 카탈로그의 `cubes`: `[{name, skill, effect, max_level, supported}]`(표의 순서 그대로).
+///
+/// 루트 `src/core/efficiency.mjs`의 `cubeCatalogFrom`과 같은 규칙이다: `_`로 시작하는 키(주석·공통 스탯)와
+/// `공통`(어떤 큐브를 껴도 붙는 두 번째 효과 — 큐브 이름이 아니다)은 빼고, `unsupported`가 참이면 엔진이 효과를
+/// 계산하지 못하는 큐브다(`supported: false`).
+pub fn cube_catalog(table: &Value) -> Vec<Value> {
+    let Some(table) = table.as_object() else {
+        return Vec::new();
+    };
+    // JS의 「참 같은 값」과 같게 본다(`!row.unsupported`).
+    let truthy = |v: Option<&Value>| match v {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(Value::Number(n)) => n.as_f64().is_some_and(|x| x != 0.0),
+        Some(Value::String(s)) => !s.is_empty(),
+        Some(_) => true,
+    };
+    table
+        .iter()
+        .filter(|(name, row)| !name.starts_with('_') && name.as_str() != "공통" && row.is_object())
+        .map(|(name, row)| {
+            json!({
+                "name": name,
+                "skill": row.get("스킬명").and_then(Value::as_str),
+                "effect": row.get("template").and_then(Value::as_str),
+                "max_level": row.get("values").and_then(Value::as_object).map_or(0, |v| v.len()),
+                "supported": !truthy(row.get("unsupported")),
+            })
+        })
+        .collect()
+}
+
+/// 엔진이 아는 니케·보스 프리셋·큐브: `{nikkes, bosses, cubes}`. Node 런타임의 `loadCatalog`와 같은 값이다
 /// (키 순서도 파일 그대로 — serde_json의 `preserve_order`).
 pub fn catalog(engine_dir: &Path) -> Result<Value, EngineError> {
     let nikkes = read_engine_json(engine_dir, "data/parsed_nikke.json")?;
@@ -254,7 +289,11 @@ pub fn catalog(engine_dir: &Path) -> Result<Value, EngineError> {
         });
     };
     let bosses: Vec<&String> = presets.keys().filter(|k| !k.starts_with('_')).collect();
-    Ok(json!({ "nikkes": nikkes, "bosses": bosses }))
+    // 큐브 표를 읽지 못하면 카탈로그를 버리지 않고 큐브만 「모름」(null)으로 둔다 — 화면이 큐브를 바꿔 볼 수 없다고 말한다.
+    let cubes = read_engine_json(engine_dir, CUBE_TABLE_FILE)
+        .ok()
+        .map(|table| cube_catalog(&table));
+    Ok(json!({ "nikkes": nikkes, "bosses": bosses, "cubes": cubes }))
 }
 
 /// 엔진 버전: `{repo, commit, dirty}`. 커밋을 알 수 없으면 commit·dirty가 null이다(값을 지어내지 않는다).
@@ -989,6 +1028,30 @@ mod tests {
             catalog(&std::env::temp_dir().join("nikke-companion-없는-엔진")),
             Err(EngineError::DataUnreadable { .. })
         ));
+    }
+
+    #[test]
+    fn cube_catalog_keeps_table_order_and_marks_unsupported_cubes() {
+        // 지어낸 큐브 표(엔진의 cube.json과 같은 모양): 주석 키·공통 효과는 큐브가 아니다.
+        let table = json!({
+            "_comment": "주석",
+            "_stats": { "1": { "atk": 1 } },
+            "공통": { "stat": "element_bonus", "스킬명": "공통 효과", "template": "공통 {0}%", "values": { "5": 1.0 } },
+            "가 큐브": { "stat": "a", "스킬명": "가 효과", "template": "가 {0}% ▲", "values": { "1": 1.0, "2": 2.0, "3": 3.0 } },
+            "나 큐브": { "stat": "b", "스킬명": "나 효과", "template": "나 {0}% ▲", "values": { "1": 1.0 }, "unsupported": true },
+            "다 큐브": { "stat": "c", "values": {}, "unsupported": false },
+            "이상한 줄": "객체가 아니다"
+        });
+        let cubes = cube_catalog(&table);
+        assert_eq!(
+            cubes,
+            vec![
+                json!({ "name": "가 큐브", "skill": "가 효과", "effect": "가 {0}% ▲", "max_level": 3, "supported": true }),
+                json!({ "name": "나 큐브", "skill": "나 효과", "effect": "나 {0}% ▲", "max_level": 1, "supported": false }),
+                json!({ "name": "다 큐브", "skill": null, "effect": null, "max_level": 0, "supported": true }),
+            ]
+        );
+        assert!(cube_catalog(&json!(["객체가 아니다"])).is_empty());
     }
 
     #[test]

@@ -9,16 +9,30 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canonicalJson } from '../core/cache.mjs';
+import { cubeCatalogFrom } from '../core/efficiency.mjs';
 import { ENGINE_REPO } from '../core/runtime.mjs';
 
 export const DEFAULT_ENGINE_DIR = path.resolve(fileURLToPath(new URL('../../vendor/nikke-calc', import.meta.url)));
 
-/** 엔진이 아는 니케와 보스 프리셋. 이름 검증과 버스트 단계 확인에 쓴다. */
+/** 엔진의 큐브 표(엔진 저장소 기준 경로). 카탈로그의 `cubes`가 여기서 나온다. */
+export const CUBE_TABLE_FILE = 'data/base_stat_tables/cube.json';
+
+/**
+ * 엔진이 아는 니케·보스 프리셋·큐브. 이름 검증과 버스트 단계 확인, 큐브 바꿔 보기(src/core/efficiency.mjs)에 쓴다.
+ * `cubes`는 큐브 표를 `cubeCatalogFrom`으로 줄인 것이다(이름·효과·최대 레벨·엔진이 효과를 계산하는지).
+ */
 export function loadCatalog(engineDir = DEFAULT_ENGINE_DIR) {
   const read = (rel) => JSON.parse(fs.readFileSync(path.join(engineDir, rel), 'utf8'));
   const nikkes = read('data/parsed_nikke.json');
   const bosses = Object.keys(read('data/boss_presets.json')).filter((k) => !k.startsWith('_'));
-  return { nikkes, bosses };
+  // 큐브 표를 읽지 못하면 카탈로그를 버리지 않고 큐브만 「모름」(null)으로 둔다 — Rust의 `catalog`와 같다.
+  let cubes = null;
+  try {
+    cubes = cubeCatalogFrom(read(CUBE_TABLE_FILE));
+  } catch {
+    cubes = null;
+  }
+  return { nikkes, bosses, cubes };
 }
 
 /** 자동 티어가 읽는 엔진 데이터 파일(엔진 저장소 기준 경로). */

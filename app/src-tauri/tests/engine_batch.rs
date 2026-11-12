@@ -161,6 +161,10 @@ fn rust_command_and_node_runtime_give_the_same_total_damage() {
     assert_eq!(names, expected_names);
     assert_eq!(catalog["bosses"], reference["catalog"]["bosses"]);
     assert!(catalog["nikkes"]["크라운"]["burst_stage"].is_string());
+    // 큐브 목록(P-031 — 큐브 바꿔 보기)도 Node 런타임과 같은 값·같은 순서다.
+    assert_eq!(catalog["cubes"], reference["catalog"]["cubes"]);
+    let cubes = catalog["cubes"].as_array().expect("cubes");
+    assert!(cubes.iter().any(|c| c["supported"] == true) && cubes.iter().all(|c| c["name"].is_string()));
 
     let version = engine::version(&config.engine_dir);
     assert_eq!(version, reference["version"]);

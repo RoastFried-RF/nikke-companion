@@ -1,6 +1,8 @@
 // 테스트용 가짜 엔진과 실제 입력 문서.
 // 카탈로그·계정·조건·편성은 저장소의 실제 파일이다(엔진 데이터와 검증용 샘플). 엔진 실행만 가짜다.
-import type { EngineCatalog, EngineRequest, EngineRow, EngineRuntime, EngineVersion } from '../../src/types';
+import { cubeCatalogFrom } from '@core/efficiency.mjs';
+import type { CubeInfo, EngineCatalog, EngineRequest, EngineRow, EngineRuntime, EngineVersion } from '../../src/types';
+import cubeTable from '../../../vendor/nikke-calc/data/base_stat_tables/cube.json';
 import account from '../../../data/samples/account.sample.json';
 import bossBundle from '../../../data/samples/bosses.anomaly.sample.json';
 import condition from '../../../data/samples/condition.solo-raid.json';
@@ -33,6 +35,8 @@ export const sampleAccount = account;
 export const catalog: EngineCatalog = {
   nikkes: parsedNikke as unknown as EngineCatalog['nikkes'],
   bosses: Object.keys(bossPresets).filter((k) => !k.startsWith('_')),
+  // 큐브 목록(P-031)도 엔진의 큐브 표에서 같은 규칙으로 만든다.
+  cubes: cubeCatalogFrom(cubeTable) as CubeInfo[],
 };
 
 export const FAKE_EVALUATOR: EngineVersion = { repo: 'fake/engine', commit: 'f'.repeat(40), dirty: false };

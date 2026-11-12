@@ -24,7 +24,7 @@ const results = await nodeRuntime.runBatch(requests);
 const out = {
   requests,
   results,
-  catalog: { nikke_names: Object.keys(catalog.nikkes), bosses: catalog.bosses },
+  catalog: { nikke_names: Object.keys(catalog.nikkes), bosses: catalog.bosses, cubes: catalog.cubes },
   version: await nodeRuntime.engineVersion(),
 };
 process.stdout.write(JSON.stringify(out));

@@ -107,6 +107,24 @@ npm --prefix app test -- DeckBuilder                      # 화면(가짜 backen
 cargo test --manifest-path app/src-tauri/Cargo.toml --test live_clipboard -- --ignored --nocapture   # 이 PC의 클립보드에 실제로 쓴다(끝나면 앞의 글자를 되돌린다)
 ```
 
+**육성 효율표**(P-031 — `app/README.md` §육성 효율표, 형식·규칙은 `docs/data-model.md` §육성 효율표): 편성 도구의 「육성 효율」 탭 — 기준 편성
+(덱 빌더의 지금 편성 또는 요격전 1위 편성)과 상대를 고르면 ① **효율표**: 니케마다 「한 단계 올릴 수 있는 것」(스킬 1·2·버스트 레벨, 돌파,
+코어 강화, 소장품 단계, 오버로드 줄 — 이미 최대인 칸은 후보가 아니다)을 스스로 후보로 만들어 하나씩 계산하고 총딜 증가율 순으로 보인다
+(한 번에 60개까지), ② **오버로드 옵션 바꿔 보기**: 니케 한 명의 부위 넷 × 줄 셋(엔진이 받는 옵션 9종)을 바꿔 총딜 변화를 본다,
+③ **큐브 바꿔 보기**: 니케마다 큐브를 바꿔 본 총딜과 「이 편성에 맞는 큐브」(한 번에 80건까지). 규칙은 순수 모듈 `src/core/efficiency.mjs`
+(계산은 `growth.mjs`의 `compareGrowth`, 가상 적용은 `applyUpgrade` — **계정 문서를 바꾸지 않는다**), 화면은 `app/src/lib/efficiency.ts`·
+`app/src/views/GrowthLab.vue`·`EfficiencyList.vue`·`OverloadEditor.vue`·`CubeBoard.vue`. **비용은 모른다**(재화·필요 수량 표가 저장소에 없다 —
+「효율」은 증가율의 순위일 뿐이라고 화면과 결과에 적는다. 값을 지어내지 않는다). 엔진은 육성 칸 `cube`로 큐브를 바꿔 받는다(적지 않으면
+기본 큐브 — 렐릭 베어 큐브 Lv.15). 큐브 목록은 카탈로그(`loadCatalog`·`engine_catalog`)의 `cubes`이고(엔진의 `cube.json`에서 — Rust
+`engine.rs`의 `cube_catalog`), 엔진이 효과를 계산하지 못하는 큐브는 「지원하지 않음」으로 적고 견주지 않는다. **보유 큐브는 모른다**(계정에는
+장착 중이던 것만 있다), **어느 부위에 어느 옵션이 붙었는지도 모른다**(계정은 옵션별 줄 수·줄 레벨만 담는다 — 화면의 부위는 자리일 뿐이다).
+
+```bash
+node --test tests/unit/efficiency.test.mjs                # 순수 함수: 큐브 표 → 목록, 한 단계 후보(최대·미확인·잠김·없음), 효율표·상한·실패, 오버로드 줄 놓기·바꿔 보기, 큐브 후보·비교·추천
+node --test tests/integration/efficiency.engine.test.mjs  # 실제 엔진(약 25초): 효율표, 오버로드 줄(줄 수 = 레벨 10), 큐브 바꾸기(기본 큐브 값 대조·지원하지 않는 큐브는 엔진이 끊는다)
+npm --prefix app test -- GrowthLab                        # 화면(가짜 backend): 기준 편성 둘·효율표(순위·막대·비용 문장·상한)·오버로드 칸·큐브 추천·진행·중단·오류
+```
+
 **오버레이는 작은 위젯이다**(P-028 — `app/README.md` §오버레이 위젯): 모양 셋 — 접힘(알약: 보스 얼굴·이름·총딜) · 한 줄 카드(기본:
 + 「약점 ○○」·작은 초상화 다섯) · 펼침(+ 한 줄 요약·2·3위·자리 순서). 누르거나 `Alt+Shift+M`으로 오가고, **창은 위젯만큼만 크다**
 (화면이 잰 크기를 `overlay_fit`으로 알린다 — 빈 투명 영역이 게임 클릭을 가로막지 않게). 그림은 `app/src/views/OverlayWidget.vue`(받은

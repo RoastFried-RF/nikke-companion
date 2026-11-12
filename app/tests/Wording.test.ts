@@ -88,6 +88,11 @@ describe('문구 — 개발 용어를 쓰지 않는다', () => {
         '../src/views/DeckOpponent.vue',
         '../src/views/DeckRoster.vue',
         '../src/views/DeckBook.vue',
+        // P-031: 육성 효율의 그림 넷도 같은 규칙을 따른다.
+        '../src/views/GrowthLab.vue',
+        '../src/views/EfficiencyList.vue',
+        '../src/views/OverloadEditor.vue',
+        '../src/views/CubeBoard.vue',
         '../src/screens/AccountScreen.vue',
       ]),
     );

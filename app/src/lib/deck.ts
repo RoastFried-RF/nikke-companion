@@ -70,6 +70,10 @@ export interface DeckStore {
   problem: Ref<string>;
   /** 다른 화면이 넘긴 편성. 덱 빌더가 받아 간다. */
   incoming: Ref<IncomingDeck | null>;
+  /** 덱 빌더에서 지금 짜고 있는 편성과 고른 상대. 다른 화면(육성 효율)이 기준 편성으로 읽는다. */
+  working: Ref<{ slots: Slots; opponent: string | null }>;
+  /** 덱 빌더가 짜던 편성이 바뀔 때마다 알린다(이 PC에도 기억한다). */
+  setWorking(slots: Slots, opponent: string | null): void;
   reload(): Promise<void>;
   /** 번호 칸에 저장한다. 값이 맞지 않으면 이유를 한국어 문장으로 던진다(아무것도 바뀌지 않는다). */
   saveSlot(index: number, deck: DeckDraft): Promise<void>;
@@ -91,6 +95,8 @@ export function createDeckStore(shared: Shared): { store: DeckStore; stop: () =>
   const ready = ref(false);
   const problem = ref('');
   const incoming = shallowRef<IncomingDeck | null>(null);
+  // 덱 빌더를 아직 열지 않았어도 지난번에 짜던 편성을 안다(이 PC에 기억해 둔 것).
+  const working = shallowRef<{ slots: Slots; opponent: string | null }>(recallWorking());
   /** 늦게 끝난 읽기가 나중 읽기를 덮지 않게 한다. */
   let seq = 0;
   let handed = 0;
@@ -137,6 +143,11 @@ export function createDeckStore(shared: Shared): { store: DeckStore; stop: () =>
     ready,
     problem,
     incoming,
+    working,
+    setWorking: (slots, opponent) => {
+      working.value = { slots: normalizeSlots(slots), opponent };
+      rememberWorking(slots, opponent);
+    },
     reload,
     saveSlot: async (index, deck) => commit(coreSaveSlot(book.value, index, deck, { now: now() }) as DeckBook),
     clearSlot: (index) => commit(coreClearSlot(book.value, index) as DeckBook),

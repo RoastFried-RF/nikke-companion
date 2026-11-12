@@ -3,7 +3,8 @@
 // 계산 모듈(account, condition, compare, candidates, growth, format, render)은 프로세스 실행·파일 읽기를
 // 직접 하지 않는다. 엔진이 필요한 함수는 `deps.runtime`으로 아래 모양의 객체를 받는다:
 //
-//   runtime.loadCatalog()            → {nikkes, bosses}            (값 또는 Promise)
+//   runtime.loadCatalog()            → {nikkes, bosses, cubes}     (값 또는 Promise. cubes는 큐브 표를 읽지 못했으면 null —
+//                                                                   큐브 바꿔 보기(efficiency.mjs)만 쓴다)
 //   runtime.engineVersion()          → {repo, commit, dirty}       (값 또는 Promise. 모르면 commit·dirty가 null)
 //   runtime.runBatch(requests, opts) → Promise<결과[]>  입력 순서 그대로, 줄마다 결과 또는 {error}
 //

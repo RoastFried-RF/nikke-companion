@@ -6,18 +6,23 @@ import { withCache } from '@core/cache.mjs';
 import { DEFAULT_BUDGET, DEFAULT_LIMIT, DEFAULT_TOP, suggestSquads } from '@core/candidates.mjs';
 import { compareSquads, InputError } from '@core/compare.mjs';
 import { compareOrders, evaluateDeck, swapOne } from '@core/deck.mjs';
+import { compareCubes, efficiencyTable, tryOverload } from '@core/efficiency.mjs';
 import { compareGrowth } from '@core/growth.mjs';
 import { DEFAULT_INTERCEPT_BUDGET, DEFAULT_INTERCEPT_TOP, recommendIntercept } from '@core/intercept.mjs';
 import type {
   BossProgress,
   CompareReport,
+  CubeReport,
   DeckOpponent,
   DeckOrderReport,
   DeckReport,
   DeckSwapReport,
+  EfficiencyReport,
   EngineRuntime,
   GrowthReport,
   InterceptReport,
+  OverloadPart,
+  OverloadTrialReport,
   SearchStage,
   SimCacheStore,
 } from '../types';
@@ -292,6 +297,50 @@ export async function runDeckSwap(input: DeckInput & { slot: number; limit?: num
       coreDeps(deps),
     );
     return report as unknown as DeckSwapReport;
+  } catch (e) {
+    throw asComputeError(e);
+  }
+}
+
+// ── 육성 효율표(P-031) ────────────────────────────────────────────────────────
+// 규칙은 전부 루트의 src/core/efficiency.mjs에 있다(그 안에서 성장 비교 compareGrowth를 부른다 — 계정은 바뀌지 않는다).
+
+/** 편성의 니케마다 한 단계 올릴 수 있는 것을 하나씩 계산해 총딜 증가율 순으로(`limit`개까지, `only`면 그 니케만). */
+export async function runEfficiency(input: DeckInput & { only?: string | null; limit?: number }, deps: ComputeDeps = defaultDeps): Promise<EfficiencyReport> {
+  try {
+    const report = await efficiencyTable(
+      { account: input.account as object, opponent: input.opponent, members: input.members },
+      { only: input.only ?? null, limit: input.limit },
+      coreDeps(deps),
+    );
+    return report as unknown as EfficiencyReport;
+  } catch (e) {
+    throw asComputeError(e);
+  }
+}
+
+/** 니케 한 명의 오버로드 옵션 줄을 화면에서 짠 것으로 바꿨을 때의 총딜(가상 적용). */
+export async function runOverloadTrial(input: DeckInput & { nikke: string; parts: OverloadPart[] }, deps: ComputeDeps = defaultDeps): Promise<OverloadTrialReport> {
+  try {
+    const report = await tryOverload(
+      { account: input.account as object, opponent: input.opponent, members: input.members, nikke: input.nikke, parts: input.parts },
+      coreDeps(deps),
+    );
+    return report as unknown as OverloadTrialReport;
+  } catch (e) {
+    throw asComputeError(e);
+  }
+}
+
+/** 니케마다 큐브를 바꿔 본 총딜과 「이 편성에 맞는 큐브」(`limit`건까지, `only`면 그 니케만). */
+export async function runCubeCompare(input: DeckInput & { only?: string | null; limit?: number }, deps: ComputeDeps = defaultDeps): Promise<CubeReport> {
+  try {
+    const report = await compareCubes(
+      { account: input.account as object, opponent: input.opponent, members: input.members },
+      { only: input.only ?? null, limit: input.limit },
+      coreDeps(deps),
+    );
+    return report as unknown as CubeReport;
   } catch (e) {
     throw asComputeError(e);
   }

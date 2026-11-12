@@ -1882,9 +1882,19 @@
         "실제 계정의 요격전 1위 편성으로 효율표를 돌려 보고, 1위로 나온 육성이 실제로 딜을 올리는지 게임에서 확인한다"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261112T132035-P-031-a1",
+        "verified_tree": "469783b7e573f2bb9831bbfb55ccd887209140ca",
+        "verified_at": "2026-11-12T13:50:56.588Z",
+        "commit": null
+      }
     },
     {
       "id": "P-032",

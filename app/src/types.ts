@@ -152,10 +152,24 @@ export interface EngineProgress {
   total: number;
 }
 
+/** 큐브 하나(엔진의 큐브 표에서 — 루트 src/core/efficiency.mjs의 cubeCatalogFrom). */
+export interface CubeInfo {
+  name: string;
+  /** 큐브 효과의 이름. 표에 없으면 null. */
+  skill: string | null;
+  /** 효과의 문구(`{0}`에 레벨별 수치가 들어간다). 표에 없으면 null. */
+  effect: string | null;
+  max_level: number;
+  /** 계산 도구가 이 큐브의 효과를 계산하는가. 아니면 바꿔 볼 수 없다(지원하지 않음). */
+  supported: boolean;
+}
+
 /** 엔진이 아는 니케와 보스 프리셋. 계산 코드(src/core)가 이름·버스트 단계 확인에 쓴다. */
 export interface EngineCatalog {
   nikkes: Record<string, Record<string, unknown>>;
   bosses: string[];
+  /** 큐브 목록(P-031). 큐브 표를 읽지 못했으면 null — 그때는 큐브를 바꿔 볼 수 없다. */
+  cubes?: CubeInfo[] | null;
 }
 
 /** 엔진 요청·결과 한 건. 모양은 엔진의 JSON 계약이고 화면 코드는 해석하지 않는다. */
@@ -971,4 +985,168 @@ export interface DeckBook {
   kind: string;
   slots: (SavedDeck | null)[];
   saved: SavedDeck[];
+}
+
+// ── 육성 효율표(P-031 — 루트 src/core/efficiency.mjs, docs/data-model.md §육성 효율표) ──────────
+
+/** 효율표·큐브 비교의 기준 총딜과 멤버별 딜. */
+export interface EfficiencyBaseline {
+  total_damage: number;
+  members: ReportMember[];
+  notes: string[];
+  engine_warnings: string[];
+  ungrown_members: string[];
+}
+
+/** 한 단계 올릴 수 있는 것 하나(무엇을 어디서 어디로). */
+export interface UpgradeStep {
+  id: string;
+  nikke: string;
+  /** `skill1`·`skill2`·`burst`·`breakthrough`·`core`·`collection`·`overload:<옵션>`. */
+  kind: string;
+  label: string;
+  from: string;
+  to: string;
+}
+
+/** 효율표의 한 줄. `gain_rate` 0.012 = 총딜 1.2% 증가. */
+export interface EfficiencyRow extends UpgradeStep {
+  rank: number;
+  total_after: number;
+  gain: number;
+  gain_rate: number | null;
+  notes: string[];
+  engine_warnings: string[];
+}
+
+/** 후보로 만들지 않은 칸과 까닭(이미 최대·미확인·잠김·없음·지원하지 않음). */
+export interface ExcludedStep {
+  nikke: string;
+  kind: string;
+  label: string;
+  code: 'max' | 'unknown' | 'locked' | 'none' | 'unsupported';
+  reason: string;
+}
+
+/** 육성 효율표(efficiencyTable). */
+export interface EfficiencyReport {
+  schema_version: number;
+  kind: 'growth_efficiency';
+  generated_at: string;
+  /** 어느 편성·어느 상대의 결과인지. */
+  key: string;
+  /** 한 니케만 본 결과면 그 이름. */
+  only: string | null;
+  account: { name?: string | null; is_test_data?: boolean; updated_at?: string | null };
+  members: string[];
+  /** 올릴 것이 없어 계산하지 않았으면 null. */
+  baseline: EfficiencyBaseline | null;
+  rows: EfficiencyRow[];
+  /** 계산하지 못한 것(0으로 두지 않는다). */
+  failed: (UpgradeStep & { reason: string })[];
+  /** 상한 때문에 보지 못한 것. */
+  skipped: UpgradeStep[];
+  excluded: ExcludedStep[];
+  candidates: { total: number; limit: number; computed: number; failed: number; skipped: number };
+  /** 비용은 모른다 — 언제나 false다. */
+  cost_known: boolean;
+  cost_note: string;
+  assumptions: string[];
+  engine?: EngineVersion | null;
+  cache?: CacheStats | null;
+  caveats: string[];
+}
+
+/** 오버로드 옵션 한 줄(옵션의 열쇠와 줄 레벨). */
+export interface OverloadLine {
+  id: string;
+  level: number;
+}
+
+/** 장비 부위 하나의 옵션 줄 셋(빈 줄은 null). */
+export interface OverloadPart {
+  part: string;
+  lines: (OverloadLine | null)[];
+}
+
+/** 옵션별로 묶은 줄(줄이 있는 옵션만). */
+export interface OverloadOptionSummary {
+  id: string;
+  name: string;
+  levels: number[];
+}
+
+/** 오버로드 옵션 바꿔 보기의 결과(tryOverload). */
+export interface OverloadTrialReport {
+  kind: 'overload_trial';
+  /** 어느 편성·상대·니케·옵션의 결과인지. */
+  key: string;
+  nikke: string;
+  /** computed 계산됨 · same 지금과 같다 · failed 계산하지 못함(0이 아니다). */
+  status: 'computed' | 'same' | 'failed';
+  before: { status: string; options: OverloadOptionSummary[]; count: number };
+  after: { options: OverloadOptionSummary[]; count: number };
+  total_before: number;
+  total_after: number | null;
+  gain: number | null;
+  gain_rate: number | null;
+  members: (ReportMember & { gain: number })[];
+  reason: string | null;
+  notes: string[];
+  assumptions: string[];
+  engine?: EngineVersion | null;
+  cache?: CacheStats | null;
+  caveats: string[];
+}
+
+/** 큐브 하나를 바꿔 본 줄. `change` +0.02 = 총딜 2% 증가. `owned_level`은 계정에서 본 보유 레벨(모르면 null). */
+export interface CubeRow {
+  cube: string;
+  level: number;
+  total_damage: number;
+  gain: number;
+  change: number | null;
+  owned_level: number | null;
+  engine_warnings: string[];
+}
+
+/** 큐브 비교에서 니케 한 명의 줄들. */
+export interface CubeNikke {
+  nikke: string;
+  /** 지금 낀 것으로 계산되는 큐브. `source: 'default'`면 계정에 적혀 있지 않아 계산 도구의 기본 큐브다. */
+  current: { name: string; level: number; source: 'account' | 'default'; owned_level: number | null };
+  /** 총딜이 큰 순. */
+  rows: CubeRow[];
+  /** 지금 큐브보다 나은 것이 없으면 null. */
+  best: { cube: string; level: number; change: number | null } | null;
+}
+
+/** 큐브 비교의 결과(compareCubes). */
+export interface CubeReport {
+  kind: 'cube_report';
+  key: string;
+  only: string | null;
+  account: { name?: string | null; is_test_data?: boolean; updated_at?: string | null };
+  members: string[];
+  baseline: EfficiencyBaseline;
+  nikkes: CubeNikke[];
+  /** 「이 편성에 맞는 큐브」: 니케마다 고른 큐브와, 함께 끼웠을 때의 총딜. */
+  recommendation: {
+    picks: { nikke: string; cube: string; level: number; changed: boolean; alone_change: number | null; owned_level: number | null }[];
+    status: 'computed' | 'unchanged' | 'failed';
+    total_damage: number | null;
+    gain: number | null;
+    gain_rate: number | null;
+    reason: string | null;
+  };
+  failed: { nikke: string; cube: string; reason: string }[];
+  /** 상한 때문에 보지 못한 큐브. */
+  skipped_cubes: string[];
+  /** 계산 도구가 효과를 계산하지 못해 견주지 않은 큐브. */
+  unsupported: string[];
+  candidates: { total: number; limit: number; computed: number; failed: number; skipped: number };
+  assumptions: string[];
+  engine?: EngineVersion | null;
+  cache?: CacheStats | null;
+  caveats: string[];
 }

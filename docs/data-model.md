@@ -805,6 +805,154 @@ P-030. 손으로 짠 편성 하나를 계산하고 바꿔 보는 순수 모듈�
 
 계산하지 않았으면 마지막 줄은 「총딜 계산 전」이다(지어내지 않는다). 빈 자리는 「(빈 자리)」.
 
+## 육성 효율표 — `src/core/efficiency.mjs`
+
+P-031. 성장 투자 비교(§성장 투자 비교 — 업그레이드 후보를 파일로 써야 한다)를 후보 없이 쓰게 한 순수 모듈이다(`node:` import 없음 —
+웹뷰와 Node가 함께 쓴다). 셋을 한다: **효율표**(한 단계 올릴 수 있는 것을 자동으로 후보로 만들어 증가율 순으로) ·
+**오버로드 옵션 바꿔 보기** · **큐브 바꿔 보기**. 계산은 전부 `compareGrowth`가 하고 가상 적용은 `applyUpgrade`다 — **계정 문서는
+바뀌지 않는다.** 기준 편성은 다섯 자리, 상대는 덱 빌더의 `resolveOpponent` 결과다(§덱 빌더 §상대). 화면은 편성 도구의 「육성 효율」
+탭(`app/README.md` §육성 효율표).
+
+**모르는 것 · 다루지 않는 것**(결과의 `caveats`에도 적는다):
+
+- **비용.** 재화·필요 수량의 표가 이 저장소에 없다 — 「효율」은 **증가율의 순위일 뿐**이다(`cost_known: false`, `cost_note`).
+  값을 지어내지 않는다: 결과의 어느 줄에도 비용·효율 점수 칸이 없다.
+- 어느 부위에 어느 오버로드 옵션이 붙었는지. 계정 상태는 옵션별 줄 수(와 줄 레벨)만 담고(§계정 상태 `overload`) 엔진도 그것만 쓴다.
+- 보유 큐브. 계정에는 계정을 받을 때 끼고 있던 큐브에서 본 레벨만 있다(`account.cubes` — §계정 가져오기).
+- 후보로 만들지 않는 칸: 호감도, 애장품 단계, 장비 등급·강화, 콘솔, 큐브 레벨, 소장품이 없는 니케의 소장품.
+
+### 한 단계 올릴 수 있는 것 — `upgradeCandidates({account, members, catalog, only})`
+
+편성의 니케마다(또는 `only`의 한 명) 아래 칸에서 **한 단계 위**를 업그레이드 후보(§성장 투자 비교의 후보 형식)로 만든다.
+계정 상태에 있고 엔진이 계산에 반영하는 칸만이다.
+
+| 종류(`kind`) | 무엇 | 후보 | 후보가 아닌 때(`excluded[].code`) |
+|---|---|---|---|
+| `skill1` · `skill2` · `burst` | 스킬 1 · 스킬 2 · 버스트 레벨 | `add: {skill_levels: [1,0,0]}` 등(+1) | 이미 10(`max`) · 미확인(`unknown`) |
+| `breakthrough` | 돌파 | `add: {breakthrough: 1}` | 이미 3(`max`) · 미확인 |
+| `core` | 코어 강화 | `add: {core_enhancement: 1}` | 이미 7(`max`) · 돌파 3 미만(`locked` — 엔진 `calculator/base_stat.py`의 「돌파 3 이후 해금」) · 미확인 |
+| `collection` | 소장품 단계 | `set: {collection_stage: "SR6"}`(같은 등급 안에서 +1) | 15(`max` — R15도 최대다. SR은 다른 소장품이다) · 소장품 없음(`none` — 어느 등급을 얻을지 모른다) · 미확인 · 읽을 수 없는 표기(`unsupported`) |
+| `overload:<옵션>` | 오버로드 옵션 9종 각각 한 줄 더 | `add: {overload: {옵션: 1}}`(계정이 줄별 레벨로 적었으면 `[10]`) | 그 옵션이 이미 부위 수만큼(`max`) · 열두 줄이 다 참(`max`) · 미확인 · 합산 수치(`equip_skills`)로만 적힘(`unsupported`) |
+
+- 적지 않은 칸은 미육성 값(스킬 1/1/1, 돌파 0, 코어 강화 0, 옵션 없음)에서 한 단계다 — 계산이 그 값으로 하기 때문이다.
+- **오버로드의 가정**: 부위 넷 × 줄 셋(모두 12줄), 한 옵션은 부위마다 한 줄(많아야 4줄). 계정에 장비가 적혀 있고 오버로드 장비가
+  아닌 부위(`tier`가 있는 부위)가 있으면 그만큼 줄어든다(오버로드 장비 2부위 → 6줄, 옵션마다 2줄). 새 줄의 레벨은 10이다
+  (`DEFAULT_LINE_LEVEL` — 엔진이 줄 수만 받았을 때 쓰는 레벨, `SIM-JSON.md` §육성 `overload`). 「한 옵션은 부위마다 한 줄」은 게임
+  화면에서 확인한 값이 아니라 이 모듈의 가정이다.
+- SSR이 아닌 니케의 돌파 후보에는 「그 등급의 돌파 한도는 이 앱이 확인하지 못했다」는 메모가 붙는다(엔진의 범위는 등급과 무관하게 0~3이다).
+- 순서는 종류(`CANDIDATE_KINDS` — 위 표의 순서, 오버로드는 옵션 표의 순서) → 편성의 자리 순서다. 상한에 걸리면 뒤의 종류부터 빠진다.
+  같은 입력이면 같은 목록이다.
+
+```jsonc
+{ "candidates": [ { "id": "헬름 · 스킬 1 Lv.7 → Lv.8", "nikke": "헬름", "kind": "skill1", "label": "스킬 1", "from": "Lv.7", "to": "Lv.8",
+                    "upgrade": { "name": "헬름 · 스킬 1 Lv.7 → Lv.8", "nikke": "헬름", "add": { "skill_levels": [1, 0, 0] } }, "notes": [] } ],
+  "excluded":   [ { "nikke": "헬름", "kind": "burst", "label": "버스트", "code": "max", "reason": "버스트 레벨이 이미 최대(10)다." } ] }
+```
+
+### 효율표 — `efficiencyTable({account, opponent, members}, {limit, only})`
+
+후보를 `limit`개(기본 60 — `DEFAULT_EFFICIENCY_LIMIT`)까지 하나씩 가상 적용해 총딜 증가율 순으로 돌려준다. 엔진 요청은 기준 1건 +
+계산한 후보 수다(`compareGrowth` 한 번 — 캐시에 있는 것은 엔진에 보내지 않는다).
+
+```jsonc
+{
+  "schema_version": 1, "kind": "growth_efficiency", "generated_at": "…",
+  "key": "…",                       // 어느 편성·어느 상대의 결과인지(덱 빌더의 deckKey와 같다)
+  "only": null,                      // 한 니케만 본 결과면 그 이름
+  "account": { }, "opponent": { }, "members": ["…"],
+  "baseline": { "total_damage": 0, "members": [ { "name": "…", "damage": 0, "share": 0.2 } ], "notes": [], "engine_warnings": [], "ungrown_members": [] },
+  "rows": [ { "rank": 1, "id": "헬름 · 스킬 1 Lv.7 → Lv.8", "nikke": "헬름", "kind": "skill1", "label": "스킬 1", "from": "Lv.7", "to": "Lv.8",
+              "total_after": 0, "gain": 0, "gain_rate": 0.0123, "notes": [], "engine_warnings": [] } ],
+  "failed":   [ { "id": "…", "nikke": "…", "kind": "…", "label": "…", "from": "…", "to": "…", "reason": "…" } ],   // 계산하지 못한 것(0이 아니다)
+  "skipped":  [ { "id": "…", "nikke": "…", "kind": "…", "label": "…", "from": "…", "to": "…" } ],                  // 상한 때문에 보지 못한 것
+  "excluded": [ ],                    // 후보로 만들지 않은 칸과 까닭(위)
+  "candidates": { "total": 45, "limit": 60, "computed": 45, "failed": 0, "skipped": 0 },
+  "cost_known": false, "cost_note": "비용은 모른다 — …",
+  "assumptions": [], "engine": { }, "cache": { }, "caveats": ["비용은 모른다 — …", "…"]
+}
+```
+
+- `rows`는 증가율이 큰 순이다(같으면 후보 순서 — 안정 정렬). 딜에 영향이 없는 것도 빼지 않고 0%로 둔다.
+- 올릴 수 있는 칸이 하나도 없으면 계산하지 않는다: `baseline`이 `null`(0이 아니다), `rows`가 빈 배열이다.
+- 한 단계씩 **따로** 올려 본 값이다 — 여럿을 함께 올린 효과, 두 단계 이상 올렸을 때의 순서는 보지 않는다.
+
+### 오버로드 옵션 바꿔 보기 — `tryOverload({account, opponent, members, nikke, parts})`
+
+화면은 부위 넷 × 줄 셋의 칸에서 줄마다 옵션(엔진이 받는 9종 — §계정 상태의 옵션 표)과 줄 레벨(1~15)을 고른다.
+
+- `overloadState(니케 항목)` → `{status, lines: [{id, level}], reason}`: `lines`(줄을 읽었다) · `unknown`(미확인 칸 — 빈 줄에서 시작하고
+  적용 전을 옵션 없음으로 계산한다) · `aggregate`(합산 수치 `equip_skills`로만 적혀 있다 — **지원하지 않음**) · `unreadable`.
+  줄 수만 적힌 줄은 레벨 10이다.
+- `layoutOverload(lines)` → `{parts: [{part, lines: [줄|null ×3]} ×4], overflow}`: 줄을 머리 → 몸통 → 팔 → 다리 순으로, 같은 옵션은
+  되도록 서로 다른 부위에 놓는다. **화면에 놓을 자리를 정하는 것일 뿐이다** — 실제로 어느 부위에 붙었는지는 계정 정보에 없다.
+- `overloadFromParts(parts)` → `{overload, lines, count, problems, notes}`: 옵션 9종을 모두 적은 `overload`(줄이 없는 옵션은 `[]` —
+  적지 않은 옵션이 계정의 값으로 남지 않게). `problems`(모르는 옵션 · 레벨 범위 밖 · 한 부위에 네 줄 이상)가 있으면 계산하지 않고,
+  같은 부위에 같은 옵션이 두 줄이면 `notes`로 알리기만 한다(게임에서 되는 조합인지 확인하지 못했다 — 계산은 한다).
+- `tryOverload`는 `{nikke, set: {overload}}` 후보 하나를 `compareGrowth`에 넘긴다(엔진 요청 2건 — 기준과 바꾼 것).
+
+```jsonc
+{
+  "schema_version": 1, "kind": "overload_trial", "generated_at": "…",
+  "key": "…",                       // 편성·상대·니케·옵션별 줄 레벨(overloadTrialKey) — 화면이 「지금 고른 것의 결과인가」를 견준다
+  "nikke": "헬름",
+  "status": "computed",             // computed · same(지금 계정의 옵션과 같다 — 표기만 다른 것 포함) · failed(계산하지 못함 — 0이 아니다)
+  "before": { "status": "lines", "options": [ { "id": "atk_pct", "name": "공격력", "levels": [10, 10] } ], "count": 4 },
+  "after":  { "options": [ { "id": "atk_pct", "name": "공격력", "levels": [15, 10, 10] } ], "count": 5 },
+  "total_before": 0, "total_after": 0, "gain": 0, "gain_rate": 0.0123,   // failed면 total_after·gain·gain_rate가 null
+  "members": [ { "name": "…", "damage": 0, "share": 0.2, "gain": 0 } ],
+  "reason": null, "notes": [], "assumptions": [], "engine": { }, "cache": { },
+  "caveats": ["계정은 바뀌지 않는다 — 여기서만 바꿔 본 값이다.", "…"]
+}
+```
+
+장비의 등급·강화는 그대로 두고 옵션만 바꾼다. 옵션을 얻는 데 드는 재화와 확률은 모른다.
+
+### 큐브 — `compareCubes({account, opponent, members}, {limit, only})`
+
+**엔진은 요청으로 큐브를 바꿔 받는다**: 육성 프로필의 니케 항목 `cube`(이름 또는 `{name, level}` — `vendor/nikke-calc/docs/SIM-JSON.md`
+§육성·§니케별 운용 `cube`). 적지 않으면 전원 기본 스펙 큐브다(`runner/spec.py` `DEFAULT_CHAR["cube"]` — 렐릭 베어 큐브 Lv.15, 미육성
+프로필에서도 같다: 큐브는 「육성이 아니라 케이스가 정하는 축」이라 미육성 값에 없다). 모르는 이름과 효과 모델이 없는 큐브는 엔진이
+오류로 끊는다(`spec.check_cube()`). 계정 상태의 `cube` 칸(§계정 상태)이 그대로 프로필에 실린다.
+
+- **카탈로그의 `cubes`**: 런타임의 카탈로그(`loadCatalog` · Rust `engine_catalog`)에 큐브 목록이 실린다 —
+  엔진의 `data/base_stat_tables/cube.json`을 `cubeCatalogFrom`으로 줄인 것이다(Rust는 `engine.rs`의 `cube_catalog` — 같은 규칙, 같은 값):
+  `[{name, skill, effect, max_level, supported}]`. `_`로 시작하는 키와 `공통`(어떤 큐브를 껴도 붙는 두 번째 효과)은 큐브가 아니다.
+  `supported: false`는 표에 `unsupported`로 적힌 큐브다(지금 2종). 큐브 표를 읽지 못하면 `cubes`는 `null`이고 큐브 비교는
+  「큐브 목록이 없다」로 끝난다(지어내지 않는다).
+- `currentCube(니케 항목)`: 계정에 적혀 있으면 그것(`source: "account"`), 없으면 엔진의 기본 큐브(`source: "default"` —
+  `ENGINE_DEFAULT_CUBE`. 통합 테스트가 「기본 큐브를 직접 적은 값 = 적지 않은 값」으로 엔진과 대조한다). 계정을 받을 때 니케별 큐브는
+  옮기지 않는다(엔진 문서 `HARNESS.md` — 「API가 장착 중인 것만 준다」) — 그래서 받은 계정은 전원 기본 큐브로 계산된다.
+- 후보(`cubeCandidates`): 엔진이 효과를 계산하는 큐브 가운데 지금 낀 것이 아닌 것. **레벨은 지금 큐브의 레벨로 맞춘다**(그 큐브의
+  최대 레벨을 넘지 않게) — 큐브의 종류만 견준다. 순서는 큐브(표의 순서) → 자리 순서이고, `limit`(기본 80 — 다섯 명 × 15종 = 75건이
+  다 들어간다)에 걸리면 큐브를 통째로 뒤에서부터 뺀다(니케마다 같은 큐브들을 견준다).
+- 「이 편성에 맞는 큐브」(`recommendation`): 니케마다 총딜이 가장 컸던 큐브(지금 큐브보다 느는 것이 없으면 지금 그대로). 둘 이상이
+  바뀌면 **함께 끼운 것을 한 번 더 계산한다**(엔진 요청 1건) — 각각의 합으로 어림하지 않는다. 모든 조합을 본 것은 아니다.
+
+```jsonc
+{
+  "schema_version": 1, "kind": "cube_report", "generated_at": "…", "key": "…", "only": null,
+  "account": { }, "opponent": { }, "members": ["…"], "baseline": { "total_damage": 0, "members": [ ] },
+  "nikkes": [ { "nikke": "헬름",
+                "current": { "name": "렐릭 베어 큐브", "level": 15, "source": "default", "owned_level": null },
+                "rows": [ { "cube": "렐릭 퀀텀 큐브", "level": 15, "total_damage": 0, "gain": 0, "change": 0.021,
+                            "owned_level": null, "engine_warnings": [] } ],            // 총딜이 큰 순
+                "best": { "cube": "렐릭 퀀텀 큐브", "level": 15, "change": 0.021 } } ],  // 지금보다 나은 것이 없으면 null
+  "recommendation": { "picks": [ { "nikke": "헬름", "cube": "렐릭 퀀텀 큐브", "level": 15, "changed": true, "alone_change": 0.021, "owned_level": null } ],
+                      "status": "computed",          // computed · unchanged(바꿀 것이 없다) · failed(함께 끼운 것을 계산하지 못했다)
+                      "total_damage": 0, "gain": 0, "gain_rate": 0.03, "reason": null },
+  "failed": [ { "nikke": "…", "cube": "…", "reason": "…" } ],
+  "skipped_cubes": [], "unsupported": ["렐릭 힐링 큐브", "렐릭 어시스터 큐브"],
+  "candidates": { "total": 75, "limit": 80, "computed": 75, "failed": 0, "skipped": 0 },
+  "assumptions": [], "engine": { }, "cache": { },
+  "caveats": ["보유 큐브는 모른다 — …", "…"]
+}
+```
+
+- `owned_level`: 계정의 `account.cubes`(계정을 받을 때 끼고 있던 큐브에서 본 레벨 — 하한)에 그 큐브가 있으면 그 값, 없으면 `null`
+  (없다는 뜻이 아니라 **모른다**는 뜻이다).
+- 한계: 추천한 큐브를 갖고 있는지·몇 레벨인지 모른다, 같은 레벨로 견줬다, 한 큐브를 몇 명이 함께 낄 수 있는지 모른다(같은 큐브가
+  여러 니케에게 추천될 수 있다).
+
 ## 시뮬 결과 캐시 — `src/core/cache.mjs`
 
 엔진 시뮬 1회가 4~5초라서, 같은 엔진 판·같은 요청의 결과는 다시 계산하지 않는다. `withCache(runtime, store)`가

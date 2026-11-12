@@ -112,7 +112,8 @@ watch(owned, (names) => {
 });
 
 const key = computed(() => deckKey(slots.value, opponentKey.value));
-watch(key, () => rememberWorking(slots.value, opponentKey.value));
+// 짜던 편성을 기억한다. 앱 안에서는 내 편성의 상태가 맡는다 — 육성 효율 화면이 「덱 빌더의 지금 편성」으로 읽는다.
+watch(key, () => (decks ? decks.setWorking(slots.value, opponentKey.value) : rememberWorking(slots.value, opponentKey.value)));
 const members = computed(() => slots.value.filter((m): m is string => m !== null));
 const full = computed(() => members.value.length === slots.value.length);
 const burst = computed(() => burstCheck(slots.value, catalog.value));
