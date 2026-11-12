@@ -1,0 +1,109 @@
+{
+  "started_at": "2026-11-12T05:27:40.647Z",
+  "model": "claude-fable-5-2",
+  "agent_command": "claude -p --model claude-fable-5-2 --effort {effort} --permission-mode acceptEdits --allowedTools Bash(node *) Bash(npm *) Bash(python *) Bash(git status*) Bash(git diff*) Bash(git log*) Bash(rustc *) Bash(npx *) Bash(cargo *) --output-format json",
+  "limits": {
+    "max_iterations": 2,
+    "max_minutes": 240
+  },
+  "head_at_start": "ef7e65a04b7438c8cfa91b727ef7407d6166ba77",
+  "git_status_at_start": [],
+  "iterations": [
+    {
+      "task": "P-020",
+      "attempt": 1,
+      "resumed": false,
+      "run": ".harness/runs/20261112T052740-P-020-a1",
+      "agent": {
+        "ok": true,
+        "effort": "high",
+        "exit_code": 0,
+        "signal": null,
+        "duration_ms": 2051728,
+        "result": {
+          "is_error": false,
+          "error": null,
+          "num_turns": 108,
+          "total_cost_usd": 12.660103999999999,
+          "models": [
+            "claude-fable-5-2"
+          ],
+          "session_id": "7a2460d2-c5af-418b-b570-3d61ef3fd728"
+        }
+      },
+      "verify": {
+        "passed": true,
+        "reason": null,
+        "tree": "d8f35c29d0ffcbcb1d5447422dd6fade90c74a33"
+      },
+      "commit": "22c66d0a770d373fe289c32d6a8b89785db1227b",
+      "outcome": "verified"
+    },
+    {
+      "task": "P-021",
+      "attempt": 1,
+      "resumed": false,
+      "run": ".harness/runs/20261112T060326-P-021-a1",
+      "agent": {
+        "ok": true,
+        "effort": "high",
+        "exit_code": 0,
+        "signal": null,
+        "duration_ms": 3219484,
+        "result": {
+          "is_error": false,
+          "error": null,
+          "num_turns": 235,
+          "total_cost_usd": 22.320908400000004,
+          "models": [
+            "claude-fable-5-2"
+          ],
+          "session_id": "14cc3521-ee21-4b88-9098-f6aefea1b4a2"
+        }
+      },
+      "verify": {
+        "passed": true,
+        "reason": null,
+        "tree": "23874ee9d5b99fff46dfdbc17810edc7cbb8213e"
+      },
+      "commit": "e2bc9c7a93ea09848d7290b8e513930b5d038832",
+      "outcome": "verified"
+    }
+  ],
+  "stop_reason": "한도 도달: 반복 2회",
+  "finished_at": "2026-11-12T06:57:50.027Z",
+  "head_at_end": "e2bc9c7a93ea09848d7290b8e513930b5d038832",
+  "tasks": {
+    "done": [
+      "H-001",
+      "P-001",
+      "P-002",
+      "P-003",
+      "P-004",
+      "H-002",
+      "P-005",
+      "P-006",
+      "P-007",
+      "P-008",
+      "P-009",
+      "P-010",
+      "P-011",
+      "P-012",
+      "P-013",
+      "P-016",
+      "P-015",
+      "P-018",
+      "P-019",
+      "P-017",
+      "P-020",
+      "P-021"
+    ],
+    "pending": [
+      "P-023",
+      "P-022"
+    ],
+    "blocked": [
+      "P-014"
+    ]
+  }
+}
