@@ -183,6 +183,13 @@ const conditionCount = computed(() => {
       />
       <StatusPill v-if="dataKind" :label="dataKind.label" :tone="dataKind.tone" solid data-testid="data-kind" />
       <StatusPill v-if="report.bundle?.is_test_data" label="검증용 보스 정보" tone="test" solid data-testid="bundle-kind" />
+      <StatusPill
+        v-if="report.excluded"
+        :label="`${report.excluded.label} ${report.excluded.count}명 제외`"
+        tone="unknown"
+        :detail="report.excluded.text"
+        data-testid="excluded-pill"
+      />
       <span class="result__account" data-testid="account-name">{{ report.account?.name ?? '(이름 없음)' }}</span>
       <span v-if="generated" class="result__time" data-testid="generated-at">계산 {{ generated }}</span>
     </div>

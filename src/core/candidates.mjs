@@ -4,6 +4,7 @@
 // 형식 설명은 docs/data-model.md §후보 생성·§배치 탐색.
 import { validateAccount, unconfirmedFields } from './account.mjs';
 import { compareSquads, InputError, SQUAD_SIZE } from './compare.mjs';
+import { excludeNikkes, isExcludeList } from './exclude.mjs';
 import { engineAccess } from './runtime.mjs';
 import { DEFAULT_BUDGET, DEFAULT_REFINE_TOP, pickBestPlacement, planRefinement, variantName } from './search.mjs';
 
@@ -387,10 +388,15 @@ function mergeCacheStats(first, second) {
  *   `refine`(기본 true)을 끄면 1단계만 한다. `budget` 기본 120, `refineTop` 기본 5.
  *   `priorityElement`·`priorityMin`은 generateCandidates에 그대로 넘긴다(우선 속성 — 주지 않으면 결과가 종전과 같다).
  *   우선 속성이 있으면 1단계는 그 후보 순서대로 예산을 쓴다 — 예산이 모자라도 우선 속성 니케가 든 후보가 먼저 잘리지 않는다.
+ *   `exclude`(니케 이름의 목록 — P-033의 「안 씀」)를 주면 그 니케들을 뺀 계정으로 후보를 만들고, 실제로 뺀 것이 있으면
+ *   결과에 `excluded`(누구를 몇 명 — exclude.mjs)와 caveats 한 줄이 남는다. 주지 않거나 뺀 것이 없으면 결과가 종전과 같다.
  * @param {object} [deps] compareSquads와 같다. 더해서 `onStage({stage, stages, requests, used, budget})` —
  *   엔진 배치를 맡기기 직전에 부른다(진행 표시용. `used`는 그 전까지 쓴 시뮬 횟수)
  */
-export async function suggestSquads({ account, condition }, options = {}, deps = {}) {
+export async function suggestSquads({ account: given, condition }, options = {}, deps = {}) {
+  if (options.exclude !== undefined && !isExcludeList(options.exclude)) {
+    throw new InputError('추천 옵션이 잘못됐다', [{ path: '/exclude', message: 'exclude는 니케 이름의 목록이어야 한다' }]);
+  }
   const top = options.top ?? DEFAULT_TOP;
   if (!isPositiveInt(top)) throw new InputError('추천 옵션이 잘못됐다', [{ path: '/top', message: 'top은 1 이상의 정수여야 한다' }]);
   const refine = options.refine ?? true;
@@ -401,8 +407,11 @@ export async function suggestSquads({ account, condition }, options = {}, deps =
   if (!isPositiveInt(refineTop)) throw new InputError('추천 옵션이 잘못됐다', [{ path: '/refineTop', message: 'refineTop은 1 이상의 정수여야 한다' }]);
 
   const catalog = await engineAccess(deps).catalog();
-  const a = validateAccount(account, catalog);
+  const a = validateAccount(given, catalog);
   if (!a.ok) throw new InputError('계정 상태가 잘못됐다', a.errors);
+  // 뺄 니케(「안 씀」)가 있으면 그 니케들이 없는 계정으로 후보를 만들고 계산한다. 받은 계정은 바꾸지 않는다.
+  const cut = excludeNikkes(given, options.exclude ?? []);
+  const account = cut.account;
 
   const generated = generateCandidates(account, catalog, options);
   if (generated.squads.length === 0) {
@@ -505,5 +514,10 @@ export async function suggestSquads({ account, condition }, options = {}, deps =
       ? `후보 ${simulated}개를 계산해 총딜 상위 ${report.ranking.length}개만 표시한다.`
       : `계산한 후보 ${simulated}개를 모두 표시한다.`,
   ];
+  // 뺐다는 사실을 결과에 남긴다(뺀 것이 없으면 아무 칸도 더하지 않는다).
+  if (cut.excluded) {
+    report.excluded = cut.excluded;
+    report.caveats.push(cut.excluded.text);
+  }
   return report;
 }

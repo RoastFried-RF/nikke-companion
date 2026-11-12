@@ -45,6 +45,13 @@ const made = computed(() => {
       <StatusPill label="추정 · 실전 미대조" tone="estimate" detail="수치는 계산으로 어림한 값이다. 실제 전투 기록과 맞춰 본 적이 없다." data-testid="estimate-pill" />
       <StatusPill v-if="dataKind" :label="dataKind.label" :tone="dataKind.tone" solid data-testid="data-kind" />
       <StatusPill v-if="dropped" :label="`계산하지 못한 편성 ${dropped}개`" tone="unknown" data-testid="dropped-pill" />
+      <StatusPill
+        v-if="report.excluded"
+        :label="`${report.excluded.label} ${report.excluded.count}명 제외`"
+        tone="unknown"
+        :detail="report.excluded.text"
+        data-testid="excluded-pill"
+      />
       <span class="board__account" data-testid="account-name">{{ report.account?.name ?? '(이름 없음)' }}</span>
       <span v-if="generated" class="board__time" data-testid="generated-at">계산 {{ generated }}</span>
     </div>

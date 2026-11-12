@@ -50,6 +50,9 @@ export function shellMocks(): Record<string, ReturnType<typeof vi.fn>> {
     'loadDecks',
     'saveDecks',
     'copyText',
+    // 계정 여러 개·도구 링크(P-033): 계정을 목록에서 숨기기와 다시 보이기, 목록의 도구를 기본 브라우저로 열기.
+    'setAccountHidden',
+    'openToolLink',
   ];
   return Object.fromEntries(names.map((name) => [name, vi.fn()]));
 }
@@ -108,9 +111,16 @@ export class FakeDisk {
   /** 사용자가 고른 기본 계정(상태 파일). */
   chosen: string | null = null;
   launch: OverlayLaunch = 'with_app';
-  intercept: unknown | null = null;
-  interceptSavedAt: string | null = null;
+  /** 목록에서 숨긴 계정(상태 파일 — P-033). 파일은 그대로다. */
+  hidden = new Set<string>();
+  /**
+   * 계정마다 따로 두는 마지막 요격전 결과(`<계정>.intercept.json` — P-033). 열쇠 ''는 계정이 정해지지 않았을 때의
+   * 한 자리(`.last-intercept.json`)다 — 지금 쓰는 계정에 제 결과가 없으면 그 자리의 것을 그 계정의 것으로 옮긴다(Rust의 규칙).
+   */
+  intercepts = new Map<string, { doc: unknown; savedAt: string }>();
   problems: string[] = [];
+  /** 기본 브라우저로 연 도구의 id(연 순서대로). 실제로 여는 것은 없다. */
+  opened: string[] = [];
   /** 계정마다 둔 요격전 계획(`<계정>.plan.json` — 기록·즐겨찾기). */
   plans = new Map<string, unknown>();
   /** 계정마다 둔 내 편성(`<계정>.decks.json` — 번호 칸 다섯과 이름 붙인 목록). */
@@ -131,19 +141,65 @@ export class FakeDisk {
     this.accounts.set(name, { doc, modified_at: this.now() });
   }
 
-  /** Rust의 규칙: 고른 계정이 아직 있으면 그것, 아니면 계정이 하나뿐일 때 그것. */
+  /** 목록에 보이는 계정의 이름(숨긴 것은 빠진다). */
+  shown(): string[] {
+    return [...this.accounts.keys()].filter((n) => !this.hidden.has(n));
+  }
+
+  /** Rust의 규칙: 고른 계정이 아직 있으면(숨기지 않았으면) 그것, 아니면 보이는 계정이 하나뿐일 때 그것. */
   effective(): { name: string | null; remembered: boolean } {
-    if (this.chosen && this.accounts.has(this.chosen)) return { name: this.chosen, remembered: true };
-    if (this.accounts.size === 1) return { name: [...this.accounts.keys()][0], remembered: false };
+    const shown = this.shown();
+    if (this.chosen && shown.includes(this.chosen)) return { name: this.chosen, remembered: true };
+    if (shown.length === 1) return { name: shown[0], remembered: false };
     return { name: null, remembered: false };
+  }
+
+  /** 지금 쓰는 계정의 결과 자리. 그 계정에 제 결과가 없고 예전의 한 자리에 결과가 있으면 옮긴다(Rust의 adopt_legacy_intercept). */
+  private slot(): string {
+    const name = this.effective().name ?? '';
+    if (name && !this.intercepts.has(name) && this.intercepts.has('')) {
+      this.intercepts.set(name, this.intercepts.get('')!);
+      this.intercepts.delete('');
+    }
+    return name;
+  }
+
+  /** 지금 쓰는 계정의 마지막 요격전 결과(없으면 null). */
+  get intercept(): unknown | null {
+    return this.intercepts.get(this.slot())?.doc ?? null;
+  }
+
+  set intercept(doc: unknown | null) {
+    const slot = this.slot();
+    if (doc === null) this.intercepts.delete(slot);
+    else this.intercepts.set(slot, { doc, savedAt: this.intercepts.get(slot)?.savedAt ?? this.now() });
+  }
+
+  /** 그 결과를 저장한 시각. */
+  get interceptSavedAt(): string | null {
+    return this.intercepts.get(this.slot())?.savedAt ?? null;
+  }
+
+  set interceptSavedAt(at: string | null) {
+    const found = this.intercepts.get(this.slot());
+    if (found && at !== null) found.savedAt = at;
+  }
+
+  /** 그 계정의 결과를 저장한다(이름을 주지 않으면 지금 쓰는 계정 — Rust의 save_intercept_for). */
+  saveIntercept(report: unknown, name: string | null = null): void {
+    if (name !== null && !this.accounts.has(name)) throw `'${name}' 계정을 찾을 수 없다. 설정의 계정 연결에서 계정을 새로 받아라`;
+    this.intercepts.set(name ?? this.slot(), { doc: structuredClone(report), savedAt: this.now() });
   }
 
   snapshot(): SharedSnapshot {
     const { name, remembered } = this.effective();
+    const entries = [...this.accounts.entries()].map(([n, a]) => ({ name: n, modified_at: a.modified_at })).sort((a, b) => a.name.localeCompare(b.name));
     return {
       default_account: name,
       remembered,
-      accounts: [...this.accounts.entries()].map(([n, a]) => ({ name: n, modified_at: a.modified_at })).sort((a, b) => a.name.localeCompare(b.name)),
+      accounts: entries.filter((a) => !this.hidden.has(a.name)),
+      hidden_accounts: entries.filter((a) => this.hidden.has(a.name)),
+      accounts_location: 'C:\\가짜\\계정 폴더',
       overlay_launch: this.launch,
       intercept_saved_at: this.interceptSavedAt,
       problems: [...this.problems],
@@ -159,8 +215,7 @@ export class FakeDisk {
 
   /** 다른 창(또는 앞선 실행)이 결과를 저장한 것처럼 디스크에 둔다. `announce`면 알림도 보낸다. */
   putIntercept(report: unknown, announce = false): void {
-    this.intercept = structuredClone(report);
-    this.interceptSavedAt = this.now();
+    this.saveIntercept(report);
     if (announce) this.emit();
   }
 }
@@ -191,8 +246,27 @@ export function installShell(api: Api, disk: FakeDisk = new FakeDisk()): FakeDis
   });
   api.setDefaultAccount.mockImplementation(async (name: string) => {
     if (!disk.accounts.has(name)) throw `'${name}' 계정을 찾을 수 없다. 설정의 계정 연결에서 계정을 새로 받아라`;
+    // 숨겨 둔 계정을 고르면 다시 보인다(Rust의 set_default_account).
+    disk.hidden.delete(name);
     disk.chosen = name;
     return disk.emit();
+  });
+  // 계정 숨기기(P-033): Rust의 set_account_hidden — 파일은 그대로 두고 목록에서만 뺀다. 지금 쓰는 계정을 숨기면 고른 것이 없어진다.
+  api.setAccountHidden.mockImplementation(async (name: string, hidden: boolean) => {
+    if (!disk.accounts.has(name)) throw `'${name}' 계정을 찾을 수 없다. 설정의 계정 연결에서 계정을 새로 받아라`;
+    if (hidden) {
+      disk.hidden.add(name);
+      if (disk.chosen === name) disk.chosen = null;
+    } else {
+      disk.hidden.delete(name);
+    }
+    return disk.emit();
+  });
+  // 도구 링크(P-033): Rust의 open_tool_link — 목록의 id만 받는다. 실제로 여는 것은 없고 불린 id만 적는다.
+  api.openToolLink.mockImplementation(async (id: string) => {
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(id)) throw '목록에 없는 도구다 — 열지 않았다';
+    disk.opened.push(id);
+    return { id, name: id, url: `https://${id}.example/` };
   });
   api.setOverlayLaunch.mockImplementation(async (mode: OverlayLaunch) => {
     disk.launch = mode;
@@ -205,12 +279,12 @@ export function installShell(api: Api, disk: FakeDisk = new FakeDisk()): FakeDis
     if (!found) throw `'${target}' 계정을 찾을 수 없다. 설정의 계정 연결에서 계정을 새로 받아라`;
     return { name: target, modified_at: found.modified_at, account: structuredClone(found.doc) } as never;
   });
-  api.saveInterceptResult.mockImplementation(async (report) => {
+  api.saveInterceptResult.mockImplementation(async (report, name: string | null = null) => {
     const doc = report as unknown as { kind?: unknown; schema_version?: unknown };
     if (doc.kind !== 'intercept_report') throw `요격전 추천 결과가 아니다(종류: ${String(doc.kind ?? '없음')}). 앞서 저장한 결과는 그대로 둔다`;
     if (doc.schema_version !== 1) throw `요격전 추천 결과의 판이 다르다(받은 것 ${String(doc.schema_version)}, 이 앱이 읽는 판 1). 앞서 저장한 결과는 그대로 둔다`;
-    disk.intercept = structuredClone(report);
-    disk.interceptSavedAt = disk.now();
+    // 결과는 계정마다 따로다(P-033): 이름을 주면 그 계정의 것으로, 아니면 지금 쓰는 계정의 것으로 둔다.
+    disk.saveIntercept(report, name);
     return disk.emit();
   });
   api.loadInterceptResult.mockImplementation(async () => (disk.intercept === null ? null : structuredClone(disk.intercept)));
@@ -226,10 +300,12 @@ export function installShell(api: Api, disk: FakeDisk = new FakeDisk()): FakeDis
     return found === undefined ? null : structuredClone(found);
   });
   api.savePlan.mockImplementation(async (name: string | null, plan) => {
-    const doc = plan as unknown as { kind?: unknown; schema_version?: unknown; favorites?: unknown; records?: unknown };
+    const doc = plan as unknown as { kind?: unknown; schema_version?: unknown; favorites?: unknown; records?: unknown; unused?: unknown; rewards?: unknown };
     if (doc.kind !== 'intercept_plan' || doc.schema_version !== 1 || !Array.isArray(doc.favorites) || !Array.isArray(doc.records)) {
       throw '요격전 기록이 아니다(종류가 다르다). 앞서 저장한 기록은 그대로 둔다';
     }
+    // P-033이 더한 칸 둘은 없어도 되지만, 있으면 목록이어야 한다.
+    for (const list of [doc.unused, doc.rewards]) if (list !== undefined && !Array.isArray(list)) throw '요격전 기록이 아니다(목록 칸의 모양이 다르다). 앞서 저장한 기록은 그대로 둔다';
     disk.plans.set(planAccount(name), structuredClone(plan));
   });
 
@@ -293,7 +369,7 @@ async function click(w: Wrapper, testid: string): Promise<void> {
 }
 
 export type PageKey = 'home' | 'intercept' | 'roster' | 'tools' | 'tier' | 'settings';
-export type SectionKey = 'account' | 'overlay' | 'engine' | 'advanced';
+export type SectionKey = 'account' | 'overlay' | 'engine' | 'links' | 'advanced';
 /** 예전 오버레이의 탭 이름. 지금은 설정 아래에 있다: 추천·비교/요격전/성장/티어 → 고급의 탭, 계정 → 계정 연결. */
 export type LegacyTab = 'compare' | 'intercept' | 'growth' | 'tier' | 'account';
 

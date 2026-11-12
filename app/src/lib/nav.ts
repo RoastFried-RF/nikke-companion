@@ -20,6 +20,8 @@ export const SETTINGS_SECTIONS = [
   { key: 'account', label: '계정 연결' },
   { key: 'overlay', label: '오버레이' },
   { key: 'engine', label: '계산 도구' },
+  // P-033: 커뮤니티 도구 목록(누르면 기본 브라우저로 연다)과 이 앱이 하지 않는 것.
+  { key: 'links', label: '다른 도구' },
   { key: 'advanced', label: '고급' },
 ] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]['key'];
@@ -32,6 +34,13 @@ export const ADVANCED_TABS = [
   { key: 'tier', label: '티어' },
 ] as const;
 export type AdvancedTab = (typeof ADVANCED_TABS)[number]['key'];
+
+/** 요격전 화면의 보기(P-033): 추천 편성 · 기록장(모듈 기록과 요격전 기록). */
+export const INTERCEPT_VIEWS = [
+  { key: 'recommend', label: '추천' },
+  { key: 'journal', label: '기록장' },
+] as const;
+export type InterceptView = (typeof INTERCEPT_VIEWS)[number]['key'];
 
 /** 편성 도구의 탭. */
 export const TOOL_TABS = [
@@ -76,8 +85,12 @@ export interface Nav {
   section: Ref<SettingsSection>;
   advanced: Ref<AdvancedTab>;
   tool: Ref<ToolTab>;
+  /** 요격전 화면의 보기(추천 · 기록장). 앱을 켜면 추천이다(기억하지 않는다). */
+  interceptView: Ref<InterceptView>;
   /** 화면을 옮기고 기억한다. */
   go(page: PageKey): void;
+  /** 요격전 화면을 그 보기로 연다(주지 않으면 추천 — 보스의 추천을 보러 가는 길들이 쓴다). */
+  openIntercept(view?: InterceptView): void;
   /** 설정 화면의 그 구획을 연다. */
   openSettings(section: SettingsSection): void;
   /** 설정 > 고급의 그 탭을 연다. */
@@ -94,6 +107,7 @@ export function createNav(): Nav {
   const section = ref<SettingsSection>(pick(SETTINGS_SECTIONS, recall(LAST_SECTION), 'account'));
   const advanced = ref<AdvancedTab>(pick(ADVANCED_TABS, recall(LAST_ADVANCED), 'compare'));
   const tool = ref<ToolTab>(pick(TOOL_TABS, recall(LAST_TOOL), 'suggest'));
+  const interceptView = ref<InterceptView>('recommend');
 
   function go(next: PageKey): void {
     page.value = next;
@@ -112,7 +126,12 @@ export function createNav(): Nav {
     section,
     advanced,
     tool,
+    interceptView,
     go,
+    openIntercept(next = 'recommend') {
+      interceptView.value = next;
+      go('intercept');
+    },
     openSettings(next) {
       setSection(next);
       go('settings');

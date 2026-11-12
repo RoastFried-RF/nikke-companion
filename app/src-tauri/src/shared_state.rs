@@ -4,10 +4,13 @@
 //!   열쇠다(`account_sync::validate_name`을 통과한 이름의 `<계정 폴더>/<이름>.json`만 읽는다).
 //! - **오버레이를 언제 띄우는가**: 앱과 함께 / 게임을 찾았을 때 / 띄우지 않음.
 //! - **마지막 요격전 추천 결과**: 앱 창이 계산을 끝내면 여기에 쓰고, 오버레이 창이 읽는다. 앱을 다시 켜도 남아 있다.
+//!   **계정마다 따로 둔다**(P-033 — `<계정>.intercept.json`): 계정을 바꾸면 그 계정의 결과가 보인다.
+//! - **숨긴 계정**(P-033): 계정을 목록에서 숨긴다 — **파일은 지우지 않는다**(이 모듈에는 지우는 코드가 없다).
 //!
-//! 파일은 둘이다(계정 폴더는 gitignore — 개인 계정 데이터가 저장소에 올라가지 않는다):
-//! `.companion-state.json`(기본 계정·오버레이 설정)과 `.last-intercept.json`(마지막 요격전 결과). 이름에 점이 있어
-//! 계정 이름(점을 받지 않는다)과 겹치지 않는다.
+//! 파일(계정 폴더는 gitignore — 개인 계정 데이터가 저장소에 올라가지 않는다):
+//! `.companion-state.json`(기본 계정·숨긴 계정·오버레이 설정), `<계정>.intercept.json`(그 계정의 마지막 요격전 결과),
+//! `.last-intercept.json`(계정이 정해지지 않았을 때의 결과 자리 — P-033 전에는 결과가 여기 하나뿐이었다. 지금 쓰는 계정에
+//! 제 결과가 아직 없으면 이것을 그 계정의 것으로 옮긴다). 이름에 점이 더 있어 계정 이름(점을 받지 않는다)과 겹치지 않는다.
 //!
 //! 형식 검사에 실패한 결과(다른 종류·다른 판)는 쓰지 않고 한국어로 알린다 — 앞서 저장한 것은 그대로다.
 //! 이 모듈은 창·이벤트를 모른다(파일만 다룬다). 네트워크를 쓰지 않는다.
@@ -25,8 +28,10 @@ use crate::capture::Stamp;
 
 /// 기본 계정·오버레이 설정을 두는 파일(계정 폴더 안).
 pub const STATE_FILE: &str = ".companion-state.json";
-/// 마지막 요격전 추천 결과를 두는 파일(계정 폴더 안).
+/// 마지막 요격전 추천 결과를 두는 파일(계정 폴더 안) — 지금 쓰는 계정이 정해지지 않았을 때의 자리다.
 pub const INTERCEPT_FILE: &str = ".last-intercept.json";
+/// 계정마다 두는 요격전 추천 결과의 꼬리: `<계정 이름>.intercept.json`(P-033). 이름에 점이 더 있어 계정 목록에 들지 않는다.
+pub const INTERCEPT_SUFFIX: &str = ".intercept.json";
 /// 상태 파일의 판.
 pub const STATE_SCHEMA_VERSION: u64 = 1;
 /// 상태 파일의 종류.
@@ -162,8 +167,13 @@ pub struct SharedSnapshot {
     pub default_account: Option<String>,
     /// 사용자가 고른 것인가(아니면 계정이 하나뿐이라 그것을 쓰는 것이다).
     pub remembered: bool,
-    /// 계정 폴더의 계정들(이름순).
+    /// 계정 폴더의 계정들(이름순) — 목록에서 숨긴 것은 빠진다.
     pub accounts: Vec<AccountEntry>,
+    /// 목록에서 숨긴 계정들(이름순). 파일은 그대로 있다 — 다시 보이게 할 수 있다.
+    pub hidden_accounts: Vec<AccountEntry>,
+    /// 계정 폴더의 위치(사람이 읽는 글자). 계정을 완전히 지우려는 사람에게 어디에 있는지 알려 주는 데만 쓴다 —
+    /// 화면이 이 글자로 무엇을 읽거나 쓸 수는 없다(명령은 폴더·파일 이름을 받지 않는다).
+    pub accounts_location: String,
     /// 오버레이를 언제 띄우는가(`with_app`·`with_game`·`manual`).
     pub overlay_launch: OverlayLaunch,
     /// 마지막 요격전 결과를 저장한 시각(ISO, UTC). 없으면 `None`.
@@ -177,6 +187,8 @@ pub struct SharedSnapshot {
 pub struct StoredState {
     pub default_account: Option<String>,
     pub overlay_launch: OverlayLaunch,
+    /// 목록에서 숨긴 계정의 이름(이름순, 겹치지 않는다).
+    pub hidden: Vec<String>,
 }
 
 fn iso(time: SystemTime) -> Option<String> {
@@ -289,10 +301,24 @@ pub fn read_state(dir: &Path) -> (StoredState, Option<String>) {
         .and_then(Value::as_str)
         .and_then(OverlayLaunch::parse)
         .unwrap_or_default();
+    // 숨긴 계정: 계정 이름으로 쓸 수 있는 글자만 남긴다(P-033 전의 파일에는 이 칸이 없다 — 빈 목록이다).
+    let mut hidden: Vec<String> = doc
+        .get("hidden_accounts")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(Value::as_str)
+                .filter_map(|name| validate_name(name).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    hidden.sort();
+    hidden.dedup();
     (
         StoredState {
             default_account,
             overlay_launch,
+            hidden,
         },
         None,
     )
@@ -305,6 +331,7 @@ pub fn write_state(dir: &Path, state: &StoredState) -> Result<(), SharedError> {
         "kind": STATE_KIND,
         "default_account": state.default_account,
         "overlay_launch": state.overlay_launch.key(),
+        "hidden_accounts": state.hidden,
     });
     write_json(dir, STATE_FILE, &doc, "앱 설정")
 }
@@ -323,29 +350,69 @@ pub fn effective_account(remembered: Option<&str>, accounts: &[AccountEntry]) ->
     }
 }
 
+/// 계정 목록을 보이는 것과 숨긴 것으로 나눈다. 숨긴 이름 가운데 파일이 없는 것은 어느 쪽에도 없다.
+fn split_hidden(all: Vec<AccountEntry>, hidden: &[String]) -> (Vec<AccountEntry>, Vec<AccountEntry>) {
+    all.into_iter().partition(|a| !hidden.contains(&a.name))
+}
+
+/// 지금 쓰는 계정(숨긴 계정은 쓰지 않는다). 정해지지 않았으면 `None`.
+fn current_account(dir: &Path) -> Option<String> {
+    let (state, _) = read_state(dir);
+    let (shown, _) = split_hidden(list_accounts(dir), &state.hidden);
+    effective_account(state.default_account.as_deref(), &shown).0
+}
+
 /// 공유 상태 한 벌.
 pub fn snapshot(dir: &Path) -> SharedSnapshot {
-    let accounts = list_accounts(dir);
     let (state, problem) = read_state(dir);
+    let (accounts, hidden_accounts) = split_hidden(list_accounts(dir), &state.hidden);
     let (default_account, remembered) = effective_account(state.default_account.as_deref(), &accounts);
+    // 결과를 저장한 시각은 지금 쓰는 계정의 것이다 — 계정을 바꾸면 이 값도 바뀐다(화면이 그 계정의 결과를 다시 읽는다).
+    let intercept_saved_at = modified_at(&dir.join(intercept_file(default_account.as_deref())));
     SharedSnapshot {
         default_account,
         remembered,
         accounts,
+        hidden_accounts,
+        accounts_location: dir.display().to_string(),
         overlay_launch: state.overlay_launch,
-        intercept_saved_at: modified_at(&dir.join(INTERCEPT_FILE)),
+        intercept_saved_at,
         problems: problem.into_iter().collect(),
     }
 }
 
-/// 기본 계정을 정한다. 그 이름의 계정이 있어야 한다.
+/// 기본 계정을 정한다. 그 이름의 계정이 있어야 한다. 숨겨 둔 계정이었으면 다시 보이게 한다(고른 계정이 목록에 없으면 안 된다).
 pub fn set_default_account(dir: &Path, name: &str) -> Result<SharedSnapshot, SharedError> {
     let name = checked_name(name)?;
     if !account_path(dir, &name).is_file() {
         return Err(SharedError::AccountMissing { name });
     }
     let (mut state, _) = read_state(dir);
+    state.hidden.retain(|n| n != &name);
     state.default_account = Some(name);
+    write_state(dir, &state)?;
+    Ok(snapshot(dir))
+}
+
+/// 계정을 목록에서 숨기거나 다시 보이게 한다(P-033). **파일은 건드리지 않는다** — 계정·기록·저장한 편성·결과가 그대로 남는다.
+/// 지금 쓰는 계정을 숨기면 고른 계정이 없어진다(남은 계정이 하나면 그것을 쓰고, 여럿이면 화면이 고르라고 알린다).
+/// 그 이름의 계정이 계정 폴더에 있어야 한다.
+pub fn set_account_hidden(dir: &Path, name: &str, hidden: bool) -> Result<SharedSnapshot, SharedError> {
+    let name = checked_name(name)?;
+    let all = list_accounts(dir);
+    if !all.iter().any(|a| a.name == name) {
+        return Err(SharedError::AccountMissing { name });
+    }
+    let (mut state, _) = read_state(dir);
+    // 파일이 없어진 계정의 이름은 이참에 뺀다.
+    state.hidden.retain(|n| n != &name && all.iter().any(|a| &a.name == n));
+    if hidden {
+        state.hidden.push(name.clone());
+        state.hidden.sort();
+        if state.default_account.as_deref() == Some(name.as_str()) {
+            state.default_account = None;
+        }
+    }
     write_state(dir, &state)?;
     Ok(snapshot(dir))
 }
@@ -425,17 +492,55 @@ pub fn check_intercept(doc: &Value) -> Result<(), SharedError> {
     Ok(())
 }
 
-/// 요격전 추천 결과를 저장한다. 모양이 맞지 않으면 쓰지 않는다 — 앞서 저장한 것이 그대로 남는다.
+/// 그 계정의 요격전 결과 파일 이름. 계정이 정해지지 않았으면 예전의 한 자리(`.last-intercept.json`)다.
+fn intercept_file(account: Option<&str>) -> String {
+    match account {
+        Some(name) => format!("{name}{INTERCEPT_SUFFIX}"),
+        None => INTERCEPT_FILE.to_string(),
+    }
+}
+
+/// 요격전 추천 결과를 지금 쓰는 계정의 것으로 저장한다(계정이 정해지지 않았으면 예전의 한 자리에).
+/// 모양이 맞지 않으면 쓰지 않는다 — 앞서 저장한 것이 그대로 남는다.
 pub fn save_intercept(dir: &Path, report: &Value) -> Result<SharedSnapshot, SharedError> {
     check_intercept(report)?;
-    write_json(dir, INTERCEPT_FILE, report, "요격전 추천 결과")?;
+    write_json(dir, &intercept_file(current_account(dir).as_deref()), report, "요격전 추천 결과")?;
     Ok(snapshot(dir))
 }
 
-/// 저장해 둔 요격전 추천 결과. 없으면 `None`. 읽을 수 없는 것(깨졌다·다른 종류·다른 판)은 한국어로 알린다
-/// (파일은 건드리지 않는다 — 다음 계산이 새로 쓴다).
+/// 요격전 추천 결과를 **그 계정의 것으로** 저장한다(P-033 — 계산을 시작할 때 쓰던 계정의 이름을 화면이 넘긴다. 계산하는
+/// 동안 지금 쓰는 계정이 바뀌어도 결과가 다른 계정의 것으로 남지 않는다). 이름을 주지 않으면 `save_intercept`와 같다.
+/// 그 이름의 계정이 계정 폴더에 있어야 한다(없는 계정의 결과를 만들지 않는다). 이름은 경로가 아니라 열쇠다.
+pub fn save_intercept_for(dir: &Path, name: Option<&str>, report: &Value) -> Result<SharedSnapshot, SharedError> {
+    let Some(name) = name.map(str::trim).filter(|n| !n.is_empty()) else {
+        return save_intercept(dir, report);
+    };
+    check_intercept(report)?;
+    let name = plan_account(dir, Some(name))?;
+    write_json(dir, &intercept_file(Some(&name)), report, "요격전 추천 결과")?;
+    Ok(snapshot(dir))
+}
+
+/// P-033 전에는 결과가 한 자리(`.last-intercept.json`)뿐이었다. 지금 쓰는 계정에 제 결과가 아직 없고 그 자리에 결과가
+/// 남아 있으면 이름을 바꿔 그 계정의 것으로 삼는다(한 번뿐이다 — 다른 계정으로 바꿨을 때 남의 결과가 보이지 않게).
+/// 어느 계정으로 계산한 것인지는 그 파일에 적혀 있지 않다 — 그때 쓰던 계정이 지금 쓰는 계정이라고 본 것이다.
+fn adopt_legacy_intercept(dir: &Path, account: &str) {
+    let own = dir.join(intercept_file(Some(account)));
+    let legacy = dir.join(INTERCEPT_FILE);
+    if !own.exists() && legacy.is_file() {
+        // 못 옮겨도 된다(그 계정의 결과가 아직 없는 것으로 보일 뿐이다).
+        let _ = fs::rename(&legacy, &own);
+    }
+}
+
+/// 지금 쓰는 계정의 요격전 추천 결과(계정이 정해지지 않았으면 예전의 한 자리). 없으면 `None`.
+/// 읽을 수 없는 것(깨졌다·다른 종류·다른 판)은 한국어로 알린다(파일은 건드리지 않는다 — 다음 계산이 새로 쓴다).
 pub fn load_intercept(dir: &Path) -> Result<Option<Value>, SharedError> {
-    let path = dir.join(INTERCEPT_FILE);
+    let account = current_account(dir);
+    if let Some(name) = account.as_deref() {
+        adopt_legacy_intercept(dir, name);
+    }
+    let path = dir.join(intercept_file(account.as_deref()));
     if !path.is_file() {
         return Ok(None);
     }
@@ -453,6 +558,8 @@ pub const PLAN_SCHEMA_VERSION: u64 = 1;
 pub const PLAN_SUFFIX: &str = ".plan.json";
 /// 받아 주는 기록·즐겨찾기의 수(화면의 계산 코드는 기록을 500건까지만 남긴다 — 그보다 넉넉히).
 pub const PLAN_MAX_ITEMS: usize = 2000;
+/// 없어도 되는 목록 칸(P-033): `unused`(「안 씀」으로 표시한 니케) · `rewards`(모듈 기록장 — 날짜별 보스·달성 단계·얻은 것).
+pub const PLAN_OPTIONAL_LISTS: [&str; 2] = ["unused", "rewards"];
 
 fn plan_file(name: &str) -> String {
     format!("{name}{PLAN_SUFFIX}")
@@ -488,6 +595,15 @@ pub fn check_plan(doc: &Value) -> Result<(), SharedError> {
             Some(list) if list.len() <= PLAN_MAX_ITEMS => {}
             Some(_) => return Err(wrong("항목이 너무 많다")),
             None => return Err(wrong("목록 칸이 없다")),
+        }
+    }
+    // P-033이 더한 칸 둘(「안 씀」 표시 · 모듈 기록장): 없어도 된다(예전 문서). 있으면 목록이어야 한다.
+    for field in PLAN_OPTIONAL_LISTS {
+        match obj.get(field) {
+            None => {}
+            Some(Value::Array(list)) if list.len() <= PLAN_MAX_ITEMS => {}
+            Some(Value::Array(_)) => return Err(wrong("항목이 너무 많다")),
+            Some(_) => return Err(wrong("목록 칸의 모양이 다르다")),
         }
     }
     Ok(())
@@ -996,9 +1112,242 @@ mod tests {
         let keys: Vec<&str> = value.as_object().unwrap().keys().map(String::as_str).collect();
         assert_eq!(
             keys,
-            ["default_account", "remembered", "accounts", "overlay_launch", "intercept_saved_at", "problems"]
+            [
+                "default_account",
+                "remembered",
+                "accounts",
+                "hidden_accounts",
+                "accounts_location",
+                "overlay_launch",
+                "intercept_saved_at",
+                "problems"
+            ]
         );
         assert_eq!(value["overlay_launch"], "with_app");
         assert_eq!(value["accounts"][0]["name"], "me");
+        assert_eq!(value["hidden_accounts"], json!([]));
+        // 계정들이 있는 곳은 사람이 읽는 글자다(계정을 완전히 지우려는 사람에게 알려 준다).
+        assert_eq!(value["accounts_location"], dir.0.display().to_string());
+    }
+
+    // ── P-033: 계정 여러 개 ─────────────────────────────────────────────────────
+
+    /// 계정 폴더의 파일 이름들(정렬).
+    fn files(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn hiding_an_account_takes_it_off_the_list_but_deletes_nothing() {
+        let dir = TempDir::new();
+        dir.account("main");
+        dir.account("sub");
+        set_default_account(&dir.0, "sub").unwrap();
+        save_plan(&dir.0, Some("sub"), &plan("부계의 기록")).unwrap();
+        save_decks(&dir.0, Some("sub"), &decks("부계의 편성")).unwrap();
+        save_intercept_for(&dir.0, Some("sub"), &report("부계의 추천")).unwrap();
+        let before = files(&dir.0);
+        let account_before = fs::read_to_string(dir.0.join("sub.json")).unwrap();
+
+        let snap = set_account_hidden(&dir.0, "sub", true).unwrap();
+        let shown: Vec<&str> = snap.accounts.iter().map(|a| a.name.as_str()).collect();
+        let hidden: Vec<&str> = snap.hidden_accounts.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(shown, ["main"]);
+        assert_eq!(hidden, ["sub"]);
+        // 지금 쓰던 계정을 숨기면 고른 것이 없어진다 — 남은 계정이 하나라 그것을 쓴다(사용자가 고른 것은 아니다).
+        assert_eq!(snap.default_account.as_deref(), Some("main"));
+        assert!(!snap.remembered);
+        // 파일은 하나도 지워지지 않았고 내용도 그대로다.
+        assert_eq!(files(&dir.0), before);
+        assert_eq!(fs::read_to_string(dir.0.join("sub.json")).unwrap(), account_before);
+        assert_eq!(load_plan(&dir.0, Some("sub")).unwrap().unwrap(), plan("부계의 기록"));
+        assert_eq!(load_decks(&dir.0, Some("sub")).unwrap().unwrap(), decks("부계의 편성"));
+        // 숨긴 것은 다시 켜도 남아 있다(설정 파일에 적혔다).
+        assert_eq!(read_state(&dir.0).0.hidden, ["sub"]);
+
+        // 다시 보이게 하면 목록에 돌아오고, 그 계정의 것이 그대로 보인다.
+        let snap = set_account_hidden(&dir.0, "sub", false).unwrap();
+        let shown: Vec<&str> = snap.accounts.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(shown, ["main", "sub"]);
+        assert!(snap.hidden_accounts.is_empty());
+        // 계정이 둘인데 고른 것이 없다 — 추측하지 않는다.
+        assert_eq!(snap.default_account, None);
+        set_default_account(&dir.0, "sub").unwrap();
+        assert_eq!(load_intercept(&dir.0).unwrap().unwrap()["account"]["name"], "부계의 추천");
+        assert_eq!(files(&dir.0), before);
+    }
+
+    #[test]
+    fn a_hidden_account_is_never_picked_by_itself_and_choosing_it_shows_it_again() {
+        let dir = TempDir::new();
+        dir.account("main");
+        dir.account("sub");
+        dir.account("third");
+        // 고르지 않은 계정을 숨겨도 고른 계정은 그대로다.
+        set_default_account(&dir.0, "main").unwrap();
+        let snap = set_account_hidden(&dir.0, "third", true).unwrap();
+        assert_eq!(snap.default_account.as_deref(), Some("main"));
+        assert!(snap.remembered);
+        // 숨긴 계정만 남으면 쓸 계정이 없다(숨긴 것을 스스로 쓰지 않는다).
+        set_account_hidden(&dir.0, "main", true).unwrap();
+        let snap = set_account_hidden(&dir.0, "sub", true).unwrap();
+        assert!(snap.accounts.is_empty());
+        assert_eq!(snap.hidden_accounts.len(), 3);
+        assert_eq!(snap.default_account, None);
+        // 숨긴 계정을 고르면(새로 받았을 때도 이 길이다) 다시 보인다.
+        let snap = set_default_account(&dir.0, "sub").unwrap();
+        assert_eq!(snap.default_account.as_deref(), Some("sub"));
+        let shown: Vec<&str> = snap.accounts.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(shown, ["sub"]);
+        // 같은 계정을 두 번 숨겨도 한 번만 적힌다.
+        set_account_hidden(&dir.0, "sub", true).unwrap();
+        set_account_hidden(&dir.0, "sub", true).unwrap();
+        assert_eq!(read_state(&dir.0).0.hidden, ["main", "sub", "third"]);
+    }
+
+    #[test]
+    fn hiding_takes_only_names_of_accounts_that_exist() {
+        let dir = TempDir::new();
+        dir.account("main");
+        for bad in ["../main", "..\\main", "main.json", "C:\\x", "a/b", ""] {
+            let err = set_account_hidden(&dir.0, bad, true).unwrap_err();
+            assert!(matches!(err, SharedError::NameInvalid { .. }), "{bad}: {err:?}");
+            assert!(has_korean(&err.to_string()));
+        }
+        assert_eq!(
+            set_account_hidden(&dir.0, "nobody", true).unwrap_err(),
+            SharedError::AccountMissing { name: "nobody".into() }
+        );
+        assert!(read_state(&dir.0).0.hidden.is_empty());
+        // 파일이 없어진 계정의 이름은 다음에 숨길 때 목록에서 빠진다.
+        dir.account("gone");
+        set_account_hidden(&dir.0, "gone", true).unwrap();
+        fs::remove_file(dir.0.join("gone.json")).unwrap();
+        set_account_hidden(&dir.0, "main", true).unwrap();
+        assert_eq!(read_state(&dir.0).0.hidden, ["main"]);
+        // 설정 파일의 숨긴 이름에 이상한 글자가 있어도 읽지 않는다.
+        fs::write(
+            dir.0.join(STATE_FILE),
+            json!({ "schema_version": 1, "kind": "companion_state", "default_account": null, "overlay_launch": "manual", "hidden_accounts": ["main", "../x", 3, "main"] }).to_string(),
+        )
+        .unwrap();
+        let (state, problem) = read_state(&dir.0);
+        assert_eq!(state.hidden, ["main"]);
+        assert_eq!(state.overlay_launch, OverlayLaunch::Manual);
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn each_account_keeps_its_own_intercept_result() {
+        let dir = TempDir::new();
+        dir.account("main");
+        dir.account("sub");
+        set_default_account(&dir.0, "main").unwrap();
+        let saved = save_intercept(&dir.0, &report("본계의 추천")).unwrap();
+        assert!(saved.intercept_saved_at.is_some());
+        assert!(dir.0.join("main.intercept.json").is_file());
+        assert!(!dir.0.join(INTERCEPT_FILE).exists());
+
+        // 계정을 바꾸면 그 계정의 결과(아직 없다)가 보인다 — 앞 계정의 결과가 따라오지 않는다.
+        let snap = set_default_account(&dir.0, "sub").unwrap();
+        assert_eq!(snap.intercept_saved_at, None);
+        assert_eq!(load_intercept(&dir.0).unwrap(), None);
+        save_intercept(&dir.0, &report("부계의 추천")).unwrap();
+        assert_eq!(load_intercept(&dir.0).unwrap().unwrap()["account"]["name"], "부계의 추천");
+
+        // 돌아가면 그대로다.
+        let snap = set_default_account(&dir.0, "main").unwrap();
+        assert!(snap.intercept_saved_at.is_some());
+        assert_eq!(load_intercept(&dir.0).unwrap().unwrap()["account"]["name"], "본계의 추천");
+
+        // 계산을 시작한 계정의 이름을 주면, 그 사이 다른 계정으로 바꿨어도 그 계정의 것으로 남는다.
+        save_intercept_for(&dir.0, Some("sub"), &report("부계의 새 추천")).unwrap();
+        assert_eq!(load_intercept(&dir.0).unwrap().unwrap()["account"]["name"], "본계의 추천");
+        set_default_account(&dir.0, "sub").unwrap();
+        assert_eq!(load_intercept(&dir.0).unwrap().unwrap()["account"]["name"], "부계의 새 추천");
+        // 이름을 주지 않으면 지금 쓰는 계정의 것이다.
+        save_intercept_for(&dir.0, None, &report("부계의 더 새 추천")).unwrap();
+        save_intercept_for(&dir.0, Some("  "), &report("부계의 가장 새 추천")).unwrap();
+        assert_eq!(load_intercept(&dir.0).unwrap().unwrap()["account"]["name"], "부계의 가장 새 추천");
+    }
+
+    #[test]
+    fn saving_a_result_for_an_account_takes_only_names_of_accounts_that_exist() {
+        let dir = TempDir::new();
+        dir.account("main");
+        for bad in ["../main", "..\\main", "main.intercept", "C:\\x", "a/b"] {
+            let err = save_intercept_for(&dir.0, Some(bad), &report("x")).unwrap_err();
+            assert!(matches!(err, SharedError::NameInvalid { .. }), "{bad}: {err:?}");
+        }
+        assert_eq!(
+            save_intercept_for(&dir.0, Some("nobody"), &report("x")).unwrap_err(),
+            SharedError::AccountMissing { name: "nobody".into() }
+        );
+        assert!(!dir.0.join("nobody.intercept.json").exists());
+        // 요격전 추천 결과가 아닌 것은 이름이 맞아도 쓰지 않는다.
+        let err = save_intercept_for(&dir.0, Some("main"), &json!({ "kind": "tier", "schema_version": 1 })).unwrap_err();
+        assert!(matches!(err, SharedError::WrongKind { .. }), "{err:?}");
+        assert_eq!(files(&dir.0), ["main.json"]);
+    }
+
+    #[test]
+    fn a_result_saved_before_results_were_per_account_goes_to_the_account_in_use_once() {
+        let dir = TempDir::new();
+        // 계정이 없을 때(또는 P-033 전)의 결과는 한 자리에 있다.
+        save_intercept(&dir.0, &report("예전 결과")).unwrap();
+        assert!(dir.0.join(INTERCEPT_FILE).is_file());
+        assert_eq!(load_intercept(&dir.0).unwrap().unwrap()["account"]["name"], "예전 결과");
+
+        // 계정이 생기면 지금 쓰는 계정이 그 결과를 제 것으로 삼는다(이름만 바뀐다 — 내용은 그대로).
+        dir.account("main");
+        assert_eq!(load_intercept(&dir.0).unwrap().unwrap()["account"]["name"], "예전 결과");
+        assert!(!dir.0.join(INTERCEPT_FILE).exists());
+        assert!(dir.0.join("main.intercept.json").is_file());
+        assert!(snapshot(&dir.0).intercept_saved_at.is_some());
+
+        // 다른 계정에는 따라가지 않는다.
+        dir.account("sub");
+        set_default_account(&dir.0, "sub").unwrap();
+        assert_eq!(load_intercept(&dir.0).unwrap(), None);
+
+        // 제 결과가 이미 있는 계정은 예전 자리의 것을 덮어쓰지 않는다.
+        set_default_account(&dir.0, "main").unwrap();
+        fs::write(dir.0.join(INTERCEPT_FILE), report("남의 결과").to_string()).unwrap();
+        assert_eq!(load_intercept(&dir.0).unwrap().unwrap()["account"]["name"], "예전 결과");
+        assert!(dir.0.join(INTERCEPT_FILE).is_file());
+    }
+
+    #[test]
+    fn the_plan_may_carry_the_unused_marks_and_the_reward_journal() {
+        let dir = TempDir::new();
+        dir.account("me");
+        let mut doc = plan("기록");
+        // 예전 문서(칸 둘이 없다)는 그대로 받는다.
+        save_plan(&dir.0, Some("me"), &doc).unwrap();
+        doc["unused"] = json!(["네온", "라피"]);
+        doc["rewards"] = json!([{ "id": "m1", "date": "2026-11-12", "boss_id": "kraken", "boss_name": "크라켄", "stage": 4, "gear": { "머리": 0, "몸통": 0, "팔": 0, "다리": 0 }, "modules": 2, "note": null, "created_at": null }]);
+        save_plan(&dir.0, Some("me"), &doc).unwrap();
+        assert_eq!(load_plan(&dir.0, Some("me")).unwrap().unwrap(), doc);
+
+        // 있으면 목록이어야 하고, 너무 많으면 받지 않는다 — 앞서 저장한 것은 그대로다.
+        for (field, bad) in [
+            ("unused", json!("네온")),
+            ("unused", json!({ "네온": true })),
+            ("rewards", json!(3)),
+            ("rewards", Value::Array(vec![json!({}); PLAN_MAX_ITEMS + 1])),
+        ] {
+            let mut broken = doc.clone();
+            broken[field] = bad;
+            let err = save_plan(&dir.0, Some("me"), &broken).unwrap_err();
+            assert!(matches!(err, SharedError::PlanInvalid { .. }), "{field}: {err:?}");
+            assert!(has_korean(&err.to_string()));
+            assert_eq!(load_plan(&dir.0, Some("me")).unwrap().unwrap(), doc);
+        }
     }
 }

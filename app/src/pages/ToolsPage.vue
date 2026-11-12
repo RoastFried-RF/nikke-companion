@@ -11,6 +11,7 @@ import { DEFAULT_CONDITION, DEFAULT_CONDITION_LABEL } from '../lib/builtin';
 import { runSuggestWith } from '../lib/compute';
 import { useEngineRun } from '../lib/engineRun';
 import { RUN_SUGGEST, TOOL_TABS, useNav, type ToolTab } from '../lib/nav';
+import { unusedOwned, usePlan } from '../lib/plan';
 import { precisionOf, recallPrecision, rememberPrecision, SUGGEST_PRECISION, type PrecisionKey } from '../lib/precision';
 import { recall, remember } from '../lib/remember';
 import { useShared } from '../lib/shared';
@@ -26,6 +27,8 @@ import SquadBoard from '../views/SquadBoard.vue';
 const PRECISION_KEY = 'tools.precision';
 /** 자리 순서도 바꿔 볼지 기억하는 이름('off'면 끔). */
 const ORDER_KEY = 'tools.order';
+/** 「안 씀」 니케를 추천에서 뺄지 기억하는 이름('on'이면 뺀다 — 요격전 화면과 같은 이름을 쓴다). */
+const EXCLUDE_KEY = 'recommend.exclude-unused';
 
 const shared = useShared();
 const nav = useNav();
@@ -52,12 +55,26 @@ function openTab(next: ToolTab): void {
   else ownTab.value = next;
 }
 
+const plan = usePlan();
 const precision = ref<PrecisionKey>(recallPrecision(PRECISION_KEY));
 const tryOrder = ref(recall(ORDER_KEY) !== 'off');
+/** 「안 씀」으로 표시한 니케를 추천에서 빼는가(P-033 — 기본은 빼지 않는다). */
+const excludeUnused = ref(recall(EXCLUDE_KEY) === 'on');
+/** 「안 씀」으로 표시한 니케의 수(계정을 읽기 전이라 표시한 이름의 수다). */
+const unusedCount = computed(() => plan?.plan.value.unused?.length ?? 0);
+function onExclude(event: Event): void {
+  excludeUnused.value = (event.target as HTMLInputElement).checked;
+  remember(EXCLUDE_KEY, excludeUnused.value ? 'on' : 'off');
+}
 const suggested = ref<CompareReport | null>(null);
 const error = ref('');
 
 const accountName = computed(() => shared?.accountName.value ?? null);
+// 계정을 바꾸면 앞 계정으로 낸 추천은 치운다(다른 계정의 결과를 이 계정의 것처럼 보이지 않는다 — P-033).
+watch(accountName, () => {
+  suggested.value = null;
+  error.value = '';
+});
 const compared = computed(() => results?.compare.value ?? null);
 const growth = computed(() => results?.growth.value ?? null);
 
@@ -90,7 +107,9 @@ async function run(): Promise<void> {
   await engine.run<CompareReport>(
     async (deps) => {
       const read = await shared.loadAccount();
-      return runSuggestWith({ account: read.account, condition: DEFAULT_CONDITION, budget, refine }, deps);
+      // 「안 씀」 니케를 빼기로 했으면 이 계정이 가진 것만 추려 넘긴다 — 뺀 것은 결과에 남는다(배지와 계산 조건).
+      const exclude = excludeUnused.value ? unusedOwned(plan?.plan.value, read.account) : [];
+      return runSuggestWith({ account: read.account, condition: DEFAULT_CONDITION, budget, refine, ...(exclude.length ? { exclude } : {}) }, deps);
     },
     {
       start: () => {
@@ -164,6 +183,10 @@ async function run(): Promise<void> {
           <label class="tools__check" title="같은 다섯 명이라도 자리 순서에 따라 총딜이 달라진다 — 상위 편성의 자리 순서를 바꿔 가며 견준다">
             <input type="checkbox" :checked="tryOrder" :disabled="engine.computing" data-testid="suggest-order" @change="onOrder" />
             자리 순서도 바꿔 본다
+          </label>
+          <label v-if="plan" class="tools__check" title="내 니케 화면에서 「안 씀」으로 표시한 니케를 추천에서 뺀다 — 뺀 니케는 결과에 적힌다">
+            <input type="checkbox" :checked="excludeUnused" :disabled="engine.computing" data-testid="suggest-exclude-unused" @change="onExclude" />
+            「안 씀」 니케 빼기 <span class="nk-muted" data-testid="suggest-unused-count">({{ unusedCount }}명)</span>
           </label>
           <button
             type="button"

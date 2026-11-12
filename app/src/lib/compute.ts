@@ -126,12 +126,17 @@ export interface SuggestOptions {
   top?: number;
   refine?: boolean;
   budget?: number;
+  /** 추천에서 뺄 니케의 이름(P-033의 「안 씀」). 실제로 뺀 것이 있으면 결과의 `excluded`에 남는다. */
+  exclude?: string[];
 }
+
+/** 뺄 니케가 없으면 그 칸을 아예 넘기지 않는다(빼지 않는 계산은 종전과 같은 요청이다). */
+const excludeOption = (exclude: string[] | undefined): { exclude?: string[] } => (exclude && exclude.length > 0 ? { exclude } : {});
 
 async function suggestWith(input: { account: unknown; condition: unknown } & SuggestOptions, deps: ComputeDeps): Promise<CompareReport> {
   const report = await suggestSquads(
     { account: input.account as object, condition: input.condition as object },
-    { limit: input.limit, top: input.top, refine: input.refine, budget: input.budget },
+    { limit: input.limit, top: input.top, refine: input.refine, budget: input.budget, ...excludeOption(input.exclude) },
     coreDeps(deps),
   );
   return report as unknown as CompareReport;
@@ -177,10 +182,13 @@ export async function runIntercept(input: InterceptInput, deps: ComputeDeps = de
   }
 }
 
-async function interceptWith(input: { account: unknown; bundle: unknown; top?: number; budget?: number }, deps: ComputeDeps): Promise<InterceptReport> {
+async function interceptWith(
+  input: { account: unknown; bundle: unknown; top?: number; budget?: number; exclude?: string[] },
+  deps: ComputeDeps,
+): Promise<InterceptReport> {
   const report = await recommendIntercept(
     { account: input.account as object, bundle: input.bundle as object },
-    { top: input.top, budget: input.budget },
+    { top: input.top, budget: input.budget, ...excludeOption(input.exclude) },
     coreDeps(deps),
   );
   return report as unknown as InterceptReport;
@@ -191,7 +199,7 @@ async function interceptWith(input: { account: unknown; bundle: unknown; top?: n
  * 파일 경로 없음). `runIntercept`와 같은 함수(`recommendIntercept`)를 부른다.
  */
 export async function runInterceptWith(
-  input: { account: unknown; bundle: unknown; top?: number; budget?: number },
+  input: { account: unknown; bundle: unknown; top?: number; budget?: number; exclude?: string[] },
   deps: ComputeDeps = defaultDeps,
 ): Promise<InterceptReport> {
   try {

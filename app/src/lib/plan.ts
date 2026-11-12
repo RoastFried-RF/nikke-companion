@@ -19,7 +19,10 @@ import {
   recordsOf as coreRecordsOf,
   removeRecord as coreRemoveRecord,
   toggleFavorite as coreToggleFavorite,
+  toggleUnused as coreToggleUnused,
+  unusedOwned as coreUnusedOwned,
 } from '@core/plan.mjs';
+import { addReward as coreAddReward, journalDays as coreJournalDays, journalSummary as coreJournalSummary, removeReward as coreRemoveReward } from '@core/journal.mjs';
 import { inject, onBeforeUnmount, provide, ref, shallowRef, watch, type InjectionKey, type Ref } from 'vue';
 import type {
   AccountDoc,
@@ -30,6 +33,8 @@ import type {
   GearSummary,
   InterceptBoss,
   InterceptReport,
+  JournalDay,
+  JournalSummary,
   NikkeInfo,
   PlanDoc,
   PlanRecord,
@@ -50,6 +55,17 @@ export interface RecordInput {
   stage: string;
 }
 
+/** 모듈 기록장 입력 칸의 값(화면이 넘긴다). 수는 사용자가 적은 글자 그대로다 — 비워 두면 0이다. */
+export interface RewardInput {
+  date: string;
+  boss_id: string;
+  boss_name: string;
+  stage: string;
+  /** 부위(머리·몸통·팔·다리) → 적은 글자. */
+  gear: Record<string, string>;
+  modules: string;
+}
+
 export interface PlanStore {
   /** 지금 쓰는 계정의 계획. 계정이 없거나 아직 적은 것이 없으면 빈 계획이다. */
   plan: Ref<PlanDoc>;
@@ -62,11 +78,23 @@ export interface PlanStore {
   addRecord(input: RecordInput): Promise<void>;
   removeRecord(id: string): Promise<void>;
   toggleFavorite(name: string): Promise<void>;
+  /** 「안 씀」 표시를 켜거나 끈다(P-033). 계정은 바뀌지 않는다 — 표시일 뿐이다. */
+  toggleUnused(name: string): Promise<void>;
+  /** 모듈 기록장에 한 줄을 더하고 저장한다. 값이 맞지 않으면 이유를 한국어 문장으로 던진다(아무것도 바뀌지 않는다). */
+  addReward(input: RewardInput): Promise<void>;
+  removeReward(id: string): Promise<void>;
 }
 
 const KEY: InjectionKey<PlanStore> = Symbol('plan');
 
 const blank = (): PlanDoc => emptyPlan() as PlanDoc;
+
+/** 손으로 적은 수 → 정수. 비워 두면 0, 숫자가 아니면 NaN(계산 코드가 이유를 말하며 거부한다). */
+const count = (text: string): number => {
+  const s = text.trim();
+  if (s === '') return 0;
+  return /^\d+$/.test(s) ? Number(s) : Number.NaN;
+};
 
 export function createPlanStore(shared: Shared): { store: PlanStore; stop: () => void } {
   // 문서를 통째로 갈아 끼운다(안쪽을 고치지 않는다) — 그래서 안쪽까지 지켜보지 않는다. Rust에 넘기는 것도 보통 객체다.
@@ -135,6 +163,23 @@ export function createPlanStore(shared: Shared): { store: PlanStore; stop: () =>
     },
     removeRecord: (id) => commit(coreRemoveRecord(plan.value, id) as PlanDoc),
     toggleFavorite: (name) => commit(coreToggleFavorite(plan.value, name) as PlanDoc),
+    toggleUnused: (name) => commit(coreToggleUnused(plan.value, name) as PlanDoc),
+    addReward: async (input) => {
+      const next = coreAddReward(
+        plan.value,
+        {
+          date: input.date,
+          boss_id: input.boss_id,
+          boss_name: input.boss_name,
+          stage: input.stage.trim() === '' ? null : count(input.stage),
+          gear: Object.fromEntries(Object.entries(input.gear).map(([part, text]) => [part, count(text)])),
+          modules: count(input.modules),
+        },
+        { now: new Date().toISOString() },
+      ) as PlanDoc;
+      await commit(next);
+    },
+    removeReward: (id) => commit(coreRemoveReward(plan.value, id) as PlanDoc),
   };
 
   // 기본 계정이 정해지거나 바뀌면 그 계정의 것을 읽는다.
@@ -191,7 +236,7 @@ export function planView(account: AccountDoc, report: InterceptReport | null, pl
   };
   const bosses = planBosses(report);
   const rows = gearRows(account) as GearRow[];
-  const core = pickCore({ report, favorites: plan.favorites, account }) as CorePick;
+  const core = pickCore({ report, favorites: plan.favorites, unused: plan.unused ?? [], account }) as CorePick;
   const coreSet = new Set(core.names);
   return {
     core,
@@ -221,6 +266,21 @@ export function recordCheck(boss: InterceptBoss | null | undefined, plan: PlanDo
 /** 보스의 1위 편성. 계산하지 않았으면 null. */
 export function bestOf(boss: InterceptBoss | null | undefined): RankingEntry | null {
   return (bestSquad(boss) as RankingEntry | null) ?? null;
+}
+
+/** 「안 씀」으로 표시한 니케 가운데 그 계정이 가진 이름 — 추천 계산에서 뺄 목록이다(계정에 적힌 순서). */
+export function unusedOwned(plan: PlanDoc | null | undefined, account: AccountDoc | null | undefined): string[] {
+  return plan && account ? (coreUnusedOwned(plan, account) as string[]) : [];
+}
+
+/** 모듈 기록장의 요약: 이번 주·이번 달·전체의 합, 주별·월별 합, 보스별 횟수. `day`는 오늘(`YYYY-MM-DD`). */
+export function journalSummary(plan: PlanDoc, day: string, bosses: Array<{ id: string; name: string }>): JournalSummary {
+  return coreJournalSummary(plan, { today: day, bosses }) as JournalSummary;
+}
+
+/** 날짜별 보기(최근이 앞): 그날의 보상 기록과 요격전 대미지 기록. */
+export function journalDays(plan: PlanDoc): JournalDay[] {
+  return coreJournalDays(plan) as JournalDay[];
 }
 
 /** 기록 한 줄의 말: 「9.40억 · 모의전 · 2026-11-12 · 달성 단계 4」의 재료. */

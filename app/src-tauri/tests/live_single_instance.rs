@@ -60,6 +60,7 @@ impl TempAccounts {
             &StoredState {
                 default_account: None,
                 overlay_launch: launch,
+                ..StoredState::default()
             },
         )
         .expect("오버레이 설정 쓰기");

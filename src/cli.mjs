@@ -47,6 +47,7 @@ const USAGE = [
   '  node src/cli.mjs intercept --account <계정.json> [--bosses <보스 묶음.json, 기본 data/intercept/anomaly.json>] [--boss <보스 이름 또는 id>]',
   '      요격전(이상 개체) 보스마다 보유 니케로 총딜이 가장 큰 편성을 추천한다. --boss로 한 보스만 계산할 수 있다',
   '      [--top <보스별 표시 수, 기본 3>]   [--budget <전체 시뮬 횟수의 상한, 기본 300 — 보스 수로 나눈다>]   [--json <결과.json>]',
+  'suggest·intercept: [--exclude <니케 이름,니케 이름>] 그 니케들을 빼고 추천한다(「안 씀」 — 뺀 것이 결과에 남는다)',
   'compare·suggest·growth·tier·intercept는 같은 엔진 판·같은 요청의 시뮬 결과를 다시 계산하지 않는다(캐시):',
   '  [--no-cache] 캐시를 읽지도 쓰지도 않는다   [--cache-dir <폴더, 기본 data/cache/sim>]',
 ].join('\n');
@@ -96,6 +97,13 @@ function pickSquad(squadsDoc, name) {
     throw new InputError('기준 편성이 없다', [{ path: '--squad', message: `그 이름의 편성이 없다. 있는 이름: ${squads.map((s) => s?.name ?? '(이름 없음)').join(', ')}` }]);
   }
   return found;
+}
+
+/** `--exclude "이름,이름"` → 이름 목록. 주지 않으면 undefined다. 니케 이름에는 쉼표가 없다 — 쉼표로만 나눈다. */
+function readNames(key, value) {
+  if (value === undefined) return undefined;
+  if (value === true) throw new InputError('인자가 빠졌다', [{ path: `--${key}`, message: '니케 이름이 필요하다(쉼표로 나눈다)' }]);
+  return String(value).split(',').map((n) => n.trim()).filter(Boolean);
 }
 
 const [command, ...rest] = process.argv.slice(2);
@@ -159,7 +167,7 @@ try {
         bundle: readJsonFile('bosses', opts.bosses ?? INTERCEPT_BOSSES),
         boss: opts.boss,
       },
-      { top: readCount('top', opts.top), budget: readCount('budget', opts.budget) },
+      { top: readCount('top', opts.top), budget: readCount('budget', opts.budget), exclude: readNames('exclude', opts.exclude) },
       {
         ...deps,
         // 진행은 표준 오류로만 낸다 — 표준 출력은 결과 표다.
@@ -209,6 +217,7 @@ try {
         refine: opts['no-refine'] === true ? false : undefined,
         budget: readCount('budget', opts.budget),
         refineTop: readCount('refine-top', opts['refine-top']),
+        exclude: readNames('exclude', opts.exclude),
       },
       deps,
     );

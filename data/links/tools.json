@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "kind": "tool_links",
+  "source": {
+    "title": "니케 유용한 툴 모음집",
+    "where": "니케 마이너 갤러리의 글",
+    "checked_at": "2026-11-12",
+    "note": "모음집 글에 실린 도구 가운데 2026-11-12에 직접 열어 본 것만 담았다. 이 앱은 이 사이트들의 내용을 가져오지 않는다 — 누르면 기본 브라우저로 열 뿐이다.",
+    "description_note": "한 줄 설명은 그날 열어 본 기록을 줄인 것이다. 근거(basis)가 recorded면 기록에 기능이 적혀 있던 도구이고, category면 기록에 분류 한마디만 남아 있던 도구다 — 사이트가 바뀌었을 수 있다."
+  },
+  "links": [
+    {
+      "id": "letsdoro",
+      "name": "레츠도로",
+      "url": "https://letsdoro.com/",
+      "description": "진행 중인 콘텐츠의 보스·속성·기간, 솔로 레이드·유니온 레이드 덱, 버프 계산기, 큐브 추천, 마이페이지(기록관·즐겨찾기).",
+      "basis": "recorded"
+    },
+    {
+      "id": "nikke-gear",
+      "name": "니케 장비 현황",
+      "url": "https://nikkegear885.github.io/nikke-/",
+      "description": "계정을 동기화해 니케별 기업 장비 현황, 기업 장비 필요 현황, 장비 파밍 예상 일자를 본다.",
+      "basis": "recorded"
+    },
+    {
+      "id": "dildoro",
+      "name": "딜도로",
+      "url": "https://dildoro.com/",
+      "description": "덱 계산, 버스트 순서 비교, 「한 명을 바꾼다면?」, 육성 효율표, 랭커 덱·프리셋.",
+      "basis": "recorded"
+    },
+    {
+      "id": "enikk",
+      "name": "Enikk",
+      "url": "https://enikk.app/",
+      "description": "플레이어 육성 비교(속성별 커버리지).",
+      "basis": "recorded"
+    },
+    {
+      "id": "doroparty",
+      "name": "도로파티",
+      "url": "https://doroparty.com/",
+      "description": "유니온 구인.",
+      "basis": "category"
+    },
+    {
+      "id": "forbidden-library",
+      "name": "니케 금서고",
+      "url": "https://nikkeforbiddenlibrary.com/",
+      "description": "스토리 열람.",
+      "basis": "category"
+    },
+    {
+      "id": "pvp-meta",
+      "name": "NIKKE PvP META",
+      "url": "https://inspiring-hotteok-9de45f.netlify.app/",
+      "description": "PVP 메타.",
+      "basis": "category"
+    },
+    {
+      "id": "nikke-deck",
+      "name": "NIKKE DECK",
+      "url": "https://nikke-deck.com/ko/deck",
+      "description": "다섯 자리에 초상화를 끌어다 놓는 팀 빌더, 덱 저장·공유, 버스트 게이지가 차는 속도 표시.",
+      "basis": "recorded"
+    },
+    {
+      "id": "arena-tools",
+      "name": "NIKKE Arena Tools",
+      "url": "https://nikke.top/",
+      "description": "PVP(아레나) 도구 — 버스트 게이지가 차는 속도 표시.",
+      "basis": "recorded"
+    },
+    {
+      "id": "collectibles-sim",
+      "name": "소장품 강화 시뮬레이터",
+      "url": "https://changjoeconomy.github.io/collectibles/",
+      "description": "관리 키트 세 종류의 경험치와 보유 비율로 강화 구간의 최소 사용 조합을 찾는다.",
+      "basis": "recorded"
+    },
+    {
+      "id": "nibung-sim",
+      "name": "니붕 시뮬레이터",
+      "url": "https://nibung.kr/",
+      "description": "오버로드 모듈 시뮬레이터(옵션 변경·전투력 미리 보기), 모집 시뮬레이터.",
+      "basis": "recorded"
+    },
+    {
+      "id": "nikkefig",
+      "name": "니케피그",
+      "url": "https://nikkefig.com/",
+      "description": "피규어.",
+      "basis": "category"
+    },
+    {
+      "id": "scarlet-farm",
+      "name": "홍련 농장",
+      "url": "https://scarletfarm.app/",
+      "description": "미니게임.",
+      "basis": "category"
+    }
+  ],
+  "not_supported": [
+    {
+      "id": "pvp",
+      "topic": "PVP 계산",
+      "reason": "이 앱의 계산 도구는 PVP(아레나)를 계산하지 않는다 — 지원하지 않음.",
+      "links": ["pvp-meta", "arena-tools"]
+    },
+    {
+      "id": "stats",
+      "topic": "통계·랭킹",
+      "reason": "다른 플레이어들의 기록을 모은 서버 데이터가 필요하다 — 이 앱은 이 PC에 받아 둔 내 계정만 본다.",
+      "links": ["dildoro", "enikk", "pvp-meta"]
+    },
+    {
+      "id": "story",
+      "topic": "스토리 열람",
+      "reason": "이 앱에는 스토리 자료가 없다.",
+      "links": ["forbidden-library"]
+    },
+    {
+      "id": "union",
+      "topic": "유니온 구인",
+      "reason": "이 앱은 다른 플레이어와 이어지지 않는다(이 PC 안에서만 돈다).",
+      "links": ["doroparty"]
+    }
+  ]
+}

@@ -7,7 +7,12 @@
 // **계정에 없는 것은 지어내지 않는다.** 장비를 적지 않은 니케는 「기록 없음」이고(끼지 않은 것으로 세지 않는다),
 // 가지고 있지만 끼지 않은 장비의 수·보상이 나올 확률·한 번에 얻는 수는 모른다 — 모른다는 문장을 함께 돌려준다.
 import { investmentScore } from './candidates.mjs';
+import { isDate } from './dates.mjs';
 import { formatDamage } from './format.mjs';
+import { readRewards, STAGE_MAX } from './journal.mjs';
+
+// 날짜 검사와 달성 단계의 범위는 모듈 기록장(journal.mjs)과 함께 쓴다 — 이 모듈에서 꺼내 쓰던 이름은 그대로다.
+export { isDate, STAGE_MAX };
 
 export const PLAN_SCHEMA_VERSION = 1;
 export const PLAN_KIND = 'intercept_plan';
@@ -163,10 +168,13 @@ export const CORE_BY_SCORE = 10;
  * 어느 니케의 장비가 중요한가(「주력」): ① 요격전 추천의 보스별 1위 편성에 든 니케 → ② 없으면 즐겨찾기 →
  * ③ 그것도 없으면 많이 키운 순서(투자 점수 — 성능 추정이 아니다) 상위 `limit`명.
  * 계정을 주면 그 계정이 가진 니케만 남긴다(다른 계정으로 계산한 옛 결과의 이름을 걸러 낸다).
- * @param {{report?: any, favorites?: string[], account?: any, limit?: number}} [input]
+ * 「안 씀」으로 표시한 니케(`unused`)는 ③에서 뺀다(많이 키웠어도 쓰지 않는 니케다).
+ * @param {{report?: any, favorites?: string[], unused?: string[], account?: any, limit?: number}} [input]
  * @returns {{basis: 'intercept'|'favorites'|'score'|'none', names: string[], text: string}}
  */
-export function pickCore({ report = null, favorites = [], account = null, limit = CORE_BY_SCORE } = {}) {
+export function pickCore({ report = null, favorites = [], unused = [], account = null, limit = CORE_BY_SCORE } = {}) {
+  // 「안 씀」으로 표시한 니케는 많이 키웠어도 주력으로 어림하지 않는다(추천 편성에 든 니케와 즐겨찾기는 그대로 둔다).
+  const idle = new Set(Array.isArray(unused) ? unused : []);
   const nikkes = isPlainObject(account?.nikkes) ? account.nikkes : null;
   const owned = (names) => [...new Set(names.filter(isText))].filter((n) => !nikkes || Object.hasOwn(nikkes, n));
 
@@ -180,6 +188,7 @@ export function pickCore({ report = null, favorites = [], account = null, limit 
   }
   if (nikkes) {
     const ranked = Object.entries(nikkes)
+      .filter(([name]) => !idle.has(name))
       .map(([name, entry]) => ({ name, score: investmentScore(isPlainObject(entry) ? entry : {}) }))
       .sort((a, b) => b.score - a.score || byName(a.name, b.name))
       .slice(0, Math.max(0, limit))
@@ -278,14 +287,15 @@ export function recommendBoss({ bosses = [], rows = [], core = [] } = {}) {
 
 /** 기록의 종류와 화면의 말. */
 export const RECORD_MODES = Object.freeze({ mock: '모의전', real: '실전' });
-/** 달성 단계의 범위. 실제 상한은 모른다(게임 화면에서 본 것은 「달성 단계 4」 하나) — 넉넉히 잡았다. */
-export const STAGE_MAX = 99;
 /** 계정 하나에 남기는 기록의 수(파일이 끝없이 커지지 않게). 넘으면 오래된 것부터 뺀다. */
 export const MAX_RECORDS = 500;
 
-/** 빈 계획 문서. */
+/**
+ * 빈 계획 문서. `unused`(「안 씀」으로 표시한 니케)와 `rewards`(모듈 기록장 — journal.mjs)는 P-033이 더한 칸이다 —
+ * 판은 그대로 1이고, 이 두 칸이 없는 예전 문서는 빈 목록으로 읽는다.
+ */
 export function emptyPlan() {
-  return { schema_version: PLAN_SCHEMA_VERSION, kind: PLAN_KIND, favorites: [], records: [] };
+  return { schema_version: PLAN_SCHEMA_VERSION, kind: PLAN_KIND, favorites: [], unused: [], records: [], rewards: [] };
 }
 
 /**
@@ -305,16 +315,6 @@ export function parseDamage(text) {
     value = Math.round(Number(m[1] ?? 0) * 1e12 + Number(m[2] ?? 0) * 1e8 + Number(m[3] ?? 0) * 1e4 + Number(m[4] ?? 0));
   }
   return Number.isSafeInteger(value) && value > 0 ? value : null;
-}
-
-/** `YYYY-MM-DD`이고 달력에 있는 날인가. */
-export function isDate(text) {
-  if (typeof text !== 'string') return false;
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
-  if (!m) return false;
-  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  const date = new Date(Date.UTC(y, mo - 1, d));
-  return date.getUTCFullYear() === y && date.getUTCMonth() === mo - 1 && date.getUTCDate() === d;
 }
 
 /** 기록 하나의 모양을 본다. 문제를 한국어 문장으로 돌려준다(없으면 빈 배열). */
@@ -355,10 +355,19 @@ export function readPlan(doc) {
   if (!isPlainObject(doc) || doc.kind !== PLAN_KIND) throw new Error('요격전 기록이 아니다(종류가 다르다).');
   if (doc.schema_version !== PLAN_SCHEMA_VERSION) throw new Error(`요격전 기록의 판이 다르다(받은 것 ${String(doc.schema_version)}, 이 앱이 읽는 판 ${PLAN_SCHEMA_VERSION}).`);
   const favorites = Array.isArray(doc.favorites) ? [...new Set(doc.favorites.filter(isText))] : [];
+  // 「안 씀」은 즐겨찾기와 함께 붙지 않는다 — 둘 다 적혀 있으면 즐겨찾기로 읽는다(빼는 쪽이 아니라 남기는 쪽으로).
+  const marked = Array.isArray(doc.unused) ? [...new Set(doc.unused.filter(isText))] : [];
+  const unused = marked.filter((name) => !favorites.includes(name));
   const raw = Array.isArray(doc.records) ? doc.records : [];
   const records = raw.filter((r) => recordProblems(r).length === 0 && (isText(r.id) || Number.isInteger(r.id))).map(cleanRecord);
-  const dropped = raw.length - records.length + (Array.isArray(doc.favorites) ? doc.favorites.length - favorites.length : 0);
-  return { plan: { schema_version: PLAN_SCHEMA_VERSION, kind: PLAN_KIND, favorites, records }, dropped };
+  const journal = readRewards(doc.rewards);
+  const dropped =
+    raw.length -
+    records.length +
+    (Array.isArray(doc.favorites) ? doc.favorites.length - favorites.length : 0) +
+    (Array.isArray(doc.unused) ? doc.unused.length - marked.length : 0) +
+    journal.dropped;
+  return { plan: { schema_version: PLAN_SCHEMA_VERSION, kind: PLAN_KIND, favorites, unused, records, rewards: journal.rewards }, dropped };
 }
 
 /**
@@ -385,10 +394,46 @@ export function removeRecord(plan, id) {
   return { ...plan, records: plan.records.filter((r) => r.id !== id) };
 }
 
-/** 즐겨찾기를 켜거나 끈 새 계획 문서. */
+const without = (list, name) => (Array.isArray(list) ? list.filter((n) => n !== name) : []);
+
+/** 즐겨찾기를 켜거나 끈 새 계획 문서. 켜면 그 니케의 「안 씀」 표시는 내린다(둘은 함께 붙지 않는다). */
 export function toggleFavorite(plan, name) {
   const on = plan.favorites.includes(name);
-  return { ...plan, favorites: on ? plan.favorites.filter((n) => n !== name) : [...plan.favorites, name] };
+  if (on) return { ...plan, favorites: without(plan.favorites, name) };
+  return { ...plan, favorites: [...plan.favorites, name], unused: without(plan.unused, name) };
+}
+
+/** 「안 씀」 표시를 켜거나 끈 새 계획 문서. 켜면 그 니케의 즐겨찾기는 내린다. 계정은 바뀌지 않는다 — 표시일 뿐이다. */
+export function toggleUnused(plan, name) {
+  const unused = Array.isArray(plan.unused) ? plan.unused : [];
+  if (unused.includes(name)) return { ...plan, unused: without(unused, name) };
+  return { ...plan, unused: [...unused, name], favorites: without(plan.favorites, name) };
+}
+
+/** 니케에 붙은 표시: 'favorite'(즐겨찾기) · 'unused'(안 씀) · null(없음). */
+export function markOf(plan, name) {
+  if (Array.isArray(plan?.favorites) && plan.favorites.includes(name)) return 'favorite';
+  if (Array.isArray(plan?.unused) && plan.unused.includes(name)) return 'unused';
+  return null;
+}
+
+/** 표시로 거르는 보기와 화면의 말. 빈 값은 「전부」다. */
+export const MARK_FILTERS = Object.freeze({ favorite: '즐겨찾기', unused: '안 씀', active: '안 씀 빼고' });
+
+/** 그 니케가 표시 거르기를 지나는가. `filter`가 비었거나 모르는 낱말이면 전부 지난다. */
+export function passesMark(plan, name, filter) {
+  const mark = markOf(plan, name);
+  if (filter === 'favorite') return mark === 'favorite';
+  if (filter === 'unused') return mark === 'unused';
+  if (filter === 'active') return mark !== 'unused';
+  return true;
+}
+
+/** 「안 씀」으로 표시한 니케 가운데 그 계정이 가진 이름(계정에 적힌 순서). 추천 계산에서 뺄 목록이다. */
+export function unusedOwned(plan, account) {
+  const unused = new Set(Array.isArray(plan?.unused) ? plan.unused : []);
+  const nikkes = isPlainObject(account?.nikkes) ? account.nikkes : {};
+  return Object.keys(nikkes).filter((name) => unused.has(name));
 }
 
 /** 한 보스의 기록 — 최근 날짜가 앞, 같은 날이면 나중에 적은 것이 앞. */

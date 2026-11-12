@@ -37,6 +37,7 @@ node src/cli.mjs intercept --account data/samples/account.sample.json           
 node src/cli.mjs intercept --account data/samples/account.sample.json --boss 크라켄 --budget 30 --top 3 --json intercept.json
 node src/cli.mjs intercept --account data/samples/account.sample.json --bosses data/samples/bosses.anomaly.sample.json --budget 25   # 검증용 보스 묶음
 node src/cli.mjs intercept --account data/samples/account.large.sample.json --boss 크라켄 --budget 20   # 보유 34명 시험 계정 — 약점 속성 니케가 후보에 드는 것을 본다
+node src/cli.mjs intercept --account data/samples/account.sample.json --boss 크라켄 --budget 12 --exclude "앨리스"   # 그 니케를 빼고 추천(「안 씀」 — 뺀 것이 결과에 남는다. suggest도 같다)
 ```
 
 요격전 추천은 보스마다 약점 속성 니케를 후보 풀에 단계당 최소 2명 넣고 후보 순서에서 앞에 둔다(`docs/data-model.md` §후보 생성 §우선 속성).
@@ -65,13 +66,13 @@ npm --prefix app run fixture                              # 컴포넌트 테스�
 
 **창이 둘이다**(P-027 — `app/README.md` §창 둘 — 데스크톱 앱과 오버레이): **데스크톱 앱 창**(`app` — 테두리가 있는 보통 창, 1100×720,
 `app/src/App.vue`)이 전부 한다 — 왼쪽 메뉴의 홈 · 요격전 · 내 니케 · 편성 도구 · 티어 · 설정(계정 연결 · 오버레이 · 계산 도구 ·
-고급). **오버레이 창**(`main` — 게임 위의 작은 위젯, `app/src/Overlay.vue`)은 마지막 요격전 추천만 보여 준다. 권한도 창마다 따로다
-(`src-tauri/capabilities/app.json` 명령 48개 / `overlay.json` 명령 15개 — 결과·상태 읽기와 자기 창의 조작). 앱을 실행하면 앱 창이 뜨고 오버레이는
+다른 도구 · 고급). **오버레이 창**(`main` — 게임 위의 작은 위젯, `app/src/Overlay.vue`)은 마지막 요격전 추천만 보여 준다. 권한도 창마다 따로다
+(`src-tauri/capabilities/app.json` 명령 50개 / `overlay.json` 명령 15개 — 결과·상태 읽기와 자기 창의 조작). 앱을 실행하면 앱 창이 뜨고 오버레이는
 설정대로 뜬다(앱과 함께 — 기본 · 게임을 찾았을 때 · 직접). **앱 창을 닫으면 앱이 끝난다**(오버레이 창은 닫히지 않고 숨는다. 끝내기
 명령은 없다 — 오버레이 위젯의 `×`는 숨기기다).
 화면은 파일 경로를 묻지 않는다: 계정은 기본 계정(이름 — 경로가 아니다), 보스 값은 내장한 `data/intercept/anomaly.json`.
 **파일을 직접 고르는 길은 설정 > 고급에만 있다**(예전 오버레이의 탭 넷이 거기에 예전 모양으로 있다). 두 창이 같은 것을 보게
-기본 계정·오버레이 설정·마지막 요격전 결과를 계정 폴더의 `.companion-state.json`·`.last-intercept.json`에 둔다
+기본 계정·오버레이 설정·마지막 요격전 결과를 계정 폴더의 `.companion-state.json`·`<계정>.intercept.json`(P-033 — 결과는 계정마다 따로다)에 둔다
 (Rust `src-tauri/src/shared_state.rs`, 화면 `app/src/lib/shared.ts` — 앱 창이 저장하면 `shared-state` 이벤트로 오버레이가 다시 읽는다).
 화면의 글에는 개발 용어(파일·JSON·시뮬·예산·경로)를 쓰지 않고(고급 제외), 숨기면 안 되는 표시(추정·미확인 값·미지원 효과·
 검증용 데이터·임시 규칙)는 접힌 구획 밖의 배지로 둔다 — `app/tests/Wording.test.ts`가 본다.
@@ -138,6 +139,28 @@ npm --prefix app test -- GrowthLab                        # 화면(가짜 backen
 node --test tests/unit/burst.test.mjs                     # 순수 함수: 버스트 보기 글 읽기, 요약(횟수·평균 주기·첫 버스트·단계별 사용자), 돌지 않는 편성, 두 편성 견주기, 결과 문서
 node --test tests/integration/burst.engine.test.mjs       # 실제 엔진(약 10초): 샘플 편성·자리 순서를 바꾼 편성, 2단계 없는 편성·3단계 한 명인 편성, 요청 길이·오류 격리
 npm --prefix app test -- BurstFlow                        # 화면(가짜 backend): 요약·띠·니케 줄·두 편성 위아래·빨간 표시와 문장·읽지 못함·진행
+```
+
+**매일 쓰는 편의 기능**(P-033 — `app/README.md` §매일 쓰는 편의 기능, 형식·규칙은 `docs/data-model.md` §계정 여러 개 · §즐겨찾기와 「안 씀」 ·
+§모듈 기록 · §도구 링크): ① **계정 여러 개** — 화면 위쪽의 계정 바꾸기(`app/src/views/AccountSwitch.vue` — 계정이 둘 이상일 때만, 계산 중에는
+잠긴다)와 설정 > 계정 연결의 목록. 니케·마지막 요격전 추천(`<계정>.intercept.json`)·기록(`<계정>.plan.json`)·저장한 편성(`<계정>.decks.json`)이
+계정마다 따로다. **숨기기는 지우기가 아니다**(Rust `shared_state.rs`의 `set_account_hidden` — 설정에 이름을 적을 뿐. **계정을 지우는 코드·명령을
+넣지 않는다** — 화면이 어디에 있는지 알려 주고 사람이 직접 지운다). ② **즐겨찾기와 「안 씀」** — 내 니케의 별과 「안 씀」 단추(함께 붙지 않는다.
+계정은 바뀌지 않는다), 내 니케·덱 빌더의 거르기, 요격전·편성 도구 추천의 「「안 씀」 니케 빼기」(선택 — 기본 꺼짐. `suggestSquads`·
+`recommendIntercept`의 옵션 `exclude`, CLI `--exclude`). **뺐다는 사실은 결과의 `excluded`와 접힌 구획 밖의 배지로 남는다.** ③ **모듈 기록장** —
+요격전 화면의 보기 「기록장」(`views/JournalBoard.vue`): 날짜별 보스·달성 단계·얻은 것(장비 부위·커스텀 모듈 수), 주(월~일)·월 합계와 보스별
+횟수, 요격전 대미지 기록(P-029)과 한 화면. 계획 문서의 `rewards`에 저장한다. **적은 것만 센다**(보상 확률·획득 수는 모른다). ④ **도구 링크** —
+설정 > 다른 도구: 목록은 `data/links/tools.json`(출처: 모음집 글). **여는 주소는 목록에 있는 것뿐이다**: 화면은 앱 명령 `open_tool_link`에 목록의
+id만 넘기고 Rust(`src-tauri/src/tool_links.rs`)가 실행 파일에 든 같은 목록에서 주소를 찾아 기본 브라우저로 연다(**셸·열기 플러그인을 더하지 않는다,
+화면에 `<a href>`·주소 칸을 두지 않는다, 그 사이트의 내용을 가져오지 않는다**). 「이 앱이 하지 않는 것」(PVP 계산 · 통계·랭킹 · 스토리 열람 ·
+유니온 구인)을 까닭과 함께 적는다. 규칙은 순수 모듈 `src/core/accounts.mjs`·`exclude.mjs`·`journal.mjs`·`dates.mjs`·`links.mjs`와 `plan.mjs`.
+**도구 목록에는 사람이나 대화형 세션이 직접 열어 확인한 것만 넣고, 한 줄 설명을 지어내지 않는다** — 기록에 기능이 없는 도구는 분류 한마디(`basis: "category"`)로 둔다.
+
+```bash
+node --test tests/unit/journal.test.mjs tests/unit/marks.test.mjs tests/unit/links.test.mjs   # 순수 함수: 기록장(주·월 합계·보스별 횟수)·표시와 추천에서 빼기·계정을 바꾸는 칸·도구 목록
+node --test tests/integration/exclude.engine.test.mjs     # 실제 엔진(약 25초): 「안 씀」을 뺀 편성 추천·요격전 추천(뺀 사실이 결과에 남는다), 빼지 않은 계산은 그대로
+npm --prefix app test -- DailyTools                       # 화면(가짜 backend): 계정 바꾸기·잠금·숨기기, 표시와 거르기·추천에서 빼기, 기록장, 도구 목록(여는 것은 목록의 id뿐)
+cargo test --manifest-path app/src-tauri/Cargo.toml --lib tool_links   # 목록에 없는 것(주소·경로·프로그램)은 열지 않는다(브라우저를 띄우지 않고 본다)
 ```
 
 **오버레이는 작은 위젯이다**(P-028 — `app/README.md` §오버레이 위젯): 모양 셋 — 접힘(알약: 보스 얼굴·이름·총딜) · 한 줄 카드(기본:

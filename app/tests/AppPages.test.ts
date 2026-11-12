@@ -664,10 +664,11 @@ describe('티어 화면', () => {
 // ── 설정 ─────────────────────────────────────────────────────────────────────
 
 describe('설정 화면', () => {
-  it('구획 넷이 있다: 계정 연결 · 오버레이 · 계산 도구 · 고급. 마지막으로 본 구획을 기억한다', async () => {
+  // P-033: 구획이 다섯이 됐다 — 「다른 도구」(커뮤니티 도구 목록과 이 앱이 하지 않는 것)가 계산 도구와 고급 사이에 들어왔다.
+  it('구획 다섯이 있다: 계정 연결 · 오버레이 · 계산 도구 · 다른 도구 · 고급. 마지막으로 본 구획을 기억한다', async () => {
     const w = await render();
     await openPage(w, 'settings');
-    expect(w.findAll('[data-testid^="section-"]').map((s) => s.text())).toEqual(['계정 연결', '오버레이', '계산 도구', '고급']);
+    expect(w.findAll('[data-testid^="section-"]').map((s) => s.text())).toEqual(['계정 연결', '오버레이', '계산 도구', '다른 도구', '고급']);
     expect(at(w, 'section-account').attributes('aria-selected')).toBe('true');
     await openSection(w, 'overlay');
     expect(localStorage.getItem('nikke-companion.settings.section')).toBe('overlay');

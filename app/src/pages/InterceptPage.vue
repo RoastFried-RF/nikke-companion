@@ -4,13 +4,17 @@
 // 계산은 루트의 recommendIntercept(CLI의 `intercept`와 같은 함수)가 하고, 여기서는 단추 하나와 정밀도 셋 중 하나를 고를 뿐이다.
 // 결과는 두 창이 함께 보는 자리(lib/shared.ts)에 올린다 — 디스크에 저장되고 오버레이 창이 받는다. 앱을 다시 켜도 보인다.
 // 계산 중에는 진행 패널이 보이고 이전 결과는 그대로 남는다. 계정이 없으면 계산 단추 대신 「계정 연결」 안내가 보인다.
+// P-033: 보기가 둘이다 — 「추천」(지금까지의 화면) · 「기록장」(views/JournalBoard.vue — 모듈 기록과 요격전 기록을 한 화면에서).
+// 추천 계산에서 「안 씀」으로 표시한 니케를 빼는 선택이 있다(기본은 빼지 않는다 — 뺐으면 결과에 배지로 남는다).
+// 결과는 계산에 쓴 계정의 것으로 저장한다(계정마다 따로다).
 import { computed, ref } from 'vue';
 import { announceWhile } from '../lib/activity';
 import { ANOMALY_BUNDLE } from '../lib/builtin';
 import { runInterceptWith } from '../lib/compute';
 import { useEngineRun } from '../lib/engineRun';
 import { localTime } from '../lib/format';
-import { RUN_INTERCEPT, useNav } from '../lib/nav';
+import { INTERCEPT_VIEWS, RUN_INTERCEPT, useNav, type InterceptView } from '../lib/nav';
+import { unusedOwned, usePlan } from '../lib/plan';
 import { INTERCEPT_PRECISION, precisionOf, recallPrecision, rememberPrecision, type PrecisionKey } from '../lib/precision';
 import { findBoss, useScreenTrack } from '../lib/screenTrack';
 import { useShared } from '../lib/shared';
@@ -20,9 +24,13 @@ import ProgressPanel from '../ui/ProgressPanel.vue';
 import SkeletonBlock from '../ui/SkeletonBlock.vue';
 import StatusPill from '../ui/StatusPill.vue';
 import InterceptResult from '../views/InterceptResult.vue';
+import JournalBoard from '../views/JournalBoard.vue';
+import { recall, remember } from '../lib/remember';
 
 /** 고른 정밀도를 기억하는 이름. */
 const PRECISION_KEY = 'intercept.precision';
+/** 「안 씀」 니케를 추천에서 뺄지 기억하는 이름('on'이면 뺀다 — 편성 도구의 추천과 같은 이름을 쓴다). */
+const EXCLUDE_KEY = 'recommend.exclude-unused';
 
 const shared = useShared();
 const nav = useNav();
@@ -31,6 +39,25 @@ const engine = useEngineRun(RUN_INTERCEPT);
 
 const precision = ref<PrecisionKey>(recallPrecision(PRECISION_KEY));
 const error = ref('');
+
+// 보기(P-033): 추천 · 기록장. 앱을 켜면 추천부터다. 어느 보기인지는 탐색 상태(lib/nav.ts)가 쥔다 — 다른 화면이 보스의 추천을
+// 보러 올 때(홈의 카드, 내 니케의 계획판, 자동 추적)는 추천 보기로 연다(nav.openIntercept). 앱 밖에서는 이 화면의 것을 쓴다.
+const ownView = ref<InterceptView>('recommend');
+const view = computed<InterceptView>(() => nav?.interceptView.value ?? ownView.value);
+function show(next: InterceptView): void {
+  if (nav) nav.interceptView.value = next;
+  else ownView.value = next;
+}
+
+// 「안 씀」 니케 빼기(P-033): 내 니케 화면에서 표시한 니케를 추천에서 뺀다. 기본은 빼지 않는다.
+const plan = usePlan();
+const excludeUnused = ref(recall(EXCLUDE_KEY) === 'on');
+/** 「안 씀」으로 표시한 니케의 수(표시한 이름의 수다 — 실제로 뺀 것은 결과에 적힌다). */
+const unusedCount = computed(() => plan?.plan.value.unused?.length ?? 0);
+function toggleExclude(): void {
+  excludeUnused.value = !excludeUnused.value;
+  remember(EXCLUDE_KEY, excludeUnused.value ? 'on' : 'off');
+}
 
 const report = computed<InterceptReport | null>(() => shared?.intercept.value ?? null);
 const ready = computed(() => shared?.ready.value ?? true);
@@ -80,10 +107,15 @@ const trackedGap = computed<{ kind: 'none' | 'absent'; name: string } | null>(()
 async function run(): Promise<void> {
   if (!shared) return;
   const budget = precisionOf(INTERCEPT_PRECISION, precision.value).budget;
+  /** 이 계산에 쓴 계정의 이름 — 결과는 이 계정의 것으로 저장한다(계산하는 동안 계정이 바뀌어도). */
+  let usedAccount: string | null = null;
   await engine.run<InterceptReport>(
     async (deps) => {
       const read = await shared.loadAccount();
-      return runInterceptWith({ account: read.account, bundle: ANOMALY_BUNDLE, budget }, deps);
+      usedAccount = read.name;
+      // 「안 씀」 니케를 빼기로 했으면 이 계정이 가진 것만 추려 넘긴다 — 뺀 것은 결과에 남는다(배지와 계산 조건).
+      const exclude = excludeUnused.value ? unusedOwned(plan?.plan.value, read.account) : [];
+      return runInterceptWith({ account: read.account, bundle: ANOMALY_BUNDLE, budget, ...(exclude.length ? { exclude } : {}) }, deps);
     },
     {
       // 이전 결과는 계산이 끝날 때까지 그대로 보인다.
@@ -92,7 +124,7 @@ async function run(): Promise<void> {
       },
       done: (computed) => {
         // 맞지 않는 문서면 던진다 — 알리고 앞서 보이던 결과를 둔다.
-        shared.publishIntercept(computed).catch((e: unknown) => {
+        shared.publishIntercept(computed, usedAccount).catch((e: unknown) => {
           error.value = e instanceof Error ? e.message : String(e);
         });
       },
@@ -109,7 +141,23 @@ async function run(): Promise<void> {
   <div class="nk-page" data-testid="page-intercept">
     <header class="nk-head">
       <h1 class="nk-title">요격전</h1>
-      <span class="nk-muted">이상 개체 요격전 — 보스마다 내 니케로 총딜이 가장 큰 편성을 찾는다</span>
+      <div class="nk-seg" role="tablist" aria-label="요격전 보기" data-testid="intercept-views">
+        <button
+          v-for="v in INTERCEPT_VIEWS"
+          :key="v.key"
+          type="button"
+          role="tab"
+          class="nk-seg__item"
+          :class="{ 'nk-seg__item--on': view === v.key }"
+          :aria-selected="view === v.key"
+          :data-testid="`intercept-view-${v.key}`"
+          @click="show(v.key)"
+        >
+          {{ v.label }}
+        </button>
+      </div>
+      <span v-if="view === 'recommend'" class="nk-muted">이상 개체 요격전 — 보스마다 내 니케로 총딜이 가장 큰 편성을 찾는다</span>
+      <span v-else class="nk-muted">요격전을 돌고 얻은 것과 대미지 기록 — 날짜별로, 주·월 합계와 보스별 횟수</span>
     </header>
 
     <SkeletonBlock v-if="!ready" shape="cards" :count="5" label="저장해 둔 추천을 읽는 중" />
@@ -124,6 +172,12 @@ async function run(): Promise<void> {
         data-testid="need-account"
         @action="nav?.openSettings('account')"
       />
+
+      <!-- 기록장(P-033): 모듈 기록과 요격전 기록을 한 화면에서. 계산이 도는 중이면 한 줄로 알린다. -->
+      <template v-else-if="view === 'journal'">
+        <p v-if="engine.computing" class="nk-note" role="status" data-testid="journal-computing">추천을 계산하는 중이다 — 추천 보기에서 진행을 볼 수 있다.</p>
+        <JournalBoard />
+      </template>
 
       <section v-else class="nk-card" aria-label="추천 계산" data-testid="intercept-controls">
         <div class="nk-row">
@@ -147,6 +201,20 @@ async function run(): Promise<void> {
               <span class="nk-seg__sub">{{ choice.time }}</span>
             </button>
           </div>
+          <!-- 누르면 켜지고 다시 누르면 꺼진다(입력 칸이 아니라 단추다 — 이 화면에는 기록 칸 말고 입력 칸을 두지 않는다). -->
+          <button
+            v-if="plan"
+            type="button"
+            class="nk-btn nk-btn--quiet"
+            :class="{ 'intercept__toggle--on': excludeUnused }"
+            :aria-pressed="excludeUnused"
+            :disabled="engine.computing"
+            title="내 니케 화면에서 「안 씀」으로 표시한 니케를 추천에서 뺀다 — 뺀 니케는 결과에 적힌다"
+            data-testid="exclude-unused"
+            @click="toggleExclude"
+          >
+            {{ excludeUnused ? '「안 씀」 니케 빼는 중' : '「안 씀」 니케 빼기' }} <span data-testid="unused-count">({{ unusedCount }}명)</span>
+          </button>
           <button
             type="button"
             class="nk-btn nk-btn--primary"
@@ -161,6 +229,7 @@ async function run(): Promise<void> {
         <p v-if="engine.busyElsewhere" class="nk-muted" data-testid="busy-elsewhere">다른 화면에서 계산이 돌고 있다. 끝나면 여기서 계산할 수 있다.</p>
       </section>
 
+      <template v-if="view === 'recommend' || !accountName">
       <ProgressPanel
         v-if="engine.computing"
         :title="progress.title"
@@ -198,6 +267,16 @@ async function run(): Promise<void> {
           <span>보스 5종의 추천 편성을 아직 찾지 않았다. 정밀도를 고르고 「추천 계산」을 누른다 — 창을 닫지 않으면 다른 화면을 봐도 계속 계산한다.</span>
         </div>
       </div>
+      </template>
     </template>
   </div>
 </template>
+
+<style scoped>
+/* 켜 둔 선택: 강조색 테두리(색만으로 알리지 않는다 — 글자도 「빼는 중」으로 바뀐다). */
+.intercept__toggle--on {
+  border-color: var(--nk-accent);
+  background: var(--nk-accent-soft);
+  color: var(--nk-text);
+}
+</style>

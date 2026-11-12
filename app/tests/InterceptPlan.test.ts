@@ -375,14 +375,32 @@ describe('요격전 기록', () => {
     expect(at(again, 'record-item').find('[data-testid="record-item-damage"]').text()).toBe('41.53억');
     again.unmount();
 
-    // 다른 계정을 기본 계정으로 고르면 그 계정의 기록(없다)이 보인다.
+    // 다른 계정을 기본 계정으로 고르면 그 계정의 것이 보인다.
+    // P-033: 추천 결과도 계정마다 따로다 — 앞 계정(me)의 추천은 이 계정(sub)에 보이지 않는다(예전에는 결과가 한 자리뿐이라 그대로 보였다).
     disk.addAccount('sub', documents[ACCOUNT_PATH]);
     disk.chosen = 'sub';
     const other = await render();
     await openPage(other, 'intercept');
-    expect(at(other, 'estimate-pill').text()).toBe('추정 · 실전 미대조');
+    expect(at(other, 'estimate-pill').exists()).toBe(false);
     expect(at(other, 'record-item').exists()).toBe(false);
+    expect(at(other, 'hint').text()).toContain('아직 찾지 않았다');
     expect(api.loadPlan).toHaveBeenCalled();
+    other.unmount();
+
+    // 이 계정으로 추천을 받으면 그 추천이 보이고, 기록은 여전히 없다(기록은 me 계정의 것이다).
+    disk.saveIntercept(sample, 'sub');
+    const own = await render();
+    await openPage(own, 'intercept');
+    expect(at(own, 'estimate-pill').text()).toBe('추정 · 실전 미대조');
+    expect(at(own, 'record-item').exists()).toBe(false);
+    own.unmount();
+
+    // 앞 계정으로 돌아가면 그 계정의 추천과 기록이 그대로다.
+    disk.chosen = 'me';
+    const back = await render();
+    await openPage(back, 'intercept');
+    expect(at(back, 'estimate-pill').text()).toBe('추정 · 기록과 12% 차이');
+    expect(at(back, 'record-item').find('[data-testid="record-item-damage"]').text()).toBe('41.53억');
   });
 });
 

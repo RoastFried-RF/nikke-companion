@@ -2010,9 +2010,19 @@
         "도구 링크가 기본 브라우저로 열린다"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261112T141531-P-033-a1",
+        "verified_tree": "e5d3b4f56336d57e80c699a09edf98855b3cc9c2",
+        "verified_at": "2026-11-12T14:58:27.218Z",
+        "commit": null
+      }
     },
     {
       "id": "P-034",

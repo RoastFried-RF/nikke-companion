@@ -2,7 +2,8 @@
 // 계정을 고치거나 계산하지 않는다 — 문서에 적힌 값을 읽어 보여 줄 뿐이다. 적지 않았거나 모르는 칸은 null(「미확인」)이다.
 
 import { investmentScore } from '@core/candidates.mjs';
-import type { AccountDoc, AccountNikke, EngineCatalog, NikkeInfo } from '../types';
+import { MARK_FILTERS, markOf as coreMarkOf, passesMark } from '@core/plan.mjs';
+import type { AccountDoc, AccountNikke, EngineCatalog, MarkFilter, NikkeInfo, NikkeMark, PlanDoc } from '../types';
 import { nikkeInfoFrom } from './nikkeInfo';
 
 /** 미확인 칸의 이름(계정 문서의 키 → 화면의 말). */
@@ -92,14 +93,31 @@ export interface RosterFilter {
   grownOnly: boolean;
   /** 이름의 일부. */
   query: string;
+  /** 표시로 거르기(P-033): 즐겨찾기만 · 안 씀만 · 안 씀 빼고. 없거나 빈 글자면 전부. */
+  mark?: MarkFilter;
 }
 
 export const NO_FILTER: RosterFilter = Object.freeze({ element: '', burst: '', grownOnly: false, query: '' });
 
-/** 거른 목록. 입력을 바꾸지 않는다. */
-export function filterRoster(rows: readonly RosterRow[], filter: RosterFilter): RosterRow[] {
+/** 표시로 거르는 보기(화면의 단추 — 순서대로). 말은 루트의 MARK_FILTERS다. */
+export const MARK_CHOICES: { key: Exclude<MarkFilter, ''>; label: string }[] = (['favorite', 'unused', 'active'] as const).map((key) => ({
+  key,
+  label: (MARK_FILTERS as Record<string, string>)[key],
+}));
+
+/** 그 니케의 표시(즐겨찾기 · 안 씀 · 없음). 계획이 없으면 표시도 없다. */
+export function markOf(plan: PlanDoc | null | undefined, name: string): NikkeMark {
+  return plan ? (coreMarkOf(plan, name) as NikkeMark) : null;
+}
+
+/**
+ * 거른 목록. 입력을 바꾸지 않는다. 표시로 거르려면 계획(즐겨찾기·「안 씀」이 든 문서)을 함께 넘긴다 —
+ * 넘기지 않으면 표시 거르기는 하지 않는다.
+ */
+export function filterRoster(rows: readonly RosterRow[], filter: RosterFilter, plan: PlanDoc | null = null): RosterRow[] {
   const query = filter.query.trim().toLowerCase().replaceAll(' ', '');
   return rows.filter((row) => {
+    if (plan && filter.mark && !passesMark(plan, row.name, filter.mark)) return false;
     if (filter.element && row.info.element !== filter.element) return false;
     if (filter.burst && row.info.burst !== filter.burst && row.info.burst !== 'A') return false;
     if (filter.grownOnly && !row.grown) return false;

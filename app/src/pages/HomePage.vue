@@ -80,12 +80,12 @@ const firstRun = computed(() => (shared?.ready.value ?? true) && !accountName.va
 /** 다음에 할 일 하나. 위에서부터 아직 안 된 것을 고른다. */
 const next = computed<{ label: string; why: string; act: () => void }>(() => {
   if (!accountName.value) return { label: '계정 연결하기', why: '먼저 계정을 연결한다.', act: () => nav?.openSettings('account') };
-  if (!report.value) return { label: '요격전 추천 받기', why: '보스마다 추천 편성을 한 번 계산해 둔다.', act: () => nav?.go('intercept') };
+  if (!report.value) return { label: '요격전 추천 받기', why: '보스마다 추천 편성을 한 번 계산해 둔다.', act: () => nav?.openIntercept() };
   if (!tracking.value) {
     return { label: '자동 추적 켜기', why: '게임에서 보고 있는 보스의 추천이 스스로 보이게 한다.', act: () => void track?.setEnabled(true) };
   }
   if (!overlayShown.value) return { label: '오버레이 띄우기', why: '게임 위에서 추천을 본다.', act: () => void setVisible(true) };
-  return { label: '요격전 추천 보기', why: '준비가 끝났다.', act: () => nav?.go('intercept') };
+  return { label: '요격전 추천 보기', why: '준비가 끝났다.', act: () => nav?.openIntercept() };
 });
 
 const STEPS = [
@@ -100,7 +100,7 @@ const computedAt = computed(() => localTime(shared?.snapshot.value?.intercept_sa
 /** 보스 카드를 누르면 그 보스를 고른 채 요격전 화면을 연다. */
 function openBoss(id: string): void {
   remember(LAST_BOSS, id);
-  nav?.go('intercept');
+  nav?.openIntercept();
 }
 
 // ── 오늘의 요격전(P-029): 주력 니케의 장비와 보스의 보상 부위를 이은 한 줄 + 그 보스의 1위 편성 + 지난 기록 ──
@@ -130,7 +130,7 @@ onActivated(() => {
 /** 오늘의 요격전 카드를 누르면: 급한 보스가 있으면 그 보스를 고른 채, 없으면 그냥 요격전 화면을 연다. */
 function openToday(id: string | null): void {
   if (id) remember(LAST_BOSS, id);
-  nav?.go('intercept');
+  nav?.openIntercept();
 }
 </script>
 

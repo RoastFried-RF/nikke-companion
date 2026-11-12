@@ -21,6 +21,7 @@ import SettingsPage from './pages/SettingsPage.vue';
 import TierPage from './pages/TierPage.vue';
 import ToolsPage from './pages/ToolsPage.vue';
 import NavIcon from './ui/NavIcon.vue';
+import AccountSwitch from './views/AccountSwitch.vue';
 
 /** 붙이기를 켜 두었는지 기억하는 localStorage 키(components/GamePanel.vue와 같다). */
 const FOLLOW_KEY = 'nikke-companion.follow-game';
@@ -55,7 +56,7 @@ provideAccountLink();
 const track = provideScreenTrack({
   computing: () => computingRun.value !== null,
   onIntercept: () => page.value === 'intercept',
-  moveToIntercept: () => nav.go('intercept'),
+  moveToIntercept: () => nav.openIntercept(),
 });
 // 계산이 시작·끝나거나 화면이 바뀌면 미뤄 둔 이동을 다시 보게 한다(계산이 끝났으면 그때 옮긴다).
 watch([computingRun, page, nav.section], () => track.settle());
@@ -114,6 +115,9 @@ onMounted(async () => {
     </nav>
 
     <main class="app__main" data-testid="app-main">
+      <!-- 계정 여러 개(P-033): 고를 계정이 둘 이상이면 어느 화면에서든 위쪽에서 바꾼다. 계산 중에는 바꾸지 못한다. -->
+      <AccountSwitch :computing="computingRun !== null" />
+
       <!-- 계산 중에는 자동 추적이 화면을 옮기지 않는다. 어느 화면을 보고 있든 보이게 맨 위에 둔다. -->
       <p v-if="track.pendingMove.value" class="nk-note" role="status" data-testid="track-pending-move">
         게임에서 보고 있는 보스: <strong>{{ track.target.value?.name }}</strong> — 계산이 끝나면 요격전 화면으로 옮긴다(계산 중에는 화면을 옮기지

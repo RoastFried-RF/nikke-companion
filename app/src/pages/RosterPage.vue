@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // 내 니케(데스크톱 앱): 기본 계정의 보유 니케를 초상화 격자로 — 이름·속성·버스트 단계와 육성 요약(돌파·스킬·오버로드 줄 수).
 // 구획이 둘이다(P-029): 「니케」(격자 — 별을 눌러 즐겨찾기) · 「장비 · 요격전 계획」(views/PlanBoard.vue — 오늘 돌 보스·장비 현황·속성 커버리지).
+// P-033: 별 옆에 「안 씀」 표시가 있다(둘은 함께 붙지 않는다). 표시로 거른다 — 즐겨찾기만 · 안 씀만 · 안 씀 빼고.
+// 「안 씀」은 계정을 바꾸지 않는다 — 표시일 뿐이고, 추천 계산에서 빼는 것은 요격전·편성 도구에서 따로 고른다.
 // 속성·버스트 단계·「육성한 것만」으로 거르고 이름으로 찾는다. 계정을 고치지 않는다 — 계정에 적힌 값을 보여 줄 뿐이다.
 // 초상화는 한꺼번에 묻지 않는다: 처음에는 한 판만 그리고, 아래로 내리거나 「더 보기」를 누르면 다음 판을 그린다.
 import { computed, onActivated, ref, watch } from 'vue';
@@ -9,11 +11,11 @@ import { localTime } from '../lib/format';
 import { useNav } from '../lib/nav';
 import { usePlan } from '../lib/plan';
 import { recall, remember } from '../lib/remember';
-import { breakthroughLabel, filterRoster, overloadLabel, rosterRows, skillsLabel, type RosterFilter } from '../lib/roster';
+import { breakthroughLabel, filterRoster, MARK_CHOICES, markOf, overloadLabel, rosterRows, skillsLabel, type RosterFilter } from '../lib/roster';
 import { LAST_BOSS } from '../lib/screenTrack';
 import { useShared } from '../lib/shared';
 import { useNikkeCatalog } from '../lib/useNikkeCatalog';
-import type { AccountRead, PlanDoc } from '../types';
+import type { AccountRead, MarkFilter, PlanDoc } from '../types';
 import PlanBoard from '../views/PlanBoard.vue';
 import EmptyState from '../ui/EmptyState.vue';
 import NikkeTile from '../ui/NikkeTile.vue';
@@ -32,7 +34,7 @@ const { catalog, info } = useNikkeCatalog();
 const read = ref<AccountRead | null>(null);
 const loading = ref(false);
 const error = ref('');
-const filter = ref<RosterFilter>({ element: '', burst: '', grownOnly: false, query: '' });
+const filter = ref<RosterFilter>({ element: '', burst: '', grownOnly: false, query: '', mark: '' });
 const shownCount = ref(PAGE_SIZE);
 /** 늦게 끝난 읽기가 나중 읽기를 덮지 않게 한다. */
 let seq = 0;
@@ -66,7 +68,7 @@ onActivated(() => {
 });
 
 const rows = computed(() => rosterRows(read.value?.account, catalog.value));
-const filtered = computed(() => filterRoster(rows.value, filter.value));
+const filtered = computed(() => filterRoster(rows.value, filter.value, planDoc.value));
 const visible = computed(() => filtered.value.slice(0, shownCount.value));
 const rest = computed(() => Math.max(0, filtered.value.length - shownCount.value));
 // 거르기를 바꾸면 첫 판부터 다시 그린다.
@@ -95,14 +97,27 @@ const report = computed(() => shared?.intercept.value ?? null);
 const blankPlan: PlanDoc = { schema_version: 1, kind: 'intercept_plan', favorites: [], records: [] };
 const planDoc = computed(() => plan?.plan.value ?? blankPlan);
 const isFavorite = (name: string) => planDoc.value.favorites.includes(name);
+const isUnused = (name: string) => markOf(planDoc.value, name) === 'unused';
+/** 표시한 니케의 수(이 계정이 가진 니케만 센다). */
+const markCounts = computed(() => ({
+  favorite: rows.value.filter((r) => markOf(planDoc.value, r.name) === 'favorite').length,
+  unused: rows.value.filter((r) => markOf(planDoc.value, r.name) === 'unused').length,
+}));
 /** 즐겨찾기를 켜거나 끈다. 저장하지 못하면 계획 쪽에 이유가 남는다. */
 function toggleFavorite(name: string): void {
   plan?.toggleFavorite(name).catch(() => {});
 }
+/** 「안 씀」 표시를 켜거나 끈다(P-033). 계정은 바뀌지 않는다. */
+function toggleUnused(name: string): void {
+  plan?.toggleUnused(name).catch(() => {});
+}
+function toggleMark(value: Exclude<MarkFilter, ''>): void {
+  filter.value.mark = filter.value.mark === value ? '' : value;
+}
 /** 계획판에서 보스를 누르면 그 보스를 고른 채 요격전 화면을 연다. */
 function openBoss(id: string): void {
   remember(LAST_BOSS, id);
-  nav?.go('intercept');
+  nav?.openIntercept();
 }
 
 const synchro = computed(() => read.value?.account?.account?.synchro_level ?? null);
@@ -222,14 +237,37 @@ function toggle(key: 'element' | 'burst', value: string): void {
           <input v-model="filter.grownOnly" type="checkbox" data-testid="filter-grown" />
           육성한 것만
         </label>
+        <div v-if="plan" class="nk-seg" role="group" aria-label="표시">
+          <button
+            v-for="m in MARK_CHOICES"
+            :key="m.key"
+            type="button"
+            class="nk-seg__item"
+            :class="{ 'nk-seg__item--on': filter.mark === m.key }"
+            :aria-pressed="filter.mark === m.key"
+            :data-mark="m.key"
+            data-testid="filter-mark"
+            @click="toggleMark(m.key)"
+          >
+            {{ m.label }}
+          </button>
+        </div>
         <span class="nk-muted" data-testid="roster-shown">{{ filtered.length }}명</span>
+        <span v-if="plan" class="nk-muted" data-testid="roster-marks">즐겨찾기 {{ markCounts.favorite }}명 · 안 씀 {{ markCounts.unused }}명</span>
       </section>
 
       <p v-if="filtered.length === 0" class="nk-note" data-testid="roster-empty">조건에 맞는 니케가 없다.</p>
 
       <div v-else class="roster__scroll" data-testid="roster-scroll" @scroll.passive="onScroll">
         <ul class="roster__grid" data-testid="roster-grid">
-          <li v-for="row in visible" :key="row.name" class="roster__item" :data-grown="row.grown ? 'yes' : 'no'" data-testid="roster-item">
+          <li
+            v-for="row in visible"
+            :key="row.name"
+            class="roster__item"
+            :data-grown="row.grown ? 'yes' : 'no'"
+            :data-mark="markOf(planDoc, row.name) ?? 'none'"
+            data-testid="roster-item"
+          >
             <NikkeTile :name="row.name" :element="row.info.element" :burst="row.info.burst" />
             <span class="roster__growth" data-testid="roster-growth">
               <span title="돌파(+코어 강화)" data-testid="roster-breakthrough">{{ breakthroughLabel(row) }}</span>
@@ -248,6 +286,18 @@ function toggle(key: 'element' | 'burst', value: string): void {
               @click="toggleFavorite(row.name)"
             >
               {{ isFavorite(row.name) ? '★' : '☆' }}
+            </button>
+            <!-- 안 씀(P-033): 쓰지 않는 니케에 붙이는 표시. 추천에서 빼는 것은 요격전·편성 도구에서 고른다. -->
+            <button
+              v-if="plan"
+              type="button"
+              class="roster__unused"
+              :aria-pressed="isUnused(row.name)"
+              :title="isUnused(row.name) ? `${row.name} — 「안 씀」 표시 떼기` : `${row.name} — 「안 씀」으로 표시하기(계정은 바뀌지 않는다)`"
+              data-testid="roster-unused"
+              @click="toggleUnused(row.name)"
+            >
+              안 씀
             </button>
           </li>
         </ul>
@@ -316,6 +366,32 @@ function toggle(key: 'element' | 'burst', value: string): void {
 
 .roster__fav[aria-pressed='true'] {
   color: var(--nk-estimate);
+}
+
+/* 안 씀: 눌린 표시는 테두리와 글자색으로(색만으로 알리지 않는다 — 글자가 있고, 타일도 흐려진다). */
+.roster__unused {
+  padding: 0 var(--nk-space-3);
+  border: var(--nk-border-width) solid var(--nk-border);
+  border-radius: var(--nk-radius-pill);
+  background: transparent;
+  color: var(--nk-text-faint);
+  font: inherit;
+  font-size: var(--nk-font-xs);
+  cursor: pointer;
+}
+
+.roster__unused[aria-pressed='true'] {
+  border-color: var(--nk-unknown);
+  color: var(--nk-unknown);
+  font-weight: var(--nk-weight-bold);
+}
+
+.roster__item[data-mark='unused'] {
+  opacity: 0.6;
+}
+
+.roster__item[data-mark='favorite'] {
+  border-color: var(--nk-estimate);
 }
 
 .roster__growth {

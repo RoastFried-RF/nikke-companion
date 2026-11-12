@@ -46,6 +46,7 @@ import BurstPanel from './BurstPanel.vue';
 import DeckBook from './DeckBook.vue';
 import DeckOpponent from './DeckOpponent.vue';
 import DeckRoster from './DeckRoster.vue';
+import { usePlan } from '../lib/plan';
 
 const shared = useShared();
 const nav = useNav();
@@ -62,6 +63,8 @@ const loading = ref(false);
 const accountError = ref('');
 let readSeq = 0;
 const accountName = computed(() => shared?.accountName.value ?? null);
+/** 내 니케에서 붙인 표시(즐겨찾기 · 안 씀) — 보유 니케 격자의 거르기와 표시에 쓴다(P-033). 앱 밖에서는 null. */
+const marks = usePlan();
 const ready = computed(() => shared?.ready.value ?? true);
 
 async function load(): Promise<void> {
@@ -166,6 +169,13 @@ const report = shallowRef<DeckReport | null>(null);
 const swapReport = shallowRef<DeckSwapReport | null>(null);
 const orderReport = shallowRef<DeckOrderReport | null>(null);
 const error = ref('');
+// 계정을 바꾸면 앞 계정으로 낸 결과는 치운다(P-033 — 같은 다섯이어도 계정마다 육성이 다르다. 결과는 계정마다 따로다).
+watch(accountName, () => {
+  report.value = null;
+  swapReport.value = null;
+  orderReport.value = null;
+  error.value = '';
+});
 
 /** 보이는 결과가 지금 편성·지금 상대의 것인가. */
 const fresh = computed(() => report.value !== null && report.value.key === key.value);
@@ -306,7 +316,8 @@ watch(key, () => {
   burstOther.value = null;
 });
 const burstSquads = computed(() => (full.value ? [{ name: '지금 편성', members: members.value }, ...(burstOther.value ? [burstOther.value] : [])] : []));
-const burstKey = computed(() => JSON.stringify([key.value, burstOther.value?.members ?? null]));
+// 계정도 열쇠에 든다(P-033): 같은 다섯이어도 계정이 다르면 육성이 달라 버스트 흐름이 다를 수 있다.
+const burstKey = computed(() => JSON.stringify([accountName.value, key.value, burstOther.value?.members ?? null]));
 const burstBlocked = computed(() => {
   if (!opponent.value) return '상대를 먼저 고른다';
   if (!full.value) return `다섯 자리를 모두 채우면 버스트 흐름을 볼 수 있다(지금 ${members.value.length}명)`;
@@ -622,7 +633,7 @@ const warnings = computed(() => {
         :blocked="burstBlocked"
       />
 
-      <DeckRoster :rows="rows" :picked="members" :weak-to="weakTo" :disabled="engine.computing" @pick="add" />
+      <DeckRoster :rows="rows" :picked="members" :weak-to="weakTo" :disabled="engine.computing" :plan="marks?.plan.value ?? null" @pick="add" />
 
       <template v-if="decks">
         <p v-if="decks.problem.value || bookError" class="nk-error" role="alert" data-testid="book-problem">{{ bookError || decks.problem.value }}</p>

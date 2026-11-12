@@ -83,6 +83,7 @@ pub mod report;
 pub mod screen_track;
 pub mod shared_state;
 pub mod stay_on_top;
+pub mod tool_links;
 
 use std::collections::VecDeque;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -1465,6 +1466,19 @@ async fn set_default_account(app: AppHandle, name: String) -> Result<SharedSnaps
     .await
 }
 
+/// 계정을 목록에서 숨기거나 다시 보이게 한다(P-033 — 계정 여러 개). **파일은 지우지 않는다**: 숨겨도 계정·기록·저장한 편성·
+/// 결과는 계정 폴더에 그대로 있다. 지우는 명령은 앱에 없다 — 화면이 어디에 있는지 알려 주고 사람이 직접 지운다.
+#[tauri::command]
+async fn set_account_hidden(app: AppHandle, name: String, hidden: bool) -> Result<SharedSnapshot, String> {
+    blocking(move || {
+        let snapshot =
+            shared_state::set_account_hidden(&shared_dir()?, &name, hidden).map_err(|e| e.to_string())?;
+        emit_shared(&app, &snapshot);
+        Ok(snapshot)
+    })
+    .await
+}
+
 /// 오버레이를 언제 띄울지 정한다(`with_app`·`with_game`·`manual`). 다음 실행부터, 그리고 지금 도는 게임 창 추적에도 쓰인다.
 #[tauri::command]
 async fn set_overlay_launch(app: AppHandle, mode: String) -> Result<SharedSnapshot, String> {
@@ -1490,18 +1504,20 @@ async fn read_account(name: Option<String>) -> Result<Value, String> {
 
 /// 요격전 추천 결과를 계정 폴더에 저장하고 모든 창에 알린다(오버레이 창이 새 결과를 읽는다).
 /// 종류·판이 맞지 않으면 쓰지 않고 한국어로 거부한다 — 앞서 저장한 결과는 그대로다.
+/// 결과는 계정마다 따로 둔다(P-033): `name`은 계산을 시작할 때 쓰던 계정의 이름이다(경로가 아니다 — 계정 폴더에 있는
+/// 계정이어야 한다). 주지 않으면 지금 쓰는 계정의 것으로 저장한다.
 #[tauri::command]
-async fn save_intercept_result(app: AppHandle, report: Value) -> Result<SharedSnapshot, String> {
+async fn save_intercept_result(app: AppHandle, report: Value, name: Option<String>) -> Result<SharedSnapshot, String> {
     blocking(move || {
-        let snapshot =
-            shared_state::save_intercept(&shared_dir()?, &report).map_err(|e| e.to_string())?;
+        let snapshot = shared_state::save_intercept_for(&shared_dir()?, name.as_deref(), &report)
+            .map_err(|e| e.to_string())?;
         emit_shared(&app, &snapshot);
         Ok(snapshot)
     })
     .await
 }
 
-/// 저장해 둔 마지막 요격전 추천 결과. 없으면 null. 읽을 수 없으면(깨졌다·다른 종류·다른 판) 한국어 오류 문장.
+/// 지금 쓰는 계정의 마지막 요격전 추천 결과. 없으면 null. 읽을 수 없으면(깨졌다·다른 종류·다른 판) 한국어 오류 문장.
 #[tauri::command]
 async fn load_intercept_result() -> Result<Option<Value>, String> {
     blocking(|| shared_state::load_intercept(&shared_dir()?).map_err(|e| e.to_string())).await
@@ -1550,6 +1566,14 @@ async fn save_decks(name: Option<String>, decks: Value) -> Result<(), String> {
 #[tauri::command]
 async fn copy_text(text: String) -> Result<(), String> {
     blocking(move || clipboard::write_text(&text).map_err(|e| e.to_string())).await
+}
+
+/// 도구 링크(P-033)를 기본 브라우저로 연다. 화면이 넘기는 것은 **목록의 id**다(주소가 아니다) — 앱에 든 목록
+/// (`data/links/tools.json`)에 그 id가 있을 때만 그 도구의 주소를 연다(`tool_links::open`). 연 도구의 이름과 주소를 돌려준다.
+/// 이 앱은 그 사이트의 내용을 가져오지 않는다.
+#[tauri::command]
+async fn open_tool_link(id: String) -> Result<tool_links::ToolLink, String> {
+    blocking(move || tool_links::open(&id).map_err(|e| e.to_string())).await
 }
 
 /// 데스크톱 앱 창을 앞으로 가져온다(최소화돼 있으면 되돌린다). 오버레이의 「앱 열기」와 두 번째 실행이 부른다 —
@@ -2102,7 +2126,9 @@ pub fn run() {
             save_plan,
             load_decks,
             save_decks,
-            copy_text
+            copy_text,
+            set_account_hidden,
+            open_tool_link
         ])
         .setup(|app| {
             let window = app

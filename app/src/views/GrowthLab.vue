@@ -213,6 +213,12 @@ const cubePick = ref<string | null>(null);
 const cubeOnly = computed(() => (cubePick.value && members.value.includes(cubePick.value) ? cubePick.value : null));
 const cubeReport = shallowRef<CubeReport | null>(null);
 const cubeFresh = computed(() => cubeReport.value !== null && cubeReport.value.key === key.value && cubeReport.value.only === cubeOnly.value);
+// 계정을 바꾸면 앞 계정으로 낸 결과 셋은 치운다(P-033 — 같은 편성이어도 계정마다 육성이 다르다).
+watch(accountName, () => {
+  table.value = null;
+  trial.value = null;
+  cubeReport.value = null;
+});
 const cubePlan = computed(() => cubePreview(read.value?.account, squad.value, catalog.value, cubeOnly.value));
 const cubeHint = computed(() => {
   if (!cubes.value.known) return '큐브 목록을 읽지 못해 큐브를 바꿔 볼 수 없다';

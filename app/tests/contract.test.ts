@@ -1,5 +1,7 @@
 // 프런트와 Rust 쪽이 맞물리는 곳, 그리고 "쓰는 것만 허용한다·네트워크를 쓰지 않는다"는 약속의 정적 확인.
 import { INTERCEPT_REPORT_SCHEMA_VERSION } from '@core/intercept.mjs';
+import { isLinkId, isSafeLinkUrl, TOOL_LINKS_KIND, TOOL_LINKS_SCHEMA_VERSION } from '@core/links.mjs';
+import { emptyPlan, PLAN_KIND, PLAN_SCHEMA_VERSION } from '@core/plan.mjs';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -69,7 +71,11 @@ import {
   loadInterceptResult,
   startupReportPath,
   syncFailure,
+  setAccountHidden,
+  openToolLink,
 } from '../src/lib/backend';
+import toolLinksData from '../../data/links/tools.json';
+import toolLinksRs from '../src-tauri/src/tool_links.rs?raw';
 import appCapability from '../src-tauri/capabilities/app.json';
 import capability from '../src-tauri/capabilities/overlay.json';
 import tauriConf from '../src-tauri/tauri.conf.json';
@@ -177,6 +183,10 @@ const COMMANDS = [
   'copy_text',
   // P-032: 버스트 흐름 — 계산 도구의 텍스트 보기를 돌려 글을 받는 명령 하나. 데스크톱 앱 창의 것이다(오버레이는 계산을 시작하지 않는다).
   'engine_run_views',
+  // P-033: 계정 여러 개 — 계정을 목록에서 숨기기와 다시 보이기(파일은 지우지 않는다), 도구 링크 — 목록에 있는 도구를 기본 브라우저로 열기.
+  // 둘 다 데스크톱 앱 창의 것이다.
+  'set_account_hidden',
+  'open_tool_link',
 ];
 
 /**
@@ -250,10 +260,14 @@ const sharedSnapshot = {
   default_account: 'me',
   remembered: true,
   accounts: [{ name: 'me', modified_at: '2026-11-12T06:00:00.000Z' }],
+  hidden_accounts: [{ name: 'sub', modified_at: null }],
+  accounts_location: 'D:\\가짜\\accounts',
   overlay_launch: 'with_app',
   intercept_saved_at: null,
   problems: [],
 };
+/** 기본 브라우저로 연 도구(지어낸 값). */
+const openedLink = { id: 'letsdoro', name: '레츠도로', url: '(목록의 주소)' };
 /** 없는 이미지(지어낸 값). 이미지 명령은 없는 이미지를 거부하지 않고 이렇게 돌려준다. */
 const missingImage = { found: false, mime: null, data: null, source: null };
 /** 크롬 확장 연결의 상태(지어낸 값). 쿠키는 없다 — 연결 코드는 쿠키가 아니다. */
@@ -358,7 +372,8 @@ describe('Rust 명령 호출', () => {
       if (cmd === 'extension_link_status' || cmd === 'extension_link_set' || cmd === 'extension_link_new_code') return linkStatus;
       if (cmd === 'extension_link_take_pending') return true;
       if (cmd === 'nikke_portrait' || cmd === 'boss_image' || cmd === 'game_icon') return missingImage;
-      if (['shared_state', 'set_default_account', 'set_overlay_launch', 'save_intercept_result'].includes(cmd)) return sharedSnapshot;
+      if (['shared_state', 'set_default_account', 'set_overlay_launch', 'save_intercept_result', 'set_account_hidden'].includes(cmd)) return sharedSnapshot;
+      if (cmd === 'open_tool_link') return openedLink;
       if (cmd === 'read_account') return { name: 'me', modified_at: null, account: { schema_version: 1, nikkes: {} } };
       if (cmd === 'set_overlay_visible' || cmd === 'overlay_hide') return { visible: false, click_through: false, shortcut_problems: [] };
       if (['overlay_widget', 'overlay_shape', 'overlay_pin', 'set_overlay_prefs', 'reset_overlay_position'].includes(cmd)) return widgetSnapshot;
@@ -421,8 +436,14 @@ describe('Rust 명령 호출', () => {
     await expect(saveDecks(null, deckBook)).resolves.toBeNull();
     await expect(copyText(deckCopy)).resolves.toBeNull();
     await expect(engineRunViews([{ squad: ['크라운'] }], 'burst')).resolves.toEqual([{ text: '[버스트 사이클]' }]);
+    await expect(setAccountHidden('sub', true)).resolves.toEqual(sharedSnapshot);
+    await expect(openToolLink('letsdoro')).resolves.toEqual(openedLink);
     // 버스트 흐름: 화면이 넘기는 것은 요청과 보기의 이름뿐이다(실행할 프로그램·폴더는 없다 — 이름은 Rust가 정한 것만 받는다).
     expect(calls[53].args).toEqual({ requests: [{ squad: ['크라운'] }], view: 'burst' });
+    // 계정 숨기기: 화면이 넘기는 것은 계정 이름(경로가 아니다)과 숨길지 여부뿐이다.
+    expect(calls[54].args).toEqual({ name: 'sub', hidden: true });
+    // 도구 링크: 화면이 넘기는 것은 목록의 id뿐이다 — 주소가 아니다.
+    expect(calls[55].args).toEqual({ id: 'letsdoro' });
     // 요격전 계획: 화면이 넘기는 것은 계정 이름(경로가 아니다 — 주지 않으면 지금 쓰는 계정)과 계획 문서뿐이다.
     expect(calls[48].args).toEqual({ name: null });
     expect(calls[49].args).toEqual({ name: null, plan: planDoc });
@@ -468,7 +489,8 @@ describe('Rust 명령 호출', () => {
     expect(calls[33].args).toEqual({ name: 'me' });
     expect(calls[34].args).toEqual({ mode: 'with_game' });
     expect(calls[35].args).toEqual({ name: null });
-    expect(calls[36].args).toEqual({ report: { schema_version: 1, kind: 'intercept_report' } });
+    // P-033: 결과는 계정마다 따로다 — 계산에 쓴 계정의 이름을 함께 넘긴다(주지 않으면 null — 지금 쓰는 계정).
+    expect(calls[36].args).toEqual({ report: { schema_version: 1, kind: 'intercept_report' }, name: null });
     expect(calls[37].args).toEqual({});
     expect(calls[38].args).toEqual({});
     expect(calls[39].args).toEqual({ visible: false });
@@ -528,7 +550,10 @@ describe('Rust 명령 호출', () => {
     expect(libRs).toMatch(/async fn set_default_account\(app: AppHandle, name: String\) -> Result<SharedSnapshot, String>/);
     expect(libRs).toMatch(/async fn set_overlay_launch\(app: AppHandle, mode: String\) -> Result<SharedSnapshot, String>/);
     expect(libRs).toMatch(/async fn read_account\(name: Option<String>\) -> Result<Value, String>/);
-    expect(libRs).toMatch(/async fn save_intercept_result\(app: AppHandle, report: Value\) -> Result<SharedSnapshot, String>/);
+    // P-033: 결과를 계정마다 따로 두면서 계정 이름(경로가 아니다)을 받게 됐다.
+    expect(libRs).toMatch(/async fn save_intercept_result\(app: AppHandle, report: Value, name: Option<String>\) -> Result<SharedSnapshot, String>/);
+    expect(libRs).toMatch(/async fn set_account_hidden\(app: AppHandle, name: String, hidden: bool\) -> Result<SharedSnapshot, String>/);
+    expect(libRs).toMatch(/async fn open_tool_link\(id: String\) -> Result<tool_links::ToolLink, String>/);
     expect(libRs).toMatch(/async fn load_intercept_result\(\) -> Result<Option<Value>, String>/);
     expect(libRs).toMatch(/fn show_app_window\(app: AppHandle\) -> Result<\(\), String>/);
     expect(libRs).toMatch(/fn set_overlay_visible\(app: AppHandle, visible: bool\) -> OverlaySnapshot/);
@@ -1234,12 +1259,15 @@ describe('화면 자동 추적(Rust)', () => {
     // 언제 옮기고 언제 미루는지(계산 중)도 규칙(tabMoveStep)이 정한다(P-024): App.vue는 묻는 것에 답하고 시키는 대로 옮긴다.
     expect(rule).toContain('export function tabMoveStep(state: TabMoveState, input: TabMoveInput): TabMoveStep');
     const app = sources['../src/App.vue'];
+    // P-033: 요격전 화면에 보기가 둘(추천 · 기록장) 생겨, 보스를 따라 옮길 때는 추천 보기로 연다(nav.openIntercept — 예전의 nav.go('intercept')).
     expect(app).toMatch(
-      /provideScreenTrack\(\{\s*computing: \(\) => computingRun\.value !== null,\s*onIntercept: \(\) => page\.value === 'intercept',\s*moveToIntercept: \(\) => nav\.go\('intercept'\),\s*\}\);/,
+      /provideScreenTrack\(\{\s*computing: \(\) => computingRun\.value !== null,\s*onIntercept: \(\) => page\.value === 'intercept',\s*moveToIntercept: \(\) => nav\.openIntercept\(\),\s*\}\);/,
     );
     expect(app).toContain('watch([computingRun, page, nav.section], () => track.settle());');
     // 요격전 화면으로 옮기는 곳은 그 한 줄뿐이고, App.vue는 자동 이동 설정을 직접 읽어 판단하지 않는다.
-    expect(app.match(/nav\.go\('intercept'\)/g)).toHaveLength(1);
+    expect(app.match(/nav\.openIntercept\(/g)).toHaveLength(1);
+    expect(app).not.toMatch(/nav\.go\('intercept'\)/);
+    expect(sources['../src/lib/nav.ts']).toMatch(/openIntercept\(next = 'recommend'\) \{\s*interceptView\.value = next;\s*go\('intercept'\);/);
     expect(app).not.toMatch(/autoTab|tabMoveStep\(/);
     expect(rule.match(/host\.moveToIntercept\(\)/g)).toHaveLength(1);
     expect(rule).toMatch(/if \(step\.move\) host\.moveToIntercept\(\);/);
@@ -1375,7 +1403,8 @@ describe('권한(capability)', () => {
     // P-029: 42 → 44(요격전 계획 읽기·저장 — 손으로 적은 기록과 즐겨찾기를 계정 폴더에 둔다).
     // P-030: 44 → 47(덱 빌더 — 저장한 편성 읽기·저장, 편성을 글자로 클립보드에 쓰기).
     // P-032: 47 → 48(버스트 흐름 — 계산 도구의 버스트 보기를 돌려 글 받기).
-    expect(forApp).toHaveLength(48);
+    // P-033: 48 → 50(계정을 목록에서 숨기기·다시 보이기, 목록의 도구를 기본 브라우저로 열기).
+    expect(forApp).toHaveLength(50);
     // 끝내기 명령은 어느 창에도 없다 — 앱에 그런 명령이 없다.
     for (const p of [...capability.permissions, ...appCapability.permissions]) expect(p).not.toMatch(/quit|exit/);
     expect(COMMANDS).not.toContain('quit_app');
@@ -1470,7 +1499,9 @@ describe('엔진 호출(Rust)', () => {
     // 계산에는 명령을 더하지 않았다 — 덱 빌더의 계산은 이미 있는 engine_run_batch로 돈다.
     // 버스트 흐름(P-032)의 하나: 계산 도구의 결과 문서(engine_run_batch가 받는 것)에는 버스트 흐름이 없어, 같은 요청을
     // 텍스트 보기로 돌려 글을 받는 engine_run_views가 필요하다(53 → 54). 보기의 이름은 Rust가 정한 것('burst')만 받는다.
-    expect(COMMANDS).toHaveLength(54);
+    // 계정 여러 개·도구 링크(P-033)의 둘: 계정을 목록에서 숨기기·다시 보이기(파일은 지우지 않는다)와, 목록에 있는 도구의 주소를
+    // 기본 브라우저로 열기(54 → 56). 화면이 넘기는 것은 계정 이름과 목록의 id뿐이다 — 폴더·파일 이름도 주소도 넘기지 않는다.
+    expect(COMMANDS).toHaveLength(56);
     expect(DECK_COMMANDS).toEqual(['load_decks', 'save_decks', 'copy_text']);
     expect(libRs).toContain('async fn load_decks(name: Option<String>) -> Result<Option<Value>, String>');
     expect(libRs).toContain('async fn save_decks(name: Option<String>, decks: Value) -> Result<(), String>');
@@ -1797,9 +1828,10 @@ describe('두 창이 함께 보는 것(Rust)', () => {
   it('바뀌면 모든 창에 상태만 알린다 — 결과 문서와 계정의 내용은 이벤트에 싣지 않는다', () => {
     expect(glue.match(/\.emit\w*\(/g)).toHaveLength(1);
     expect(glue).toContain('app.emit(SHARED_STATE_EVENT, snapshot.clone())');
-    expect(glue.match(/emit_shared\(&app, &snapshot\);/g)).toHaveLength(3);
-    // 화면에 가는 상태의 칸은 Rust와 화면이 같다.
-    const fields = ['default_account', 'remembered', 'accounts', 'overlay_launch', 'intercept_saved_at', 'problems'];
+    // P-033: 3 → 4(계정을 숨기거나 다시 보이게 했을 때도 알린다).
+    expect(glue.match(/emit_shared\(&app, &snapshot\);/g)).toHaveLength(4);
+    // 화면에 가는 상태의 칸은 Rust와 화면이 같다(P-033: 숨긴 계정과 계정들이 있는 곳 — 보여 주기만 하는 글자 — 을 더했다).
+    const fields = ['default_account', 'remembered', 'accounts', 'hidden_accounts', 'accounts_location', 'overlay_launch', 'intercept_saved_at', 'problems'];
     const rust = sharedStateRs.slice(sharedStateRs.indexOf('pub struct SharedSnapshot {'), sharedStateRs.indexOf('/// 상태 파일의 내용.'));
     expect(rust.match(/^\s*pub (\w+):/gm)?.map((f) => f.trim())).toEqual(fields.map((f) => `pub ${f}:`));
     const types = sources['../src/types.ts'];
@@ -2064,5 +2096,140 @@ describe('프런트 코드', () => {
       // 단위 글자나 단위 값을 직접 적은 곳이 없어야 한다.
       expect(text, file).not.toMatch(/['"`]억['"`]|['"`]조['"`]|1e8|1e12|100000000/);
     }
+  });
+});
+
+// ── P-033: 계정 여러 개 · 즐겨찾기와 「안 씀」 · 모듈 기록 · 도구 링크 ─────────────────────────────
+
+describe('도구 링크 — 여는 주소는 목록에 있는 것뿐이다', () => {
+  const noComments = (text: string) =>
+    text
+      .split('\n')
+      .filter((line) => !/^\s*\/\//.test(line))
+      .join('\n');
+  const linksCode = noComments(toolLinksRs.slice(0, toolLinksRs.indexOf('#[cfg(test)]')));
+  const section = sources['../src/pages/settings/LinksSection.vue'];
+  const linksLib = sources['../src/lib/links.ts'];
+
+  it('화면이 넘기는 것은 목록의 id뿐이다 — 명령은 주소를 받지 않는다', () => {
+    expect(libRs).toContain('async fn open_tool_link(id: String) -> Result<tool_links::ToolLink, String>');
+    expect(libRs).toContain('tool_links::open(&id)');
+    // 화면 코드에서 이 명령을 부르는 곳은 backend.ts 한 곳이고, 넘기는 것은 `{ id }`다.
+    const callers = Object.entries(sources).filter(([, text]) => text.includes("'open_tool_link'"));
+    expect(callers.map(([file]) => file)).toEqual(['../src/lib/backend.ts']);
+    expect(sources['../src/lib/backend.ts']).toContain("invoke<OpenedLink>('open_tool_link', { id })");
+    // 화면은 목록에 있는 id만 넘긴다(목록에 없는 글자는 Rust에 가기 전에 거른다 — Rust도 다시 본다).
+    expect(linksLib).toContain('if (!TOOL_LINKS.links.some((link) => link.id === id)) return Promise.reject(');
+    expect(section).toContain('@click="open(link.id)"');
+    expect(section).not.toMatch(/open\(link\.url\)|openLink\(link\.url\)/);
+  });
+
+  it('목록은 저장소의 데이터 파일 하나다 — 화면과 Rust가 같은 문서를 쓴다', () => {
+    expect(toolLinksRs).toContain('const LINKS_JSON: &str = include_str!("../../../data/links/tools.json");');
+    expect(linksLib).toContain("import toolLinks from '../../../data/links/tools.json';");
+    expect(toolLinksData.kind).toBe(TOOL_LINKS_KIND);
+    expect(toolLinksRs).toContain(`pub const LINKS_KIND: &str = "${TOOL_LINKS_KIND}";`);
+    expect(toolLinksRs).toContain(`pub const LINKS_SCHEMA_VERSION: u64 = ${TOOL_LINKS_SCHEMA_VERSION};`);
+    // 출처가 모음집 글임을 적었다.
+    expect(toolLinksData.source.title).toBe('니케 유용한 툴 모음집');
+    expect(toolLinksData.source.where).toContain('니케 마이너 갤러리');
+    // 작업이 정한 열셋(직접 열어 확인한 것)과 같다.
+    expect(toolLinksData.links.map((l) => [l.name, l.url])).toEqual([
+      ['레츠도로', 'https://letsdoro.com/'],
+      ['니케 장비 현황', 'https://nikkegear885.github.io/nikke-/'],
+      ['딜도로', 'https://dildoro.com/'],
+      ['Enikk', 'https://enikk.app/'],
+      ['도로파티', 'https://doroparty.com/'],
+      ['니케 금서고', 'https://nikkeforbiddenlibrary.com/'],
+      ['NIKKE PvP META', 'https://inspiring-hotteok-9de45f.netlify.app/'],
+      ['NIKKE DECK', 'https://nikke-deck.com/ko/deck'],
+      ['NIKKE Arena Tools', 'https://nikke.top/'],
+      ['소장품 강화 시뮬레이터', 'https://changjoeconomy.github.io/collectibles/'],
+      ['니붕 시뮬레이터', 'https://nibung.kr/'],
+      ['니케피그', 'https://nikkefig.com/'],
+      ['홍련 농장', 'https://scarletfarm.app/'],
+    ]);
+    // 화면 쪽 검사(순수 모듈)를 모두 지난다.
+    for (const link of toolLinksData.links) {
+      expect(isLinkId(link.id), link.id).toBe(true);
+      expect(isSafeLinkUrl(link.url), link.url).toBe(true);
+    }
+  });
+
+  it('셸·열기 플러그인을 쓰지 않는다 — 임의의 주소·프로그램을 열 권한이 어느 창에도 없다', () => {
+    expect(cargoToml).not.toMatch(/tauri-plugin-(shell|opener|http|fs|process)/);
+    expect(libRs).not.toMatch(/tauri_plugin_(shell|opener|http|fs|process)/);
+    for (const p of [...capability.permissions, ...appCapability.permissions]) expect(p).not.toMatch(/^(shell|opener|http|fs|process):/);
+    // 여는 명령은 데스크톱 앱 창의 것이다 — 게임 위의 오버레이 창은 브라우저를 띄우지 못한다.
+    expect(appCapability.permissions).toContain('allow-open-tool-link');
+    expect(capability.permissions).not.toContain('allow-open-tool-link');
+    // 화면 코드에는 바깥으로 가는 링크·창 열기·주소 바꾸기가 없다(목록의 주소는 글자로만 보인다).
+    for (const [file, text] of Object.entries(sources)) {
+      expect(text, file).not.toMatch(/<a\s[^>]*href|window\.open\(|location\.(href|assign|replace)|target="_blank"/);
+    }
+  });
+
+  it('운영체제의 「열기」를 부르는 곳은 한 곳이고, 목록에서 찾은 주소만 넘긴다', () => {
+    const callers = Object.entries(allRust).filter(([, text]) => noComments(text.slice(0, text.includes('#[cfg(test)]') ? text.indexOf('#[cfg(test)]') : undefined)).includes('ShellExecute'));
+    expect(callers.map(([file]) => file)).toEqual(['../src-tauri/src/tool_links.rs']);
+    expect(linksCode.match(/ShellExecuteW\(/g)).toHaveLength(1);
+    expect(linksCode).toContain('ShellExecuteW(None, w!("open"), &target, None, None, SW_SHOWNORMAL)');
+    // 여는 길은 하나다: id → 목록에서 찾기 → 그 주소.
+    expect(linksCode).toMatch(/pub fn open\(id: &str\) -> Result<ToolLink, LinkError> \{\s*open_with\(links\(\), id, open_in_browser\)/);
+    expect(linksCode).toMatch(/let link = resolve\(list, id\)\?;\s*opener\(&link\.url\)\?;/);
+    // 여는 함수도 주소를 한 번 더 본다.
+    expect(linksCode).toMatch(/fn open_in_browser\(url: &str\) -> Result<\(\), LinkError> \{[\s\S]*?if !is_safe_url\(url\) \{\s*return Err\(LinkError::Unknown\);/);
+    // 프로그램을 실행하거나 네트워크·파일을 쓰지 않는다.
+    expect(linksCode).not.toMatch(/Command::new|std::process|TcpStream|TcpListener|UdpSocket|reqwest|ureq|std::fs|std::net/);
+    expect(cargoToml).toContain('"Win32_UI_Shell"');
+  });
+});
+
+describe('계정 여러 개 — 숨기기는 지우기가 아니다, 결과는 계정마다 따로다', () => {
+  const code = (source: string) =>
+    source
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+  const shared = code(sharedStateRs.slice(0, sharedStateRs.indexOf('#[cfg(test)]')));
+
+  it('계정을 지우는 코드가 없다 — 숨긴 이름을 설정에 적을 뿐이다', () => {
+    // 이 모듈이 지우는 것은 쓰다 만 임시 파일 하나뿐이다.
+    expect(shared.match(/remove_file\(/g)).toHaveLength(1);
+    expect(shared).toContain('let _ = fs::remove_file(&temp);');
+    expect(shared).not.toMatch(/remove_dir/);
+    expect(shared).toMatch(/pub fn set_account_hidden\(dir: &Path, name: &str, hidden: bool\) -> Result<SharedSnapshot, SharedError> \{\s*let name = checked_name\(name\)\?;/);
+    expect(libRs).toContain('async fn set_account_hidden(app: AppHandle, name: String, hidden: bool) -> Result<SharedSnapshot, String>');
+    // 지우는 명령은 앱에 없다.
+    expect(COMMANDS.filter((c) => /delete|remove|erase/.test(c))).toEqual([]);
+    // 숨기기는 데스크톱 앱 창의 일이다.
+    expect(appCapability.permissions).toContain('allow-set-account-hidden');
+    expect(capability.permissions).not.toContain('allow-set-account-hidden');
+  });
+
+  it('요격전 결과는 계정마다 따로 둔다 — 이름은 경로가 아니라 열쇠다', () => {
+    expect(sharedStateRs).toContain('pub const INTERCEPT_SUFFIX: &str = ".intercept.json";');
+    expect(shared).toMatch(/Some\(name\) => format!\("\{name\}\{INTERCEPT_SUFFIX\}"\),\s*None => INTERCEPT_FILE\.to_string\(\),/);
+    // 이름을 받아 저장하는 길은 계정 목록에 있는 이름만 받는다(이름 검사 → 계정이 있는지).
+    expect(shared).toMatch(/check_intercept\(report\)\?;\s*let name = plan_account\(dir, Some\(name\)\)\?;\s*write_json\(dir, &intercept_file\(Some\(&name\)\), report, "요격전 추천 결과"\)\?;/);
+    expect(libRs).toContain('shared_state::save_intercept_for(&shared_dir()?, name.as_deref(), &report)');
+    // 화면은 계산에 쓴 계정의 이름을 넘긴다.
+    expect(sources['../src/pages/InterceptPage.vue']).toContain('shared.publishIntercept(computed, usedAccount)');
+    expect(sources['../src/lib/backend.ts']).toContain("invoke<SharedSnapshot>('save_intercept_result', { report, name })");
+  });
+
+  it('계정들이 있는 곳은 보여 주기만 한다 — 화면이 그 글자를 명령에 넘기지 않는다', () => {
+    const users = Object.entries(sources).filter(([, text]) => text.includes('accounts_location'));
+    expect(users.map(([file]) => file).sort()).toEqual(['../src/pages/settings/AccountSection.vue', '../src/types.ts']);
+    expect(sources['../src/pages/settings/AccountSection.vue']).not.toMatch(/invoke|backend'/);
+    expect(sources['../src/lib/backend.ts']).not.toContain('accounts_location');
+  });
+
+  it('요격전 계획 문서의 새 칸 둘(안 씀 · 모듈 기록)은 없어도 되고, 있으면 목록이어야 한다', () => {
+    expect(sharedStateRs).toContain('pub const PLAN_OPTIONAL_LISTS: [&str; 2] = ["unused", "rewards"];');
+    expect(shared).toMatch(/for field in PLAN_OPTIONAL_LISTS \{\s*match obj\.get\(field\) \{\s*None => \{\}/);
+    expect(emptyPlan()).toEqual({ schema_version: PLAN_SCHEMA_VERSION, kind: PLAN_KIND, favorites: [], unused: [], records: [], rewards: [] });
+    expect(sharedStateRs).toContain(`pub const PLAN_KIND: &str = "${PLAN_KIND}";`);
+    expect(sharedStateRs).toContain(`pub const PLAN_SCHEMA_VERSION: u64 = ${PLAN_SCHEMA_VERSION};`);
   });
 });

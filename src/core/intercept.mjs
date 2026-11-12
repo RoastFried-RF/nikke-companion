@@ -8,6 +8,7 @@ import { validateAccount } from './account.mjs';
 import { DEFAULT_PRIORITY_MIN, suggestSquads } from './candidates.mjs';
 import { CAVEAT_NOT_VERIFIED, InputError } from './compare.mjs';
 import { CONDITION_SCHEMA_VERSION, DEFAULT_DURATION, ENEMY_KEYS, ENGINE_FIXED_LEVEL, LEVEL_MAX, levelPlan } from './condition.mjs';
+import { excludeNikkes, isExcludeList } from './exclude.mjs';
 import { groupThousands } from './format.mjs';
 import { engineAccess } from './runtime.mjs';
 
@@ -322,10 +323,15 @@ function weakPool(element, account, catalog, suggestion) {
  * - 같은 입력이면 `generated_at`·`cache` 말고는 같은 문서가 나온다.
  *
  * @param {{account: object, bundle: object, boss?: string}} input `boss`는 이름이나 id(주지 않으면 전부)
- * @param {{top?: number, budget?: number}} [options]
+ * @param {{top?: number, budget?: number, exclude?: string[]}} [options] `exclude`(니케 이름의 목록 — P-033의 「안 씀」)를 주면
+ *   그 니케들을 뺀 계정으로 모든 보스를 계산하고, 실제로 뺀 것이 있으면 결과에 `excluded`와 caveats 한 줄이 남는다
+ *   (주지 않거나 뺀 것이 없으면 결과가 종전과 같다)
  * @param {object} [deps] suggestSquads와 같다. 더해서 `onBoss({index, total, boss: {id, name}, budget})` — 그 보스의 계산 직전에 부른다
  */
-export async function recommendIntercept({ account, bundle, boss: selector }, options = {}, deps = {}) {
+export async function recommendIntercept({ account: given, bundle, boss: selector }, options = {}, deps = {}) {
+  if (options.exclude !== undefined && !isExcludeList(options.exclude)) {
+    throw new InputError('요격전 추천 옵션이 잘못됐다', [{ path: '/exclude', message: 'exclude는 니케 이름의 목록이어야 한다' }]);
+  }
   const top = options.top ?? DEFAULT_INTERCEPT_TOP;
   if (!isPositiveInt(top)) throw new InputError('요격전 추천 옵션이 잘못됐다', [{ path: '/top', message: 'top은 1 이상의 정수여야 한다' }]);
   const budget = options.budget ?? DEFAULT_INTERCEPT_BUDGET;
@@ -335,8 +341,11 @@ export async function recommendIntercept({ account, bundle, boss: selector }, op
   if (!v.ok) throw new InputError('보스 묶음이 잘못됐다', v.errors);
   const engine = engineAccess(deps);
   const catalog = await engine.catalog();
-  const a = validateAccount(account, catalog);
+  const a = validateAccount(given, catalog);
   if (!a.ok) throw new InputError('계정 상태가 잘못됐다', a.errors);
+  // 뺄 니케(「안 씀」)가 있으면 그 니케들이 없는 계정으로 모든 보스를 계산한다. 받은 계정은 바꾸지 않는다.
+  const cut = excludeNikkes(given, options.exclude ?? []);
+  const account = cut.account;
 
   const selected = selectBosses(bundle, selector);
   const shares = splitBudget(budget, selected.length);
@@ -455,6 +464,7 @@ export async function recommendIntercept({ account, bundle, boss: selector }, op
   );
   caveats.push(...mergeCaveats(computed));
   caveats.push(...v.warnings);
+  if (cut.excluded) caveats.push(cut.excluded.text);
 
   return {
     schema_version: INTERCEPT_REPORT_SCHEMA_VERSION,
@@ -482,5 +492,7 @@ export async function recommendIntercept({ account, bundle, boss: selector }, op
     sims: { budget, used, per_boss: bosses.map((b) => ({ id: b.id, name: b.name, budget: b.budget, used: b.sims })) },
     bosses,
     caveats,
+    // 뺐다는 사실(누구를 몇 명). 뺀 것이 없으면 이 칸이 없다.
+    ...(cut.excluded ? { excluded: cut.excluded } : {}),
   };
 }

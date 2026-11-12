@@ -144,6 +144,8 @@ export interface CompareReport {
   failed: FailedSquad[];
   caveats: string[];
   suggestion?: SuggestionSummary;
+  /** 추천에서 뺀 니케(「안 씀」). 뺀 것이 없으면 이 칸이 없다. */
+  excluded?: ExclusionNote | null;
 }
 
 /** 엔진 배치의 진행 상황(src-tauri/src/lib.rs의 EngineProgress). */
@@ -507,6 +509,8 @@ export interface InterceptReport {
   sims: { budget: number; used: number; per_boss: { id: string; name: string; budget: number; used: number }[] };
   bosses: InterceptBoss[];
   caveats: string[];
+  /** 추천에서 뺀 니케(「안 씀」). 뺀 것이 없으면 이 칸이 없다. */
+  excluded?: ExclusionNote | null;
 }
 
 /** 요격전 추천이 보스 하나의 계산을 시작하기 직전에 알리는 진행 상황(recommendIntercept의 `deps.onBoss`). */
@@ -770,7 +774,12 @@ export interface SharedSnapshot {
   default_account: string | null;
   /** 사용자가 고른 것인가(아니면 계정이 하나뿐이라 그것을 쓴다). */
   remembered: boolean;
+  /** 고를 수 있는 계정(이름순) — 목록에서 숨긴 것은 빠진다. */
   accounts: AccountEntry[];
+  /** 목록에서 숨긴 계정(P-033). 지운 것이 아니다 — 다시 보이게 할 수 있다. */
+  hidden_accounts: AccountEntry[];
+  /** 계정들이 있는 곳(사람이 읽는 글자 — 계정을 완전히 지우려는 사람에게 알려 주는 데만 쓴다). */
+  accounts_location: string;
   overlay_launch: OverlayLaunch;
   /** 마지막 요격전 결과를 저장한 시각(ISO, UTC). 없으면 null. */
   intercept_saved_at: string | null;
@@ -871,12 +880,125 @@ export interface PlanRecord {
   created_at: string | null;
 }
 
-/** 계정마다 두는 요격전 계획: 즐겨찾기로 고른 니케와 요격전 기록(계정 폴더의 `<계정>.plan.json`). */
+/** 모듈 기록장의 기록 하나(P-033 — 루트 src/core/journal.mjs): 그날 돈 보스·달성 단계·얻은 것. 손으로 적은 값이다. */
+export interface RewardEntry {
+  id: string;
+  /** 날짜(`YYYY-MM-DD`). */
+  date: string;
+  boss_id: string;
+  boss_name: string;
+  /** 달성 단계. 적지 않았으면 null. */
+  stage: number | null;
+  /** 얻은 장비의 수(부위 — 머리·몸통·팔·다리 — 마다). */
+  gear: Record<string, number>;
+  /** 얻은 커스텀 모듈의 수. */
+  modules: number;
+  note: string | null;
+  created_at: string | null;
+}
+
+/** 기록들의 합(루트의 rewardSum). */
+export interface RewardSum {
+  /** 돈 횟수(적은 기록의 수). */
+  runs: number;
+  modules: number;
+  gear: Record<string, number>;
+  gear_total: number;
+}
+
+/** 주 하나 또는 달 하나의 합. */
+export interface RewardPeriod extends RewardSum {
+  key: string;
+  /** 화면의 말(「11월 9일 ~ 11월 15일」 · 「2026년 11월」). */
+  label: string;
+  from: string;
+  to: string | null;
+}
+
+/** 보스 하나를 몇 번 돌았는가. */
+export interface RewardBossCount extends RewardSum {
+  boss_id: string;
+  boss_name: string;
+  last_date: string | null;
+  best_stage: number | null;
+}
+
+/** 기록장의 요약(루트의 journalSummary). */
+export interface JournalSummary {
+  total: RewardSum;
+  this_week: RewardPeriod | null;
+  this_month: RewardPeriod | null;
+  weeks: RewardPeriod[];
+  months: RewardPeriod[];
+  bosses: RewardBossCount[];
+  notes: string[];
+}
+
+/** 날짜 하나의 묶음: 그날의 보상 기록과 요격전 대미지 기록(P-029). */
+export interface JournalDay {
+  date: string;
+  rewards: RewardEntry[];
+  damages: PlanRecord[];
+}
+
+/** 니케에 붙이는 표시(P-033): 즐겨찾기 · 안 씀 · 없음. */
+export type NikkeMark = 'favorite' | 'unused' | null;
+/** 표시로 거르는 보기. 빈 글자는 전부다. */
+export type MarkFilter = '' | 'favorite' | 'unused' | 'active';
+
+/** 추천 계산에서 뺀 니케(루트 src/core/exclude.mjs) — 뺐다는 사실이 결과에 남는다. */
+export interface ExclusionNote {
+  reason: string;
+  /** 화면의 말(「안 씀」). */
+  label: string;
+  names: string[];
+  count: number;
+  text: string;
+}
+
+/** 도구 링크 하나(P-033 — 저장소의 data/links/tools.json). `basis`는 한 줄 설명의 근거다. */
+export interface ToolLink {
+  id: string;
+  name: string;
+  description: string;
+  url: string;
+  basis: string;
+  basis_label: string;
+}
+
+/** 이 앱이 하지 않는 것과 대신 안내할 도구. */
+export interface UnsupportedTopic {
+  id: string;
+  topic: string;
+  reason: string;
+  links: ToolLink[];
+}
+
+/** 도구 목록 한 벌(루트의 readToolLinks). */
+export interface ToolLinkBook {
+  source: { title: string; where: string; checked_at?: string; note?: string; description_note?: string };
+  links: ToolLink[];
+  not_supported: UnsupportedTopic[];
+}
+
+/** 기본 브라우저로 연 도구(Rust의 tool_links::ToolLink). */
+export interface OpenedLink {
+  id: string;
+  name: string;
+  url: string;
+}
+
+/**
+ * 계정마다 두는 요격전 계획: 즐겨찾기로 고른 니케와 요격전 기록(계정 폴더의 `<계정>.plan.json`).
+ * P-033이 칸 둘을 더했다 — 「안 씀」으로 표시한 니케(`unused`)와 모듈 기록장(`rewards`). 예전 문서에는 없다(빈 목록으로 읽는다).
+ */
 export interface PlanDoc {
   schema_version: number;
   kind: string;
   favorites: string[];
+  unused?: string[];
   records: PlanRecord[];
+  rewards?: RewardEntry[];
 }
 
 /** 장비 한 칸의 상태. */

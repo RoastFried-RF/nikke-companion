@@ -57,6 +57,8 @@ fn main() {
             "load_decks",
             "save_decks",
             "copy_text",
+            "set_account_hidden",
+            "open_tool_link",
         ]),
     );
     tauri_build::try_build(attributes).expect("tauri-build 실패");

@@ -27,6 +27,7 @@ import type {
   GameSnapshot,
   IconKind,
   InterceptReport,
+  OpenedLink,
   OverlayLaunch,
   OverlayPrefs,
   OverlayShape,
@@ -310,12 +311,31 @@ export function readAccount(name: string | null = null): Promise<AccountRead> {
   return invoke<AccountRead>('read_account', { name });
 }
 
-/** 요격전 추천 결과를 저장하고 모든 창에 알린다. 종류·판이 맞지 않으면 거부되고 앞서 저장한 것은 그대로다. */
-export function saveInterceptResult(report: InterceptReport): Promise<SharedSnapshot> {
-  return invoke<SharedSnapshot>('save_intercept_result', { report });
+/**
+ * 요격전 추천 결과를 저장하고 모든 창에 알린다. 종류·판이 맞지 않으면 거부되고 앞서 저장한 것은 그대로다.
+ * 결과는 계정마다 따로 둔다(P-033): `name`은 계산에 쓴 계정의 이름이다. 주지 않으면 지금 쓰는 계정의 것으로 저장한다.
+ */
+export function saveInterceptResult(report: InterceptReport, name: string | null = null): Promise<SharedSnapshot> {
+  return invoke<SharedSnapshot>('save_intercept_result', { report, name });
 }
 
-/** 저장해 둔 마지막 요격전 추천 결과. 없으면 null. 읽을 수 없으면 한국어 오류 문장으로 거부된다. */
+/**
+ * 계정을 목록에서 숨기거나 다시 보이게 한다(P-033). 지우지 않는다 — 계정·기록·저장한 편성은 그대로 남는다.
+ * 그 이름의 계정이 없으면 한국어 오류 문장으로 거부된다.
+ */
+export function setAccountHidden(name: string, hidden: boolean): Promise<SharedSnapshot> {
+  return invoke<SharedSnapshot>('set_account_hidden', { name, hidden });
+}
+
+/**
+ * 도구 링크를 기본 브라우저로 연다(P-033). 넘기는 것은 목록의 id다 — 주소가 아니다. 목록에 없는 id는 한국어 오류 문장으로
+ * 거부되고 아무것도 열리지 않는다. 이 앱은 그 사이트의 내용을 가져오지 않는다.
+ */
+export function openToolLink(id: string): Promise<OpenedLink> {
+  return invoke<OpenedLink>('open_tool_link', { id });
+}
+
+/** 지금 쓰는 계정의 마지막 요격전 추천 결과. 없으면 null. 읽을 수 없으면 한국어 오류 문장으로 거부된다. */
 export function loadInterceptResult(): Promise<unknown | null> {
   return invoke<unknown | null>('load_intercept_result');
 }

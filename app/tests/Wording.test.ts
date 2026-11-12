@@ -93,6 +93,10 @@ describe('문구 — 개발 용어를 쓰지 않는다', () => {
         '../src/views/EfficiencyList.vue',
         '../src/views/OverloadEditor.vue',
         '../src/views/CubeBoard.vue',
+        // P-033: 계정 바꾸기 · 기록장 · 다른 도구도 같은 규칙을 따른다(계정이 「어디에 있는지」는 말하되 개발 용어로 적지 않는다).
+        '../src/views/AccountSwitch.vue',
+        '../src/views/JournalBoard.vue',
+        '../src/pages/settings/LinksSection.vue',
         '../src/screens/AccountScreen.vue',
       ]),
     );
