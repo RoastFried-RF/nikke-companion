@@ -20,6 +20,8 @@
 //! - `login_window`: blablalink 로그인 창(별도 창, 앱 명령을 부를 수 없다) — 열기, 쿠키 읽기, 세션 지우기
 //! - `extension_link`: 크롬 확장 연결 — 이 PC의 크롬 확장이 넘기는 세션 쿠키를 받는 수신부(루프백에만 묶인다, 연결 코드,
 //!   정해진 요청 하나), 켜고 끄기와 코드의 기억
+//! - `assets`: 게임 이미지 읽기 — 니케 초상화·보스 이미지·아이콘을 이 PC의 정해진 폴더에서 읽어 화면에 넘긴다
+//!   (이름·id·종류는 경로가 아니라 열쇠다. 네트워크를 쓰지 않는다)
 //!
 //! 편성 비교·추천의 계산은 화면 쪽의 `src/core`(JS)가 하고, 여기서는 엔진 프로세스만 대신 띄운다.
 //! 이 앱의 Rust 코드는 네트워크 요청을 하지 않는다. 밖으로 나가는 요청은 둘뿐이다: 사용자가 연 로그인 창이
@@ -44,6 +46,7 @@
 //! 쪽이 숨겨져 있었다면 활성화 없이 보인다(`reveal_overlay`).
 
 pub mod account_sync;
+pub mod assets;
 pub mod capture;
 pub mod capture_cli;
 pub mod cookie;
@@ -188,6 +191,10 @@ struct FetchRun(engine::BatchSlot);
 
 /// 크롬 확장 연결(수신부·연결 코드·켜짐 여부). 규칙은 `extension_link`에 있다.
 struct ExtensionLink(LinkHub);
+
+/// 게임 이미지 명령이 쓰는 엔진 카탈로그의 이름 색인(카탈로그가 바뀔 때만 다시 읽는다). 규칙은 `assets`에 있다.
+#[derive(Default)]
+struct GameImages(assets::NameIndex);
 
 /// 캡처가 끝나면(오류로 끝나도) 표시를 내린다.
 struct BusyGuard<'a>(&'a AtomicBool);
@@ -386,6 +393,55 @@ fn pick_json_file_dialog(window: &WebviewWindow, title: &str) -> Result<Option<S
 #[cfg(not(windows))]
 fn pick_json_file_dialog(_window: &WebviewWindow, _title: &str) -> Result<Option<String>, String> {
     Err("파일 고르기 창은 Windows에서만 쓸 수 있다. 경로를 직접 넣어라".to_string())
+}
+
+// ── 게임 이미지 ───────────────────────────────────────────────────────────────
+//
+// 화면에는 파일·네트워크 권한이 없다. 초상화·보스 이미지·아이콘은 아래 명령이 이 PC의 파일에서 읽어 넘긴다(`assets`).
+// 화면이 넘기는 것은 니케 이름·보스 id·아이콘의 종류와 값뿐이고, 그것들은 경로가 아니라 **열쇠**다: 엔진 카탈로그·
+// 내장 보스 묶음·아이콘 표에 있는 것일 때만 정해진 폴더의 정해진 파일을 읽는다. 없는 이미지는 오류가 아니라 「없음」이다.
+
+/// 이미지를 찾을 폴더들: 엔진 폴더(엔진 계산과 같은 설정)와 저장소 루트. 찾지 못한 쪽의 이미지는 「없음」이 된다.
+fn image_dirs(app: &AppHandle) -> assets::ImageDirs {
+    let mut search_from: Vec<PathBuf> = Vec::new();
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    {
+        search_from.push(dir);
+    }
+    if let Ok(dir) = std::env::current_dir() {
+        search_from.push(dir);
+    }
+    assets::ImageDirs {
+        engine_dir: engine_config(app).ok().map(|config| config.engine_dir),
+        repo_root: capture::find_repo_root(&search_from),
+    }
+}
+
+/// 니케 초상화: `{found, mime, data, source}`(data는 base64). 이름이 엔진 카탈로그에 있을 때만 엔진 폴더의 `image/`
+/// (없으면 받아 둔 `data/assets/portraits/`)에서 읽는다. 그림이 없거나 모르는 이름이면 `found: false`.
+#[tauri::command]
+async fn nikke_portrait(app: AppHandle, name: String) -> Result<assets::GameImage, String> {
+    blocking(move || {
+        let dirs = image_dirs(&app);
+        Ok(assets::portrait(&dirs, &app.state::<GameImages>().0, &name))
+    })
+    .await
+}
+
+/// 보스 이미지. id가 내장 보스 묶음에 있을 때만 읽는다: 받아 둔 `data/assets/bosses/` → 사용자의 캡처에서 잘라 둔
+/// `data/captures/bosses/`. 없으면 `found: false` — 화면이 속성 색으로 대신한다.
+#[tauri::command]
+async fn boss_image(app: AppHandle, id: String) -> Result<assets::GameImage, String> {
+    blocking(move || Ok(assets::boss_image(&image_dirs(&app), &id))).await
+}
+
+/// 아이콘(속성·버스트 단계·클래스·기업·무기). 종류와 값이 아이콘 표에 있을 때만 읽는다: 받아 둔 `data/assets/icons/` →
+/// 엔진 폴더의 `image/icon/`(파일 이름이 확인된 종류만). 없으면 `found: false` — 화면이 직접 그린 아이콘을 쓴다.
+#[tauri::command]
+async fn game_icon(app: AppHandle, kind: String, key: String) -> Result<assets::GameImage, String> {
+    blocking(move || Ok(assets::icon(&image_dirs(&app), &kind, &key))).await
 }
 
 // ── 계정 받기 ─────────────────────────────────────────────────────────────────
@@ -1122,6 +1178,7 @@ pub fn run() {
         .manage(GameTracker::default())
         .manage(ScreenTracker::default())
         .manage(FetchRun::default())
+        .manage(GameImages::default())
         .invoke_handler(tauri::generate_handler![
             load_report,
             overlay_status,
@@ -1151,7 +1208,10 @@ pub fn run() {
             extension_link_status,
             extension_link_set,
             extension_link_new_code,
-            extension_link_take_pending
+            extension_link_take_pending,
+            nikke_portrait,
+            boss_image,
+            game_icon
         ])
         .setup(|app| {
             let window = app

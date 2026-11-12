@@ -614,3 +614,46 @@ export interface ImportReport {
   warnings: string[];
   caveats: string[];
 }
+
+// ── 디자인 기반(UI 개편 — docs/ui-redesign.md) ────────────────────────────────
+
+/** 이미지를 어디서 읽었나(src-tauri/src/assets.rs의 ImageSource): 엔진 폴더 · 받아 둔 리소스 · 사용자의 캡처 조각. */
+export type GameImageSource = 'engine' | 'assets' | 'capture';
+
+/**
+ * Rust가 이 PC의 파일에서 읽어 넘기는 이미지(src-tauri/src/assets.rs의 GameImage).
+ * 없으면 `found: false`이고 나머지는 null이다 — 오류가 아니다. 화면이 대체 그림을 그린다.
+ */
+export interface GameImage {
+  found: boolean;
+  /** 'image/webp' 또는 'image/png'. */
+  mime: string | null;
+  /** 파일 내용(base64). */
+  data: string | null;
+  source: GameImageSource | null;
+}
+
+/** 아이콘의 종류. 값은 엔진 카탈로그의 낱말 그대로 넘긴다(속성 '작열', 버스트 '1'·'A', 클래스 '화력형', 기업 '필그림', 무기 'SR'). */
+export type IconKind = 'element' | 'burst' | 'class' | 'corp' | 'weapon';
+
+/**
+ * 니케 한 명의 기본 정보(엔진 카탈로그에서 — lib/nikkeInfo.ts). 카탈로그에 없는 값은 null(「모름」)이다.
+ * 값을 지어내지 않는다.
+ */
+export interface NikkeInfo {
+  name: string;
+  /** 엔진 카탈로그에 있는 이름인가. */
+  known: boolean;
+  /** 속성(작열·풍압·철갑·전격·수냉). */
+  element: string | null;
+  /** 버스트 단계('1'·'2'·'3'·'A'). */
+  burst: string | null;
+  /** 무기 종류(AR·SMG·SG·SR·MG·RL). */
+  weapon: string | null;
+  /** 기업. */
+  corp: string | null;
+  /** 클래스(화력형·지원형·방어형). */
+  klass: string | null;
+  /** 등급(SSR·SR·R). */
+  rarity: string | null;
+}

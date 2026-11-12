@@ -18,7 +18,9 @@ import type {
   FetchLine,
   FetchOutcome,
   GameCaptureOutcome,
+  GameImage,
   GameSnapshot,
+  IconKind,
   OverlaySnapshot,
   SavedAccount,
   ScreenRecognition,
@@ -220,6 +222,26 @@ export function extensionLinkNewCode(): Promise<ExtensionLinkStatus> {
 /** 확장에서 쿠키를 받아 「계정 새로 받기」를 이을 차례면 true(한 번만). */
 export function extensionLinkTakePending(): Promise<boolean> {
   return invoke<boolean>('extension_link_take_pending');
+}
+
+// ── 게임 이미지 ───────────────────────────────────────────────────────────────
+// 화면에는 파일·네트워크 권한이 없다. 초상화·보스 이미지·아이콘은 Rust가 이 PC의 정해진 폴더에서 읽어 넘긴다.
+// 넘기는 이름·id·종류는 경로가 아니다 — Rust가 엔진 카탈로그·보스 묶음·아이콘 표에 있는 것일 때만 읽는다.
+// 없는 이미지는 거부가 아니라 `found: false`로 온다. 화면 코드는 lib/images.ts(주소로 바꾸고 기억해 둔다)를 쓴다.
+
+/** 니케 초상화. 엔진 카탈로그에 있는 이름일 때만 읽힌다. */
+export function nikkePortrait(name: string): Promise<GameImage> {
+  return invoke<GameImage>('nikke_portrait', { name });
+}
+
+/** 보스 이미지. 내장 보스 묶음에 있는 id일 때만 읽힌다(받아 둔 리소스 → 캡처에서 잘라 둔 조각). */
+export function bossImage(id: string): Promise<GameImage> {
+  return invoke<GameImage>('boss_image', { id });
+}
+
+/** 아이콘(속성·버스트 단계·클래스·기업·무기). 값은 엔진 카탈로그의 낱말 그대로 넘긴다. */
+export function gameIcon(kind: IconKind, key: string): Promise<GameImage> {
+  return invoke<GameImage>('game_icon', { kind, key });
 }
 
 /** 크롬 확장 연결의 상태가 바뀔 때마다 불린다(쿠키를 받았다·코드가 틀린 요청이 왔다). 돌려받은 함수로 구독을 끊는다. */

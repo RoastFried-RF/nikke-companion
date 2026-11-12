@@ -50,6 +50,9 @@ export default defineConfig(({ command, mode }) => {
   test: {
     environment: 'happy-dom',
     include: ['tests/**/*.test.ts'],
+    // 테스트 실행기는 CSS 파일의 내용을 비워 버린다. 전역 스타일 둘(디자인 토큰·예전 변수)은 내용 그대로 읽게 한다 —
+    // tests/DesignTokens.test.ts가 토큰의 이름·값을 확인하고, tests/contract.test.ts의 정적 검사도 이 내용을 본다.
+    css: { include: [/src[\\/]styles[\\/]tokens\.css/, /src[\\/]style\.css/] },
   },
   };
 });

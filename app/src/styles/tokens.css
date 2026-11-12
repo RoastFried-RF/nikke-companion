@@ -1,0 +1,150 @@
+/*
+ * 디자인 토큰 — UI 개편(docs/ui-redesign.md §디자인 토큰)의 색·간격·모서리·글자 크기.
+ *
+ * 규칙: 공통 부품(src/ui)은 색·크기를 직접 적지 않고 이 파일의 토큰(--nk-*)만 쓴다(tests/DesignTokens.test.ts가 확인한다).
+ * 기존 화면(src/components·src/screens)은 style.css의 예전 변수를 그대로 쓴다 — 새 구조로 옮길 때(P-027·P-028) 바꾼다.
+ * 이 파일은 변수만 정한다. 어떤 요소의 모양도 바꾸지 않는다.
+ */
+:root {
+  /* ── 색: 배경·표면. 어두운 테마 하나다. 정보 영역은 불투명 카드(--nk-surface)다. ── */
+  --nk-bg: #0d0e14;
+  --nk-surface: #161821;
+  --nk-surface-raised: #1e2130;
+  --nk-surface-sunken: #11121a;
+  --nk-border: #2b2f42;
+  --nk-border-strong: #454b68;
+  --nk-scrim: rgba(8, 9, 14, 0.72);
+
+  /* ── 색: 글자. ── */
+  --nk-text: #eef0f7;
+  --nk-text-muted: #a2a9c0;
+  --nk-text-faint: #6c7390;
+  --nk-text-on-accent: #ffffff;
+  --nk-text-on-bright: #15161d;
+
+  /* ── 색: 강조(보라 계열 하나). 고른 것·누를 수 있는 것·진행 막대. ── */
+  --nk-accent: #7c5cff;
+  --nk-accent-strong: #9d86ff;
+  --nk-accent-soft: rgba(124, 92, 255, 0.18);
+
+  /* ── 색: 속성 다섯. 게임의 보스 테마 색과 맞춘다 — 작열 빨강·풍압 초록·철갑 주황·전격 보라·수냉 파랑. ── */
+  --nk-el-fire: #f0564a;
+  --nk-el-wind: #3ecf8e;
+  --nk-el-iron: #f59e3c;
+  --nk-el-electric: #c77dff;
+  --nk-el-water: #4aa3f5;
+  --nk-el-unknown: #6c7390;
+
+  /* ── 색: 상태. 추정·미확인·오류는 줄이되 숨기지 않는다(프로젝트 원칙). ── */
+  --nk-ok: #3ecf8e;
+  --nk-estimate: #f2c94c;
+  --nk-unknown: #ff9f43;
+  --nk-error: #ff6b6b;
+  --nk-test: #ffb86b;
+  --nk-neutral: #a2a9c0;
+
+  /* ── 간격(4px 단위). ── */
+  --nk-space-1: 2px;
+  --nk-space-2: 4px;
+  --nk-space-3: 8px;
+  --nk-space-4: 12px;
+  --nk-space-5: 16px;
+  --nk-space-6: 24px;
+  --nk-space-7: 32px;
+
+  /* ── 모서리. ── */
+  --nk-radius-sm: 4px;
+  --nk-radius-md: 8px;
+  --nk-radius-lg: 12px;
+  --nk-radius-pill: 999px;
+
+  /* ── 글자 크기·굵기·줄 높이. ── */
+  --nk-font-family: 'Pretendard', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
+  --nk-font-xs: 10px;
+  --nk-font-sm: 11px;
+  --nk-font-md: 13px;
+  --nk-font-lg: 15px;
+  --nk-font-xl: 20px;
+  --nk-font-hero: 30px;
+  --nk-weight-regular: 400;
+  --nk-weight-bold: 700;
+  --nk-weight-heavy: 800;
+  --nk-line-tight: 1.2;
+  --nk-line-normal: 1.45;
+
+  /* ── 부품 크기. ── */
+  --nk-tile-lg: 92px;
+  --nk-tile-sm: 52px;
+  --nk-tile-xs: 28px;
+  --nk-boss-image: 56px;
+  --nk-icon-sm: 14px;
+  --nk-icon-md: 18px;
+  --nk-icon-lg: 24px;
+  --nk-bar-height: 6px;
+  --nk-bar-height-thin: 3px;
+  --nk-border-width: 1px;
+  --nk-border-width-strong: 2px;
+
+  /* ── 그림자·움직임. ── */
+  --nk-shadow-card: 0 2px 10px rgba(0, 0, 0, 0.35);
+  --nk-glow-width: 8px;
+  --nk-duration: 0.18s;
+  --nk-duration-shimmer: 1.4s;
+
+  /* ── 지금 가리키는 속성·상태의 색. 아래 data-* 규칙이 바꿔 준다. ── */
+  --nk-el: var(--nk-el-unknown);
+  --nk-tone: var(--nk-neutral);
+}
+
+/*
+ * 속성 색: 부품이 `data-element="작열"`처럼 엔진 카탈로그의 낱말을 그대로 적으면 --nk-el이 그 속성의 색이 된다.
+ * 모르는 속성(값 없음·다른 낱말)은 --nk-el-unknown이다.
+ */
+[data-element='작열'] {
+  --nk-el: var(--nk-el-fire);
+}
+
+[data-element='풍압'] {
+  --nk-el: var(--nk-el-wind);
+}
+
+[data-element='철갑'] {
+  --nk-el: var(--nk-el-iron);
+}
+
+[data-element='전격'] {
+  --nk-el: var(--nk-el-electric);
+}
+
+[data-element='수냉'] {
+  --nk-el: var(--nk-el-water);
+}
+
+/* 상태 색: `data-tone`으로 고른다. */
+[data-tone='ok'] {
+  --nk-tone: var(--nk-ok);
+}
+
+[data-tone='estimate'] {
+  --nk-tone: var(--nk-estimate);
+}
+
+[data-tone='unknown'] {
+  --nk-tone: var(--nk-unknown);
+}
+
+[data-tone='error'] {
+  --nk-tone: var(--nk-error);
+}
+
+[data-tone='test'] {
+  --nk-tone: var(--nk-test);
+}
+
+[data-tone='accent'] {
+  --nk-tone: var(--nk-accent-strong);
+}
+
+[data-tone='neutral'] {
+  --nk-tone: var(--nk-neutral);
+}

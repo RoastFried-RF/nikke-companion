@@ -9,6 +9,7 @@ import {
   accountSaveCookie,
   accountSaveFile,
   accountSyncStatus,
+  bossImage,
   captureGame,
   ENGINE_PROGRESS_EVENT,
   engineCancel,
@@ -23,11 +24,13 @@ import {
   extensionLinkTakePending,
   GAME_CAPTURE_EVENT,
   GAME_WINDOW_EVENT,
+  gameIcon,
   gameWindowStatus,
   loadReport,
   loginWindowClear,
   loginWindowOpen,
   loginWindowTakeCookie,
+  nikkePortrait,
   overlayStatus,
   OVERLAY_STATE_EVENT,
   pickJsonFile,
@@ -110,12 +113,19 @@ const COMMANDS = [
   'extension_link_set',
   'extension_link_new_code',
   'extension_link_take_pending',
+  'nikke_portrait',
+  'boss_image',
+  'game_icon',
 ];
 
 /** 계정 받기(P-022)에서 더한 명령 아홉 개. */
 const ACCOUNT_COMMANDS = COMMANDS.slice(16, 25);
 /** 크롬 확장 연결(P-025)에서 더한 명령 네 개. */
-const EXTENSION_COMMANDS = COMMANDS.slice(25);
+const EXTENSION_COMMANDS = COMMANDS.slice(25, 29);
+/** 게임 이미지(P-026)에서 더한 명령 세 개. */
+const IMAGE_COMMANDS = COMMANDS.slice(29);
+/** 없는 이미지(지어낸 값). 이미지 명령은 없는 이미지를 거부하지 않고 이렇게 돌려준다. */
+const missingImage = { found: false, mime: null, data: null, source: null };
 /** 크롬 확장 연결의 상태(지어낸 값). 쿠키는 없다 — 연결 코드는 쿠키가 아니다. */
 const linkStatus = {
   enabled: true,
@@ -216,6 +226,7 @@ describe('Rust 명령 호출', () => {
       if (cmd === 'login_window_clear') return '로그인 창의 쿠키·저장 데이터를 지웠다';
       if (cmd === 'extension_link_status' || cmd === 'extension_link_set' || cmd === 'extension_link_new_code') return linkStatus;
       if (cmd === 'extension_link_take_pending') return true;
+      if (cmd === 'nikke_portrait' || cmd === 'boss_image' || cmd === 'game_icon') return missingImage;
       return null;
     });
     await expect(loadReport('D:\\r.json')).resolves.toEqual({ schema_version: 1 });
@@ -247,6 +258,9 @@ describe('Rust 명령 호출', () => {
     await expect(extensionLinkSet(true)).resolves.toEqual(linkStatus);
     await expect(extensionLinkNewCode()).resolves.toEqual(linkStatus);
     await expect(extensionLinkTakePending()).resolves.toBe(true);
+    await expect(nikkePortrait('크라운')).resolves.toEqual(missingImage);
+    await expect(bossImage('kraken')).resolves.toEqual(missingImage);
+    await expect(gameIcon('element', '작열')).resolves.toEqual(missingImage);
     expect(calls.map((c) => c.cmd)).toEqual(COMMANDS);
     expect(calls[0].args).toEqual({ path: 'D:\\r.json' });
     expect(calls[6].args).toEqual({ requests: [{ squad: ['크라운'] }] });
@@ -275,6 +289,10 @@ describe('Rust 명령 호출', () => {
     expect(calls[26].args).toEqual({ enabled: true });
     expect(calls[27].args).toEqual({});
     expect(calls[28].args).toEqual({});
+    // 게임 이미지: 화면이 넘기는 것은 니케 이름·보스 id·아이콘의 종류와 값뿐이다 — 경로나 폴더는 없다.
+    expect(calls[29].args).toEqual({ name: '크라운' });
+    expect(calls[30].args).toEqual({ id: 'kraken' });
+    expect(calls[31].args).toEqual({ kind: 'element', key: '작열' });
   });
 
   it('자동 추적의 주기를 주지 않으면 null을 넘긴다 — Rust가 기본값(2초)을 쓴다', async () => {
@@ -1132,7 +1150,10 @@ describe('엔진 호출(Rust)', () => {
     // 화면 넷(P-017)까지는 14개였다. 그 뒤에 더한 것은 자동 추적(P-021)의 둘 — 켜기/끄기와 상태 — 과
     // 계정 받기(P-022)의 아홉(계정 화면은 쿠키 파일·수집 프로세스·로그인 창을 다뤄 명령이 필요하다),
     // 크롬 확장 연결(P-025)의 넷이다(수신부를 켜고 끄기·상태·연결 코드 다시 만들기·받은 쿠키로 수집 잇기 — 25 → 29).
-    expect(COMMANDS).toHaveLength(29);
+    // 게임 이미지(P-026)의 셋: 화면에는 파일 권한이 없어 초상화·보스 이미지·아이콘을 Rust가 읽어 넘긴다(29 → 32).
+    // 니케 정보(속성·버스트 단계 등)는 명령을 더하지 않고 이미 있는 engine_catalog에서 읽는다.
+    expect(COMMANDS).toHaveLength(32);
+    expect(IMAGE_COMMANDS).toEqual(['nikke_portrait', 'boss_image', 'game_icon']);
     expect(COMMANDS.slice(14, 16)).toEqual(['set_screen_tracking', 'screen_track_status']);
     expect(ACCOUNT_COMMANDS).toHaveLength(9);
     for (const cmd of ACCOUNT_COMMANDS) expect(cmd).toMatch(/^(account|login_window)_/);

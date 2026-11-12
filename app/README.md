@@ -1115,6 +1115,95 @@ node --test extension/                                                      # �
 - 프런트 `tests/contract.test.ts` 「크롬 확장 연결(Rust)」(8건)과 「(d) 네트워크」: 묶는 주소가 한 줄뿐이고 루프백임, 소켓 코드가
   그 모듈 하나에만 있고 연결을 만드는 호출이 없음, 답을 만드는 곳에 요청의 글자가 들어갈 길이 없음, 화면에 가는 상태의 칸.
 
+## 디자인 기반
+
+UI 개편(데스크톱 앱 + 오버레이 — 기준 문서는 `docs/ui-redesign.md`)의 바탕이다: 디자인 토큰, 이미지를 읽는 명령, 공통 부품,
+부품 모아 보기. **기존 화면은 아직 예전 모양 그대로다** — 새 구조로 옮기는 것은 다음 작업(P-027·P-028)이다.
+
+### 토큰
+
+`src/styles/tokens.css` — 어두운 테마의 색(배경·표면·글자·테두리), 강조색(보라 계열 하나), 속성 색 다섯(작열 빨강·풍압 초록·
+철갑 주황·전격 보라·수냉 파랑), 상태 색(정상·추정·미확인·오류·검증용), 간격·모서리·글자 크기의 단계, 부품 크기. 값의 표는
+`docs/ui-redesign.md` §5.
+
+- 이름은 모두 `--nk-`로 시작한다. 이 파일은 **변수만** 정한다 — 불러와도 기존 화면의 모양은 바뀌지 않는다
+  (기존 화면은 `src/style.css`의 예전 변수를 쓴다).
+- **부품은 색·크기를 직접 적지 않고 토큰만 쓴다.** `tests/DesignTokens.test.ts`가 `src/ui/`의 모든 파일을 본다: 16진수·`rgb()`·
+  색 이름·`px` 값이 없고, 쓰는 토큰이 모두 정의돼 있다.
+- 속성 색은 `data-element="작열"`(엔진 카탈로그의 낱말 그대로)로, 상태 색은 `data-tone="estimate"`로 고른다 —
+  그 요소 안에서 `--nk-el`·`--nk-tone`이 그 색이 된다. 낱말이 없으면 「모름」 색이다.
+
+### 부품
+
+`src/ui/` — 니케 타일(`NikkeTile` — 크기 `lg`·`sm`·`xs`), 보스 카드(`BossCard`), 속성 칩(`ElementChip`), 버스트 배지(`BurstBadge`),
+아이콘(`GameIcon`), 딜 막대(`DamageBar`), 순위 줄(`RankRow`), 상태 알약(`StatusPill`), 진행 패널(`ProgressPanel`),
+뼈대 화면(`SkeletonBlock`), 빈 상태(`EmptyState`), 접는 「자세히」(`DetailsFold`). 무엇을 그리고 어떤 상태가 있는지는
+`docs/ui-redesign.md` §6.
+
+- 부품은 보여 주기만 한다 — 계산하지 않고 결과 문서의 모양을 모른다. 대미지 표기는 `lib/format.ts`(루트의 `src/core/format.mjs`),
+  남은 시간은 루트의 `src/core/eta.mjs`, 한 줄 요약은 루트의 `src/core/summary.mjs`가 만든다.
+- 모르는 것은 「모름」으로 그린다: 초상화가 없으면 이름 첫 글자, 속성·버스트 단계를 모르면 「?」, 딜 비중을 모르면 「–」,
+  총딜을 모르면 「계산 전」. 0이나 그럴듯한 값으로 채우지 않는다.
+- 니케의 속성·버스트 단계·무기·기업은 `lib/nikkeInfo.ts`로 얻는다 — 이미 있는 `engine_catalog` 명령의 카탈로그에서 읽고,
+  카탈로그에 없는 값은 `null`(「모름」)이다.
+
+### 이미지가 어디서 오는가
+
+화면에는 파일·네트워크 권한이 없다(capability에 새 명령 셋만 더했다 — 파일·네트워크 플러그인은 없다. CSP도 그대로다).
+이미지는 Rust 명령이 **이 PC의 파일에서 읽어** base64로 넘기고(`src-tauri/src/assets.rs`), 화면은 `data:` 주소로 그린다
+(`lib/images.ts` — 한 번 물은 것은 기억한다).
+
+| 명령 | 읽는 조건 | 읽는 순서 | 없으면 |
+|---|---|---|---|
+| `nikke_portrait(name)` | 이름이 엔진 카탈로그에 있다 | 엔진 폴더 `image/<이름>.webp` → `data/assets/portraits/` | 이름 첫 글자 |
+| `boss_image(id)` | id가 내장 보스 묶음(`data/intercept/anomaly.json`)에 있다 | `data/assets/bosses/` → `data/captures/bosses/<id>.png`(캡처에서 잘라 둔 조각) | 보스의 속성 색 |
+| `game_icon(kind, key)` | 종류·값이 아이콘 표에 있다 | `data/assets/icons/<종류>/` → 엔진 폴더 `image/icon/`(파일 이름이 엔진 코드에서 확인된 속성·버스트·클래스만) | 직접 그린 도형·글자 |
+
+- 화면이 넘기는 이름·id·종류는 **경로가 아니라 열쇠**다. 카탈로그·보스 묶음·아이콘 표에 없는 문자열은 파일을 건드리지 않고
+  「없음」이 된다 — 화면이 넘긴 문자열로 임의의 파일을 읽을 수 없다(경로 탈출 테스트가 있다).
+- 초상화의 파일 이름은 엔진의 `scraper/cdn_fetch.py`의 `safe_filename()` 규칙 그대로다(금지 글자 아홉 개 → `_`).
+- **없는 이미지는 오류가 아니다** — `{found: false}`로 온다. 읽은 내용이 WebP·PNG가 아니거나 2MB를 넘어도 「없음」이다.
+- 받아 둔 리소스(`data/assets/`)는 `node scripts/fetch-assets.mjs`(저장소 루트)가 받는다 — **사람이 실행한다**
+  (`--list`로 무엇을 받는지 먼저 본다). 지금은 받을 것이 없다: 경로가 확인된 것은 초상화뿐이고 그것은 엔진 폴더에 이미 있다.
+  아이콘·보스 이미지의 주소는 확인하지 못해 받지 않는다(`docs/ui-redesign.md` §8).
+
+### 게임 이미지를 저장소에 넣지 않는 이유
+
+게임 이미지와 아이콘은 SHIFT UP / Level Infinite의 권리물이다(`docs/spec.md` §7) — 이 저장소의 코드 라이선스와 별개이고,
+저장소에 넣으면 그것을 다시 배포하는 일이 된다. 그래서:
+
+- 받아 둔 리소스(`data/assets/`)와 캡처(`data/captures/`)는 gitignore다.
+- 초상화와 일부 아이콘은 엔진 서브모듈(`vendor/nikke-calc/image/` — 남의 저장소)에 있는 것을 **읽기만** 한다.
+- 테스트는 코드로 만든 가짜 이미지(머리 바이트만 WebP·PNG 꼴인 몇십 바이트)로만 한다. fixture에 게임 이미지가 없다.
+- 설치된 게임 클라이언트의 파일은 건드리지 않는다(풀거나 복호화하지 않는다). 다른 팬 사이트의 이미지도 가져오지 않는다.
+
+### 부품 모아 보기
+
+모든 부품과 상태(이미지 있음/없음, 긴 이름, 계산 중, 빈 상태, 오류)를 한 화면에서 본다. **개발 실행에서만** 뜬다 —
+빌드한 앱에는 그 화면의 코드가 들어가지 않는다(`main.ts`의 `import.meta.env.DEV` 갈래 — 빌드 결과에 없는 것을 확인했다).
+
+```powershell
+$env:VITE_UI_GALLERY = '1'; npm --prefix app run tauri dev    # 앱 창에서: 실제 초상화·보스 이미지가 보인다
+npm --prefix app run dev                                      # 브라우저에서: 주소 뒤에 ?gallery (이미지 명령이 없어 전부 대체 그림)
+```
+
+여기의 숫자는 지어낸 보기 값이다(`src/ui/gallery/samples.ts`) — 화면 맨 위의 「검증용 데이터」 배지가 그렇게 밝힌다.
+
+### 테스트
+
+- `tests/UiParts.test.ts`(41건): 부품마다 — 이미지 있음/없음(받아 둔 것·엔진의 것·직접 그린 것), 모르는 값, 긴 이름, 크기,
+  약점 강조, 누르기·중단·접기.
+- `tests/GameImages.test.ts`(16건): 이미지 명령의 이름·인자·돌려주는 모양, 권한(새 명령 셋뿐·플러그인 없음·CSP 그대로),
+  Rust 쪽 규칙의 정적 확인(열쇠 확인이 파일 읽기보다 먼저, 읽기만 한다, 네트워크 없음), `lib/images.ts`(주소로 바꾸기·기억·
+  실패하면 다시 묻기), `lib/nikkeInfo.ts`(실제 엔진 카탈로그의 모든 니케, 없는 값은 「모름」).
+- `tests/DesignTokens.test.ts`(12건): 토큰의 이름과 값(어두운 테마, 보라 강조색, 속성 색의 계열, 상태 색, 단계), 부품이 토큰만 쓰는지.
+- `tests/UiGallery.test.ts`(11건): 모아 보기에 모든 부품과 상태가 있는지, 개발 실행에서만 뜨는지.
+- Rust `assets.rs`의 단위 테스트(16건): 파일 이름 규칙(엔진 코드와 대조), base64, 이미지 형식 판정, 초상화·보스·아이콘의 읽는
+  순서, 없는 이미지, **경로 탈출**(카탈로그 밖의 이름·위로 올라가는 경로·절대 경로·카탈로그 자체가 악의적인 경우), 이미지가 아닌
+  파일·너무 큰 파일, 카탈로그가 바뀌면 다시 읽기, 아이콘 표와 엔진 코드의 대조, 실제 엔진 폴더의 초상화·아이콘.
+
+테스트에 쓰는 이미지는 전부 코드로 만든 가짜 바이트다(`tests/helpers/fakeImages.ts`, `assets.rs`의 `fake_webp`·`fake_png`).
+
 ## 빌드
 
 ```bash
@@ -1222,6 +1311,8 @@ cargo test --manifest-path app/src-tauri/Cargo.toml --test live_stay_on_top -- -
 cargo test --manifest-path app/src-tauri/Cargo.toml --test exit_cleanup                                         # 종료 시 정리: 가짜 엔진을 띄운 실행 파일을 끝내면 자식 프로세스가 남지 않는다(평소 cargo test에도 들어 있다)
 cargo test --manifest-path app/src-tauri/Cargo.toml --test extension_link                                       # 크롬 확장 연결: 수신부를 실제로 열고 가짜 요청을 보낸다 — 루프백 전용·연결 코드·거부·쿠키 비노출(평소 cargo test에도 들어 있다)
 node --test extension/                                                                                          # 크롬 확장(저장소 루트에서): 쿠키 목록 → 헤더, 보내기 흐름, manifest 권한, 오버레이와의 계약
+node --test tests/unit/fetch-assets.test.mjs tests/unit/summary.test.mjs tests/unit/eta.test.mjs                # 디자인 기반(저장소 루트에서): 리소스 받기(가짜 서버), 한 줄 요약, 남은 시간 어림
+cargo test --manifest-path app/src-tauri/Cargo.toml --lib assets                                                # 게임 이미지 읽기: 읽는 순서·없는 이미지·경로 탈출(평소 cargo test에도 들어 있다)
 cargo clippy --all-targets --manifest-path app/src-tauri/Cargo.toml                       # 경고가 없어야 한다
 cargo run --quiet --manifest-path app/src-tauri/Cargo.toml --bin nikke-capture -- --info
 ```
@@ -1340,6 +1431,12 @@ npm --prefix app run fixture -- tier growth   # 고른 것만: compare · interc
 | `src/components/OverlayStatus.vue` | 클릭 통과·숨김 상태와 단축키 표시 |
 | `src/components/GamePanel.vue` | 게임 창 칸: 상태·크기, 화면 저장 단추와 결과, 붙이기 |
 | `src/style.css` | 색·글꼴과, 화면들이 함께 쓰는 틀(`.screen`·`.panel`·`.meta`·`.badge`·`.block` 등). 긴 글은 줄을 바꾼다(440px) |
+| `src/styles/tokens.css` | 디자인 토큰(UI 개편): 어두운 테마의 색, 보라 강조색, 속성 색 다섯, 상태 색, 간격·모서리·글자 크기. 변수만 정한다(§디자인 기반) |
+| `src/ui/*.vue` · `src/ui/useImage.ts` | 공통 부품: 니케 타일·보스 카드·속성 칩·버스트 배지·아이콘·딜 막대·순위 줄·상태 알약·진행 패널·뼈대 화면·빈 상태·접는 「자세히」. 토큰만 쓴다. 기존 화면은 아직 쓰지 않는다 |
+| `src/ui/gallery/` | 부품 모아 보기(개발 실행에서만 — 빌드에 들어가지 않는다)와 그 보기 값 |
+| `src/lib/images.ts` | 게임 이미지(초상화·보스·아이콘)를 Rust 명령으로 얻어 `data:` 주소로 바꾸고 기억한다. 없으면 null |
+| `src/lib/nikkeInfo.ts` | 니케 정보: 이름 → 속성·버스트 단계·무기·기업·클래스·등급(엔진 카탈로그에서 — 없는 값은 「모름」) |
+| `src/lib/gallery.ts` | 부품 모아 보기를 띄울지의 규칙(개발 실행 + `?gallery` 또는 `VITE_UI_GALLERY=1`) |
 | `src/lib/format.ts` | 서식. 대미지 단위 표기는 루트의 `src/core/format.mjs`를 그대로 쓴다(복제하지 않는다). 부호 붙은 증감·증가율·점수·엔진 버전·캐시·시각 |
 | `src/lib/backend.ts` | Rust 명령·이벤트를 부르는 유일한 곳 |
 | `src/lib/runtime.ts` | 계산 코드에 넘기는 엔진 런타임(Rust 명령 `engine_*`을 부른다)과 시뮬 결과 캐시의 메모리 저장소(`simCache`) |
@@ -1369,7 +1466,8 @@ npm --prefix app run fixture -- tier growth   # 고른 것만: compare · interc
 | `src-tauri/src/account_sync.rs` | 계정 받기: 이름 검사, 상태(파일의 유무·시각), 쿠키 파일 쓰기(쓰는 곳은 여기 하나), 엔진의 수집 스크립트 실행(진행 줄·경고·시간 제한·중단·실패의 구분), 받은 프로필 읽기, 계정 파일 저장(`.bak`). Tauri를 모른다 |
 | `src-tauri/src/login_window.rs` | blablalink 로그인 창: 열기(보통 창, https만, 따로 둔 저장 폴더), 쿠키 저장소 읽기, 세션 지우기. capability가 없는 창이다 |
 | `src-tauri/src/extension_link.rs` | 크롬 확장 연결: 루프백에만 묶이는 수신부(표준 라이브러리 — 요청 하나를 직접 읽는다), 요청 가리기(경로·출처·방법·호스트·형식·크기), 연결 코드(난수·견주기·틀린 횟수와 막힘), 정해진 낱말뿐인 답, 켜짐과 코드의 기억, 화면에 보일 상태. 쿠키는 `account_sync::store_pasted_cookie`로만 넘긴다. Tauri를 모른다 |
-| `src-tauri/src/lib.rs` | 창·전역 단축키·명령·게임 창 추적 스레드(붙이기·게임 위에 머물기)·화면 추적 스레드·중복 실행 방지·계정 받기 명령·크롬 확장 연결 명령·종료 시 정리를 잇는 접착 코드 |
+| `src-tauri/src/assets.rs` | 게임 이미지 읽기: 니케 초상화(엔진 카탈로그에 있는 이름만)·보스 이미지(내장 보스 묶음의 id만)·아이콘(표에 있는 종류·값만)을 정해진 폴더에서 읽어 base64로. 파일 이름 규칙, 형식·크기 확인, 읽는 순서(받아 둔 것·엔진 폴더·캡처 조각). 읽기만 한다 — 네트워크·Tauri를 모른다 |
+| `src-tauri/src/lib.rs` | 창·전역 단축키·명령·게임 창 추적 스레드(붙이기·게임 위에 머물기)·화면 추적 스레드·중복 실행 방지·계정 받기 명령·크롬 확장 연결 명령·게임 이미지 명령·종료 시 정리를 잇는 접착 코드 |
 | `src-tauri/tests/extension_link.rs` | 수신부를 실제로 열고(빈 포트) 가짜 요청을 소켓으로 보내는 테스트(평소 `cargo test`에서 돈다): 루프백 전용, 켜고 끄기, 연결 코드와 막힘, 거부하는 요청, 웹 페이지 차단, 쿠키 비노출 |
 | `src-tauri/tests/exit_cleanup.rs` | 가짜 엔진·가짜 수집 스크립트를 띄운 실행 파일을 끝내면 자식 프로세스가 남지 않는지 보는 테스트(평소 `cargo test`에서 돈다) |
 | `src-tauri/tests/live_stay_on_top.rs` | 항상 위 창에 덮인 자기 창을 포커스 없이 다시 올리는 것을 실제 창으로 보는 테스트(`#[ignore]`) — 같은 프로세스의 창, 다른 프로세스의 창 |
@@ -1382,7 +1480,8 @@ npm --prefix app run fixture -- tier growth   # 고른 것만: compare · interc
 | `src-tauri/tests/account_fetch.rs` | 가짜 엔진 폴더·가짜 수집 스크립트로 계정 수집을 확인하는 테스트(평소 `cargo test`에서 돈다): 성공·세션 만료·네트워크 오류·시간 초과·중단, 쿠키 비노출 |
 | `src-tauri/tests/live_login_window.rs` | 로그인 창을 실제로 띄워 보는 테스트(`#[ignore]`) — 임시 세션, 로그인하지 않는다 |
 | `src-tauri/tests/windows-test.manifest` | 통합 테스트 실행 파일에 넣는 「공용 컨트롤 6」 선언(`build.rs`가 테스트 실행 파일에만 넣는다 — 없으면 Tauri 창을 쓰는 테스트가 시작하지 못한다) |
-| `src-tauri/capabilities/overlay.json` | 오버레이 창(`main`)에 허용한 권한: 이벤트 듣기, 창 끌기, 앱 명령 스물아홉 개. 로그인 창(`login`)은 없다 — 권한이 하나도 없다 |
+| `src-tauri/capabilities/overlay.json` | 오버레이 창(`main`)에 허용한 권한: 이벤트 듣기, 창 끌기, 앱 명령 서른두 개. 로그인 창(`login`)은 없다 — 권한이 하나도 없다 |
+| `../scripts/fetch-assets.mjs` · `fetch-assets-lib.mjs` (저장소 루트) | 리소스 받기: 받을 목록(`data/assets/manifest.json`) 만들기, `--list`(네트워크 없음), `--run`(사람이 실행 — 공식 CDN 한 곳에서만, 조금씩). 설명은 `docs/ui-redesign.md` §8 |
 | `../extension/` (저장소 루트) | 크롬 확장(Manifest V3): `manifest.json`, 팝업(`popup.*`), 순수 모듈 `lib/cookie-header.js`·`lib/link.js`, 테스트 `tests/`. 설명은 `extension/README.md` |
 
 Rust 명령: `load_report(path)`, `overlay_status()`, `startup_report_path()`, `quit_app()`,
@@ -1402,6 +1501,9 @@ Rust 명령: `load_report(path)`, `overlay_status()`, `startup_report_path()`, `
 쿠키는 없다): `extension_link_status()`, `extension_link_set(enabled)`(수신부를 켜고 끈다 — 기억된다. 화면이 정하는 것은 켜짐뿐이다),
 `extension_link_new_code()`(연결 코드를 다시 만든다), `extension_link_take_pending()`(확장에서 쿠키를 받아 수집을 이을 차례면 true —
 한 번만).
+게임 이미지(§디자인 기반 — 돌려주는 것은 `{found, mime, data, source}`, 없는 이미지는 거부가 아니라 `found: false`):
+`nikke_portrait(name)`(엔진 카탈로그에 있는 이름의 초상화), `boss_image(id)`(내장 보스 묶음에 있는 id의 이미지),
+`game_icon(kind, key)`(아이콘 표에 있는 종류·값의 아이콘). 화면이 넘기는 것은 경로가 아니라 열쇠다.
 이벤트: `overlay-state`, `engine-progress`, `game-window`(게임 창 상태가 바뀔 때), `game-capture`(단축키로 저장한 결과),
 `screen-track`(자동 추적의 결과가 바뀔 때 — 이미지는 싣지 않는다), `account-fetch`(수집 스크립트가 줄을 낼 때 `{text, warning}` —
 쿠키 값은 가려져 있고 오버레이 창에만 보낸다), `extension-link`(크롬 확장 연결에 알릴 만한 요청이 왔을 때 — 위의 상태를
@@ -1410,6 +1512,18 @@ Rust 명령: `load_report(path)`, `overlay_status()`, `startup_report_path()`, `
 명령을 더하면 `src-tauri/build.rs`의 목록과 capability에도 적어야 화면에서 부를 수 있다.
 
 ## 사람이 확인할 것 (아직 확인하지 않았다)
+
+디자인 기반(P-026) — **부품의 실제 모습을 눈으로 보지 못했다.** 자동 실행 세션은 창도 브라우저도 띄울 수 없어 컴포넌트 테스트
+(구조·글자·상태)와 CSS를 읽는 것으로만 확인했다. 리소스도 실제로 받지 않았다(받기는 가짜 서버로만 확인했다):
+
+- 부품 모아 보기(`$env:VITE_UI_GALLERY = '1'; npm --prefix app run tauri dev`)에서 실제 초상화와 보스 이미지가 보이고 어색하지
+  않은지: 큰 타일에서 얼굴이 잘리지 않는지(위쪽 기준으로 자른다), 작은 타일 다섯이 한 줄에 들어가는지, 긴 이름이 말줄임되는지,
+  약점 속성 테두리가 눈에 띄는지, 전격(보라)과 강조색(보라)이 헷갈리지 않는지, 글자 크기(10~13px)가 읽히는지.
+- 엔진 폴더의 아이콘(속성·버스트·클래스)이 어두운 바탕에서 보이는지, 작은 크기에서 알아볼 수 있는지. 직접 그린 대체 도형
+  (모아 보기의 「직접 그린 도형」 줄)이 쓸 만한지.
+- `node scripts/fetch-assets.mjs --list`로 받을 것을 확인한 뒤(지금은 0개일 것이다) 받을 것이 있을 때 `--run`으로 받고,
+  받은 이미지가 화면에 맞게 나오는지. `data/assets/icons/…`에 아이콘을 직접 넣으면 그것이 엔진 폴더의 것보다 먼저 쓰이는지.
+- 기존 화면(탭 다섯)이 예전과 똑같이 보이는지 — 토큰 파일을 불러오게 됐지만 변수만 정하므로 달라지면 안 된다.
 
 오버레이 견고화(P-024) — **실제 게임 위에서도, 실제 오버레이 창에서도 보지 않았다.** 창 올리기는 테스트가 띄운 창으로, 종료 시
 정리는 가짜 엔진을 띄운 테스트 실행 파일로, 계산 중 탭 이동은 가짜 IPC 테스트로만 확인했다:

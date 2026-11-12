@@ -114,6 +114,21 @@ node --test extension/                                                          
 cargo test --manifest-path app/src-tauri/Cargo.toml --test extension_link                                  # 수신부를 실제로 열고(빈 포트) 가짜 요청을 보낸다: 루프백 전용·연결 코드·거부·쿠키 비노출(평소 cargo test에도 들어 있다)
 ```
 
+**UI 개편**(데스크톱 앱 + 오버레이 — 기준 문서 `docs/ui-redesign.md`. UI 작업이면 먼저 읽는다): 디자인 기반(P-026)까지 만들었다 —
+디자인 토큰 `app/src/styles/tokens.css`, 공통 부품 `app/src/ui/`(색·크기는 토큰만 쓴다), 게임 이미지 명령(Rust `src-tauri/src/assets.rs` —
+니케 이름·보스 id·아이콘 종류는 경로가 아니라 열쇠다: 엔진 카탈로그·내장 보스 묶음·아이콘 표에 있을 때만 정해진 폴더에서 읽고,
+없는 이미지는 오류가 아니라 「없음」), 한 줄 요약 `src/core/summary.mjs`, 남은 시간 어림 `src/core/eta.mjs`. 기존 화면은 아직 예전
+모양이다(옮기는 것은 P-027·P-028). **게임 이미지를 저장소에 넣지 않는다** — `data/assets/`·`data/captures/`는 gitignore이고 테스트는
+코드로 만든 가짜 이미지로만 한다. **에이전트는 `fetch-assets.mjs --run`을 돌리지 않는다**(실제로 받는 것은 사람이 한다), 설치된 게임
+클라이언트의 파일을 풀거나 복호화하지 않고, 주소를 추측해 두드려 보지 않는다. 자세한 것은 `app/README.md` §디자인 기반.
+
+```bash
+node scripts/fetch-assets.mjs --list                          # 받을 리소스의 종류별 개수·출처(네트워크 없음). --manifest는 목록을 data/assets/manifest.json에 쓴다
+node --test tests/unit/fetch-assets.test.mjs                  # 리소스 받기: 주소 규칙(엔진 코드와 대조)·목록·받기(로컬 가짜 서버 — 실제 CDN을 부르지 않는다)
+cargo test --manifest-path app/src-tauri/Cargo.toml --lib assets   # 게임 이미지 읽기: 읽는 순서·없는 이미지·경로 탈출
+$env:VITE_UI_GALLERY = '1'; npm --prefix app run tauri dev    # (PowerShell) 부품 모아 보기 — 개발 실행에서만 뜬다. 브라우저에서는 개발 서버 주소 뒤에 ?gallery
+```
+
 게임 창·화면 캡처·요격전 화면 인식(실행 중인 니케가 필요하다 — `--recognize <PNG>`와 `live_recognize`만 빼고. 게임은 읽기만 한다 —
 `app/README.md` §게임 창·화면 캡처, §화면 인식):
 

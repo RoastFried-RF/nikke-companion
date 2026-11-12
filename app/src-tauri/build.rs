@@ -32,6 +32,9 @@ fn main() {
             "extension_link_set",
             "extension_link_new_code",
             "extension_link_take_pending",
+            "nikke_portrait",
+            "boss_image",
+            "game_icon",
         ]),
     );
     tauri_build::try_build(attributes).expect("tauri-build 실패");

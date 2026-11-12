@@ -1546,9 +1546,19 @@
         "`node scripts/fetch-assets.mjs --list`로 받을 것을 확인한 뒤 `--run`으로 받고, 아이콘·이미지가 화면에 맞게 나온다"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261112T093526-P-026-a1",
+        "verified_tree": "058197d8169153d66e6801f591872f8c75e90fef",
+        "verified_at": "2026-11-12T10:10:29.291Z",
+        "commit": null
+      }
     },
     {
       "id": "P-027",
