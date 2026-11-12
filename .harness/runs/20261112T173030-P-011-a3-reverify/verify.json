@@ -1,0 +1,75 @@
+{
+  "task": "P-011",
+  "started_at": "2026-11-12T17:30:30.550Z",
+  "head": "be85fe8c426582a6bb72d61a0f5460ba81b74fc3",
+  "tree": "e512917e90ad330b41e22791adf60c5605d94b3c",
+  "dirty": true,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "unit",
+      "cmd": "node --test tests/unit/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 2663,
+      "log": "verify-1-unit.log"
+    },
+    {
+      "name": "install",
+      "cmd": "npm --prefix app install",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 828,
+      "log": "verify-2-install.log"
+    },
+    {
+      "name": "frontend-build",
+      "cmd": "npm --prefix app run build",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 5464,
+      "log": "verify-3-frontend-build.log"
+    },
+    {
+      "name": "frontend-test",
+      "cmd": "npm --prefix app test",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 7593,
+      "log": "verify-4-frontend-test.log"
+    },
+    {
+      "name": "rust-test",
+      "cmd": "cargo test --manifest-path app/src-tauri/Cargo.toml",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 22772,
+      "log": "verify-5-rust-test.log"
+    },
+    {
+      "name": "live-game",
+      "cmd": "cargo test --manifest-path app/src-tauri/Cargo.toml --test live_game -- --ignored",
+      "exit_code": null,
+      "skipped_env": true,
+      "requires": "실행 중이고 창이 떠 있는(최소화되지 않은) 니케",
+      "duration_ms": 354
+    },
+    {
+      "name": "live-capture-cli",
+      "cmd": "cargo run --quiet --manifest-path app/src-tauri/Cargo.toml --bin nikke-capture -- --info",
+      "exit_code": null,
+      "skipped_env": true,
+      "requires": "실행 중인 니케(nikke.exe)",
+      "duration_ms": 328
+    }
+  ],
+  "passed": true,
+  "reason": null,
+  "env_skipped": [
+    "live-game (실행 중이고 창이 떠 있는(최소화되지 않은) 니케)",
+    "live-capture-cli (실행 중인 니케(nikke.exe))"
+  ],
+  "env_only": false,
+  "tree_after": "e512917e90ad330b41e22791adf60c5605d94b3c",
+  "finished_at": "2026-11-12T17:31:10.843Z"
+}

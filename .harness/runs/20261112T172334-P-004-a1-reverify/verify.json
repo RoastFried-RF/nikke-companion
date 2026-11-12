@@ -1,0 +1,40 @@
+{
+  "task": "P-004",
+  "started_at": "2026-11-12T17:23:34.928Z",
+  "head": "be85fe8c426582a6bb72d61a0f5460ba81b74fc3",
+  "tree": "e512917e90ad330b41e22791adf60c5605d94b3c",
+  "dirty": true,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "acceptance",
+      "cmd": "node --test tests/unit/format.acceptance.test.mjs",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 123,
+      "log": "verify-1-acceptance.log"
+    },
+    {
+      "name": "unit",
+      "cmd": "node --test tests/unit/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 2622,
+      "log": "verify-2-unit.log"
+    },
+    {
+      "name": "integration",
+      "cmd": "node --test tests/integration/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 76804,
+      "log": "verify-3-integration.log"
+    }
+  ],
+  "passed": true,
+  "reason": null,
+  "env_skipped": [],
+  "env_only": false,
+  "tree_after": "e512917e90ad330b41e22791adf60c5605d94b3c",
+  "finished_at": "2026-11-12T17:24:54.818Z"
+}

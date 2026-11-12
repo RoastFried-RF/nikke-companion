@@ -1,0 +1,24 @@
+{
+  "task": "H-001",
+  "started_at": "2026-11-12T17:20:35.368Z",
+  "head": "be85fe8c426582a6bb72d61a0f5460ba81b74fc3",
+  "tree": "e512917e90ad330b41e22791adf60c5605d94b3c",
+  "dirty": true,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "selftest",
+      "cmd": "node scripts/harness-selftest.mjs",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 20423,
+      "log": "verify-1-selftest.log"
+    }
+  ],
+  "passed": true,
+  "reason": null,
+  "env_skipped": [],
+  "env_only": false,
+  "tree_after": "e512917e90ad330b41e22791adf60c5605d94b3c",
+  "finished_at": "2026-11-12T17:20:56.103Z"
+}
