@@ -231,6 +231,15 @@ ol {
   color: var(--muted);
 }
 
+/* 자동 추적이 따라간 보스의 추천을 보일 수 없을 때의 안내 — 다른 안내보다 눈에 띄게. */
+.screen__hint--track {
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  color: var(--text);
+}
+
 .screen__hint code {
   font-size: 12px;
   overflow-wrap: anywhere;

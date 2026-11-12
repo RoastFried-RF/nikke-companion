@@ -19,7 +19,10 @@ import {
   quitApp,
   readJsonFile,
   recognizeGameScreen,
+  SCREEN_TRACK_EVENT,
+  screenTrackStatus,
   setFollowGame,
+  setScreenTracking,
   startupReportPath,
 } from '../src/lib/backend';
 import capability from '../src-tauri/capabilities/overlay.json';
@@ -36,6 +39,7 @@ import libRs from '../src-tauri/src/lib.rs?raw';
 import overlayStateRs from '../src-tauri/src/overlay_state.rs?raw';
 import overlayWin32Rs from '../src-tauri/src/overlay_win32.rs?raw';
 import recognizeRs from '../src-tauri/src/recognize.rs?raw';
+import screenTrackRs from '../src-tauri/src/screen_track.rs?raw';
 import gitignore from '../../.gitignore?raw';
 import formatSource from '../src/lib/format.ts?raw';
 
@@ -63,6 +67,8 @@ const COMMANDS = [
   'capture_game',
   'engine_cancel',
   'recognize_game_screen',
+  'set_screen_tracking',
+  'screen_track_status',
 ];
 
 const gameWindow = {
@@ -93,6 +99,16 @@ const recognition = {
   width: 1881,
   height: 1058,
 };
+const trackStatus = {
+  enabled: true,
+  interval_ms: 2000,
+  state: 'read',
+  message: '이상 개체 요격전 보스 선택 화면 — 크라켄',
+  recognition,
+  read_at: '2026-11-12T05:00:00.000Z',
+  capture_ms: 64,
+  failures: 0,
+};
 
 describe('Rust 명령 호출', () => {
   it('명령 이름과 인자가 Rust 쪽과 같다', async () => {
@@ -110,6 +126,7 @@ describe('Rust 명령 호출', () => {
       if (cmd === 'capture_game') return captureRecord;
       if (cmd === 'engine_cancel') return true;
       if (cmd === 'recognize_game_screen') return recognition;
+      if (cmd === 'set_screen_tracking' || cmd === 'screen_track_status') return trackStatus;
       return null;
     });
     await expect(loadReport('D:\\r.json')).resolves.toEqual({ schema_version: 1 });
@@ -126,6 +143,8 @@ describe('Rust 명령 호출', () => {
     await expect(captureGame()).resolves.toEqual(captureRecord);
     await expect(engineCancel()).resolves.toBe(true);
     await expect(recognizeGameScreen()).resolves.toEqual(recognition);
+    await expect(setScreenTracking(true, 2000)).resolves.toEqual(trackStatus);
+    await expect(screenTrackStatus()).resolves.toEqual(trackStatus);
     expect(calls.map((c) => c.cmd)).toEqual(COMMANDS);
     expect(calls[0].args).toEqual({ path: 'D:\\r.json' });
     expect(calls[6].args).toEqual({ requests: [{ squad: ['크라운'] }] });
@@ -135,6 +154,20 @@ describe('Rust 명령 호출', () => {
     expect(calls[11].args).toEqual({ label: null });
     // 화면 인식은 화면에서 받는 인자가 없다(무엇을 찍을지·어디에 둘지 화면이 정하지 못한다).
     expect(calls[13].args).toEqual({});
+    // 자동 추적: 화면이 정하는 것은 켜짐과 주기뿐이다. 상태를 묻는 명령은 인자가 없다.
+    expect(calls[14].args).toEqual({ enabled: true, intervalMs: 2000 });
+    expect(calls[15].args).toEqual({});
+  });
+
+  it('자동 추적의 주기를 주지 않으면 null을 넘긴다 — Rust가 기본값(2초)을 쓴다', async () => {
+    const calls: unknown[] = [];
+    mockIPC((_cmd, args) => {
+      calls.push(args);
+      return trackStatus;
+    });
+    await setScreenTracking(false);
+    expect(calls).toEqual([{ enabled: false, intervalMs: null }]);
+    expect(screenTrackRs).toContain('pub const DEFAULT_INTERVAL_MS: u64 = 2000;');
   });
 
   it('인자 이름이 Rust 명령의 매개변수와 같다', () => {
@@ -147,6 +180,9 @@ describe('Rust 명령 호출', () => {
     expect(libRs).toMatch(/async fn recognize_game_screen\(app: AppHandle\) -> Result<Recognition, String>/);
     // 중단 명령은 화면에서 받는 인자가 없다(무엇을 멈출지는 Rust가 안다 — 도는 배치 하나).
     expect(libRs).toMatch(/fn engine_cancel\(run: State<'_, EngineRun>\) -> bool/);
+    // 자동 추적: 화면의 intervalMs가 Rust의 interval_ms다(Tauri가 이름을 바꿔 준다).
+    expect(libRs).toMatch(/fn set_screen_tracking\(app: AppHandle, enabled: bool, interval_ms: Option<u64>\) -> TrackStatus/);
+    expect(libRs).toMatch(/fn screen_track_status\(tracker: State<'_, ScreenTracker>\) -> TrackStatus/);
   });
 
   it('Rust가 거부한 한국어 문장을 그대로 넘긴다', async () => {
@@ -175,6 +211,7 @@ describe('Rust 명령 호출', () => {
     expect(libRs).toContain(`ENGINE_PROGRESS_EVENT: &str = "${ENGINE_PROGRESS_EVENT}"`);
     expect(libRs).toContain(`GAME_WINDOW_EVENT: &str = "${GAME_WINDOW_EVENT}"`);
     expect(libRs).toContain(`GAME_CAPTURE_EVENT: &str = "${GAME_CAPTURE_EVENT}"`);
+    expect(libRs).toContain(`SCREEN_TRACK_EVENT: &str = "${SCREEN_TRACK_EVENT}"`);
   });
 });
 
@@ -191,6 +228,7 @@ describe('게임 창 추적·캡처(Rust)', () => {
     'capture.rs': captureRs,
     'capture_cli.rs': captureCliRs,
     'recognize.rs': recognizeRs,
+    'screen_track.rs': screenTrackRs,
     'lib.rs': libRs,
   };
 
@@ -307,6 +345,149 @@ describe('화면 인식(Rust)', () => {
   });
 });
 
+describe('화면 자동 추적(Rust)', () => {
+  /** 주석을 뺀 코드. */
+  const code = (source: string) =>
+    source
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+  const beforeTests = (source: string) => source.slice(0, source.indexOf('#[cfg(test)]'));
+  /** 추적 스레드가 한 주기에 하는 일. */
+  const readScreen = code(libRs.slice(libRs.indexOf('fn read_screen('), libRs.indexOf('fn emit_screen_track(')));
+  const trackLoop = code(libRs.slice(libRs.indexOf('fn track_screen('), libRs.indexOf('fn start_screen_tracker(')));
+
+  it('규칙 모듈은 순수하다 — 창·캡처·파일·스레드에 닿지 않는다', () => {
+    const body = code(beforeTests(screenTrackRs));
+    expect(body).not.toMatch(/windows::|HWND|std::fs|std::io|std::path|std::process|std::net|std::env|std::thread|game_win32|tauri/);
+    expect(body).toContain('pub fn overlay_gate(enabled: bool, overlay_visible: bool) -> Result<(), Pause>');
+    expect(body).toContain('pub fn game_gate(status: &GameWindowStatus) -> Result<&GameWindowInfo, Reading>');
+    expect(body).toContain('pub fn observe(&mut self, reading: Reading, at: &str) -> bool');
+  });
+
+  it('꺼져 있거나 오버레이가 숨겨져 있으면 게임 창을 찾지도 않고, 게임 창이 떠 있을 때만 캡처한다', () => {
+    const gate = readScreen.indexOf('screen_track::overlay_gate(settings.enabled, visible)');
+    const locate = readScreen.indexOf('game_window::locate()');
+    const game = readScreen.indexOf('screen_track::game_gate(&status)');
+    const capture = readScreen.indexOf('game_window::capture_window(window)');
+    expect(gate).toBeGreaterThan(-1);
+    expect(locate).toBeGreaterThan(gate);
+    expect(game).toBeGreaterThan(locate);
+    expect(capture).toBeGreaterThan(game);
+    // 오버레이가 보이는지는 오버레이 상태에서 읽는다.
+    expect(readScreen).toContain('lock(&app.state::<Overlay>().state).visible');
+    // 꺼져 있는 동안 추적 스레드는 깨울 때까지 잔다 — 창 열거도 캡처도 없다.
+    expect(trackLoop).toMatch(/if !settings\.enabled \{\s*thread::park\(\);\s*continue;\s*\}/);
+  });
+
+  it('찍은 프레임은 인식에만 쓴다 — 저장하지도 화면에 넘기지도 않는다', () => {
+    expect(readScreen).toMatch(/Ok\(\(frame, _method\)\) => \{\s*let recognition = recognize::recognize\(&frame\);/);
+    expect(readScreen).not.toMatch(/save_png|capture_game_to_dir|default_capture_dir|fs::|emit\(/);
+    // 화면에 가는 것은 상태뿐이다: 이 여덟 칸이고 이미지가 없다.
+    const status = screenTrackRs.slice(screenTrackRs.indexOf('pub struct TrackStatus {'), screenTrackRs.indexOf('impl TrackStatus {'));
+    expect(status.match(/^\s*pub (\w+):/gm)?.map((f) => f.trim())).toEqual([
+      'pub enabled:',
+      'pub interval_ms:',
+      'pub state:',
+      'pub message:',
+      'pub recognition:',
+      'pub read_at:',
+      'pub capture_ms:',
+      'pub failures:',
+    ]);
+    // 화면 쪽 타입도 같은 여덟 칸이다.
+    const types = sources['../src/types.ts'];
+    const front = types.slice(types.indexOf('export interface ScreenTrackStatus {'), types.indexOf('/** 단축키로 저장한 결과'));
+    expect(front.match(/^ {2}(\w+):/gm)?.map((f) => f.trim())).toEqual([
+      'enabled:',
+      'interval_ms:',
+      'state:',
+      'message:',
+      'recognition:',
+      'read_at:',
+      'capture_ms:',
+      'failures:',
+    ]);
+  });
+
+  it('저장용 캡처와 겹치지 않는다 — 같은 표시를 쓰고, 겹치면 그 주기를 건너뛴다', () => {
+    expect(readScreen).toMatch(/if game\.capturing\.swap\(true, Ordering::AcqRel\) \{\s*return Reading::Busy;\s*\}/);
+    expect(readScreen).toContain('let _guard = BusyGuard(&game.capturing);');
+  });
+
+  it('결과가 바뀔 때만 화면에 알리고, 어떤 실패에도 추적 스레드는 끝나지 않는다', () => {
+    // 알리는 것은 규칙이 「바뀌었다」고 할 때뿐이다.
+    expect(trackLoop).toMatch(/log\.observe\(reading, &utc\.iso_utc\(\)\)\s*\.then\(\|\| log\.status\(\)\.clone\(\)\)/);
+    expect(trackLoop).toMatch(/if let Some\(status\) = changed \{\s*emit_screen_track\(&app, status\);\s*\}/);
+    expect(trackLoop.match(/emit_screen_track\(/g)).toHaveLength(1);
+    // 끝없는 루프이고 빠져나가는 곳이 없다. 읽는 도중의 패닉도 상태로 바꾼다.
+    expect(trackLoop).toMatch(/\bloop \{/);
+    expect(trackLoop).not.toMatch(/\bbreak\b|\breturn\b|\.unwrap\(\)|\.expect\(|panic!/);
+    expect(trackLoop).toContain('catch_unwind(AssertUnwindSafe(|| read_screen(&app, settings)))');
+    // 캡처하는 동안에는 상태를 잠그지 않는다(상태 명령이 캡처를 기다리지 않는다).
+    expect(trackLoop.indexOf('read_screen(&app, settings)')).toBeLessThan(trackLoop.indexOf('lock(&tracker.log)'));
+  });
+
+  it('캡처용 Direct3D 장치는 한 번 만들어 다시 쓴다 — 캡처 대상은 여전히 게임 창 하나뿐이다', () => {
+    const win32 = code(gameWin32Rs);
+    expect(win32).toContain('static CAPTURE_DEVICE: Mutex<Option<CaptureDevice>> = Mutex::new(None);');
+    expect(win32.match(/CaptureDevice::create\(\)/g)).toHaveLength(1);
+    // 캡처 API가 실패하면 장치를 버리고 다음에 새로 만든다.
+    expect(win32).toMatch(/fn discards_device\(error: &GameError\) -> bool \{\s*matches!\(error, GameError::CaptureFailed \{ \.\. \}\)/);
+    expect(win32.match(/CreateForWindow\(/g)).toHaveLength(1);
+  });
+
+  it('언제 보스를 바꾸는지의 규칙은 화면 쪽 순수 함수 하나다 — 화면들은 그 결과만 따른다', () => {
+    const rule = sources['../src/lib/screenTrack.ts'];
+    expect(rule).toContain('export function followStep(state: FollowState, status: ScreenTrackStatus | null | undefined, switchOn: boolean): FollowStep');
+    // 탭을 옮기는 것은 App.vue, 보스를 고르는 것은 InterceptView.vue — 둘 다 규칙이 따라가라고 할 때만.
+    expect(sources['../src/App.vue']).toMatch(/provideScreenTrack\(\(\) => \{\s*if \(track\.autoTab\.value && tab\.value !== 'intercept'\) select\('intercept'\);/);
+    expect(sources['../src/components/InterceptView.vue']).toContain('watch(() => track.target.value?.seq, followTarget);');
+    for (const [file, text] of Object.entries(sources)) {
+      if (file === '../src/lib/screenTrack.ts') continue;
+      // 인식 결과(화면 종류·보스)를 직접 읽어 따로 판단하는 화면이 없다.
+      expect(text, file).not.toMatch(/recognition\.(screen|boss)\b|followStep\(/);
+    }
+    // 요격전 화면은 인식 결과로 계산을 시작하지 않는다: 실행은 단추와 입력 칸의 Enter뿐이다.
+    const screen = sources['../src/screens/InterceptScreen.vue'];
+    expect(screen.match(/@run="run"|@enter="run"/g)).toHaveLength(3);
+    expect(screen).not.toMatch(/watch\(|onActivated\(|onMounted\(/);
+  });
+});
+
+describe('중복 실행 방지(Rust)', () => {
+  const code = (source: string) =>
+    source
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+  const reveal = code(libRs.slice(libRs.indexOf('fn reveal_overlay('), libRs.indexOf('fn register_shortcuts(')));
+
+  it('두 번째 실행을 막는 플러그인을 맨 먼저 등록한다 — 창을 만들고 단축키를 등록하기 전에 끝난다', () => {
+    expect(cargoToml).toMatch(/^tauri-plugin-single-instance = "2"$/m);
+    const run = code(libRs.slice(libRs.indexOf('pub fn run()')));
+    const single = run.indexOf('.plugin(tauri_plugin_single_instance::init(');
+    expect(single).toBeGreaterThan(-1);
+    expect(run.match(/\.plugin\(/g)).toHaveLength(2);
+    expect(single).toBeLessThan(run.indexOf('.plugin(tauri_plugin_global_shortcut'));
+    expect(single).toBeLessThan(run.indexOf('register_shortcuts('));
+    // 떠 있던 쪽이 하는 일은 하나다. 실행 인자와 작업 폴더는 쓰지 않는다.
+    expect(run).toMatch(/tauri_plugin_single_instance::init\(\|app, _args, _cwd\| \{\s*reveal_overlay\(app\);\s*\}\)/);
+  });
+
+  it('떠 있던 오버레이는 활성화 없이 보인다 — 포커스를 가져오는 호출이 없다', () => {
+    expect(reveal).toContain('state.apply(OverlayAction::Show)');
+    expect(reveal).toContain('show_overlay_without_activating(&window)');
+    expect(reveal).not.toMatch(/\.show\(\)|set_focus|set_always_on_top|unminimize|request_user_attention/);
+    expect(overlayStateRs).toMatch(/OverlayAction::Show => Self \{\s*visible: true,\s*\.\.self\s*\},/);
+  });
+
+  it('화면에서 부르는 것이 없어 권한을 더하지 않았다', () => {
+    for (const p of capability.permissions) expect(p).not.toMatch(/single-instance/);
+    for (const [file, text] of Object.entries(sources)) expect(text, file).not.toMatch(/single[-_ ]?instance/i);
+  });
+});
+
 describe('권한(capability)', () => {
   it('쓰는 것만 허용한다', () => {
     expect([...capability.permissions].sort()).toEqual(
@@ -382,7 +563,9 @@ describe('엔진 호출(Rust)', () => {
   });
 
   it('새 화면을 위해 Rust 명령이나 권한을 더하지 않았다 — 결과 파일은 read_json_file로 읽는다', () => {
-    expect(COMMANDS).toHaveLength(14);
+    // 화면 넷(P-017)까지는 14개였다. 그 뒤에 더한 것은 자동 추적(P-021)의 둘뿐이다 — 켜기/끄기와 상태.
+    expect(COMMANDS).toHaveLength(16);
+    expect(COMMANDS.slice(14)).toEqual(['set_screen_tracking', 'screen_track_status']);
     expect(sources['../src/lib/resultFile.ts']).toContain('await readJsonFile(target)');
     // Tauri API를 직접 부르는 곳은 여전히 lib/backend.ts 하나다.
     for (const [file, text] of Object.entries(sources)) {

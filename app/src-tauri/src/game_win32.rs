@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::mem::size_of;
-use std::sync::Once;
+use std::sync::{Mutex, Once};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -385,6 +385,79 @@ fn keep_winrt_loaded() {
     });
 }
 
+/// 캡처에 다시 쓰는 것들: Direct3D 장치 한 벌과, 마지막으로 찍은 창의 캡처 대상. 처음 캡처할 때 만든다.
+///
+/// 캡처마다 전부 새로 만들면 한 번에 약 200ms가 든다 — 장치 만들기 약 140ms, 캡처 대상 만들기 약 45ms
+/// (`tests/live_track.rs`로 잰 값 — `app/README.md` §자동 추적 §걸리는 시간). 자동 추적은 2초마다 캡처하므로
+/// 둘을 한 번만 만들어 다시 쓴다(한 번에 약 20ms). 프레임 풀과 세션은 여전히 캡처마다 새로 만들고 닫는다 —
+/// 찍지 않는 동안에는 캡처가 돌지 않는다.
+///
+/// 장치만 다시 쓰고 캡처 대상을 매번 새로 만들면 100번에 한 번쯤 그 호출이 2초 동안 멈췄다(같은 테스트로 확인 —
+/// 원인은 모른다). 그래서 캡처 대상도 창이 같은 동안에는 다시 쓴다.
+struct CaptureDevice {
+    device: ID3D11Device,
+    context: ID3D11DeviceContext,
+    winrt: IDirect3DDevice,
+    /// 마지막으로 찍은 창(핸들 값)과 그 창의 캡처 대상. 다른 창을 찍거나 캡처가 실패하면 새로 만든다.
+    item: Option<(isize, GraphicsCaptureItem)>,
+}
+
+// SAFETY: Direct3D 11 장치는 여러 스레드에서 불러도 된다. 즉시 컨텍스트는 한 번에 한 스레드만 써야 하는데,
+// 이 값은 `CAPTURE_DEVICE`의 잠금을 쥔 스레드만 만지므로(캡처 한 번이 끝날 때까지 쥔다) 겹치지 않는다.
+// 장치·컨텍스트·캡처 대상 모두 스레드에 묶인 COM 객체가 아니다(아파트 마샬링이 없다). 만든 스레드가 끝나도
+// COM은 `keep_winrt_loaded`가 프로세스 수명 동안 살려 둔다.
+unsafe impl Send for CaptureDevice {}
+
+/// 다시 쓰는 장치. 잠금은 캡처 한 번이 끝날 때까지 쥔다 — 캡처는 프로세스 안에서 한 번에 하나만 돈다.
+static CAPTURE_DEVICE: Mutex<Option<CaptureDevice>> = Mutex::new(None);
+
+impl CaptureDevice {
+    fn create() -> Result<Self, GameError> {
+        let (device, context) = create_d3d_device(D3D_DRIVER_TYPE_HARDWARE)
+            .or_else(|_| create_d3d_device(D3D_DRIVER_TYPE_WARP))
+            .map_err(|e| wgc_error("Direct3D 장치를 만들지 못했다", e))?;
+        let dxgi: IDXGIDevice = device
+            .cast()
+            .map_err(|e| wgc_error("DXGI 장치를 얻지 못했다", e))?;
+        let winrt: IDirect3DDevice = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi) }
+            .and_then(|inspectable| inspectable.cast())
+            .map_err(|e| wgc_error("캡처용 Direct3D 장치를 만들지 못했다", e))?;
+        Ok(Self {
+            device,
+            context,
+            winrt,
+            item: None,
+        })
+    }
+
+    /// 장치가 아직 쓸 만한가. 그래픽 드라이버가 다시 시작됐거나 장치가 제거됐으면 아니다.
+    fn alive(&self) -> bool {
+        unsafe { self.device.GetDeviceRemovedReason() }.is_ok()
+    }
+
+    /// 이 창의 캡처 대상. 같은 창이면 앞서 만든 것을 쓰고, 아니면 새로 만들어 둔다.
+    fn item_for(&mut self, hwnd: HWND) -> Result<GraphicsCaptureItem, GameError> {
+        let key = hwnd_value(hwnd);
+        if let Some((kept, item)) = &self.item {
+            if *kept == key {
+                return Ok(item.clone());
+            }
+        }
+        let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()
+            .map_err(|e| wgc_error("캡처 대상을 만들 수 없다", e))?;
+        let item: GraphicsCaptureItem = unsafe { interop.CreateForWindow(hwnd) }
+            .map_err(|e| wgc_error("게임 창을 캡처 대상으로 만들지 못했다", e))?;
+        self.item = Some((key, item.clone()));
+        Ok(item)
+    }
+}
+
+/// 이 오류 뒤에는 장치를 버리고 다음 캡처에서 새로 만든다: 캡처 API가 실패한 경우다(장치가 망가졌을 수 있다).
+/// 최소화·빈 화면·크기 불일치는 장치와 무관하므로 장치를 그대로 둔다.
+fn discards_device(error: &GameError) -> bool {
+    matches!(error, GameError::CaptureFailed { .. })
+}
+
 /// Windows.Graphics.Capture로 창을 찍고 클라이언트 영역만 잘라 낸다.
 ///
 /// 합성기(DWM)가 그 창의 화면을 텍스처로 넘겨준다 — 다른 창에 가려져 있어도 게임 화면이 찍힌다.
@@ -401,33 +474,58 @@ fn capture_wgc(
             detail: "이 Windows는 Windows.Graphics.Capture를 지원하지 않는다".to_string(),
         });
     }
-    let (device, context) = create_d3d_device(D3D_DRIVER_TYPE_HARDWARE)
-        .or_else(|_| create_d3d_device(D3D_DRIVER_TYPE_WARP))
-        .map_err(|e| wgc_error("Direct3D 장치를 만들지 못했다", e))?;
-    let dxgi: IDXGIDevice = device
-        .cast()
-        .map_err(|e| wgc_error("DXGI 장치를 얻지 못했다", e))?;
-    let winrt_device: IDirect3DDevice = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi) }
-        .and_then(|inspectable| inspectable.cast())
-        .map_err(|e| wgc_error("캡처용 Direct3D 장치를 만들지 못했다", e))?;
+    // 다른 스레드가 잠근 채 죽었어도 장치 자리는 쓸 수 있다(망가졌으면 아래에서 새로 만든다).
+    let mut slot = CAPTURE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    if slot.as_ref().is_some_and(|kept| !kept.alive()) {
+        *slot = None;
+    }
+    let mut kept = match slot.take() {
+        Some(kept) => kept,
+        None => CaptureDevice::create()?,
+    };
+    let result = capture_with_device(&mut kept, hwnd, window, expected);
+    // 이번 캡처가 쓴 읽기용 텍스처·프레임 표면을 지금 정리하게 한다. Direct3D 11은 놓은 자원을 다음 Flush까지
+    // 들고 있을 수 있다 — 장치를 계속 쓰므로 캡처마다 비워 준다.
+    unsafe { kept.context.Flush() };
+    match &result {
+        // 캡처 API가 실패했다: 장치도 캡처 대상도 버린다. 다음 캡처가 처음부터 다시 만든다.
+        Err(e) if discards_device(e) => {}
+        // 그 밖의 실패(최소화·빈 화면·크기 불일치): 장치는 두고 캡처 대상만 새로 만들게 한다 —
+        // 창 크기가 바뀐 뒤에 옛 캡처 대상이 계속 어긋난 프레임을 주는 일이 없게.
+        Err(_) => {
+            kept.item = None;
+            *slot = Some(kept);
+        }
+        Ok(_) => *slot = Some(kept),
+    }
+    result
+}
 
-    let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()
-        .map_err(|e| wgc_error("캡처 대상을 만들 수 없다", e))?;
-    let item: GraphicsCaptureItem = unsafe { interop.CreateForWindow(hwnd) }
-        .map_err(|e| wgc_error("게임 창을 캡처 대상으로 만들지 못했다", e))?;
+/// 장치 한 벌로 캡처 한 번: 프레임 풀·세션을 만들고, 프레임 하나를 읽고, 닫는다.
+fn capture_with_device(
+    kept: &mut CaptureDevice,
+    hwnd: HWND,
+    window: &GameWindowInfo,
+    expected: (u32, u32),
+) -> Result<Frame, GameError> {
+    let item = kept.item_for(hwnd)?;
     let size = item
         .Size()
         .map_err(|e| wgc_error("캡처 대상의 크기를 읽지 못했다", e))?;
     let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
-        &winrt_device,
+        &kept.winrt,
         DirectXPixelFormat::B8G8R8A8UIntNormalized,
         1,
         size,
     )
     .map_err(|e| wgc_error("프레임 풀을 만들지 못했다", e))?;
-    let session = pool
-        .CreateCaptureSession(&item)
-        .map_err(|e| wgc_error("캡처 세션을 만들지 못했다", e))?;
+    let session = match pool.CreateCaptureSession(&item) {
+        Ok(session) => session,
+        Err(e) => {
+            let _ = pool.Close();
+            return Err(wgc_error("캡처 세션을 만들지 못했다", e));
+        }
+    };
     // 마우스 커서와 노란 캡처 테두리를 빼 달라고 한다. 지원하지 않는 Windows에서는 무시된다.
     let _ = session.SetIsCursorCaptureEnabled(false);
     let _ = session.SetIsBorderRequired(false);
@@ -435,7 +533,7 @@ fn capture_wgc(
     let result = session
         .StartCapture()
         .map_err(|e| wgc_error("캡처를 시작하지 못했다", e))
-        .and_then(|()| wait_for_frame(&pool, &device, &context, hwnd, window, expected));
+        .and_then(|()| wait_for_frame(&pool, &kept.device, &kept.context, hwnd, window, expected));
     let _ = session.Close();
     let _ = pool.Close();
     result

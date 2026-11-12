@@ -17,6 +17,8 @@ fn main() {
             "set_follow_game",
             "capture_game",
             "recognize_game_screen",
+            "set_screen_tracking",
+            "screen_track_status",
         ]),
     );
     tauri_build::try_build(attributes).expect("tauri-build 실패");

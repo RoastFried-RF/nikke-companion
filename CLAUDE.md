@@ -58,7 +58,18 @@ npm --prefix app run build                                # 타입 검사 + 프�
 npm --prefix app test                                     # 컴포넌트 테스트 (vitest)
 cargo test --manifest-path app/src-tauri/Cargo.toml       # Rust 단위 테스트
 cargo build --manifest-path app/src-tauri/Cargo.toml
+cargo clippy --all-targets --manifest-path app/src-tauri/Cargo.toml   # 경고가 없어야 한다
 npm --prefix app run fixture                              # 컴포넌트 테스트용 샘플 결과 넷을 실제 CLI로 다시 만든다(몇 분). 고른 것만: `-- tier growth`
+```
+
+오버레이의 요격전 탭에는 **자동 추적** 스위치가 있다(기본 꺼짐): 켜 두면 2초마다 게임 화면을 읽어(읽기만 — 이미지는 저장하지도
+화면에 넘기지도 않는다) 게임에서 보고 있는 이상 개체 보스의 추천을 스스로 보여 준다. 규칙은 Rust `src-tauri/src/screen_track.rs`
+(언제 읽는가)와 `app/src/lib/screenTrack.ts`의 `followStep`(언제 보스를 바꾸는가) — `app/README.md` §자동 추적.
+오버레이는 한 번만 뜬다(두 번째 실행은 조용히 끝나고 떠 있던 창이 보인다 — §중복 실행 방지).
+
+```bash
+cargo test --manifest-path app/src-tauri/Cargo.toml --test live_track -- --ignored --nocapture --test-threads=1   # 캡처 한 번에 걸리는 시간·창 크기 변경(자기 창. 게임 창 측정 한 건은 게임 창이 떠 있어야 한다)
+cargo test --manifest-path app/src-tauri/Cargo.toml --test live_single_instance -- --ignored --nocapture        # 오버레이를 실제로 두 번 띄워 창이 하나인지 본다(떠 있는 오버레이는 끄고 돌린다)
 ```
 
 게임 창·화면 캡처·요격전 화면 인식(실행 중인 니케가 필요하다 — `--recognize <PNG>`와 `live_recognize`만 빼고. 게임은 읽기만 한다 —

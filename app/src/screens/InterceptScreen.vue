@@ -5,18 +5,24 @@
 //
 // 가장 자주 보는 화면이라 마지막 결과를 기억한다: 앱을 다시 열면 그 결과와 마지막으로 고른 보스가 바로 보인다
 // (계산에 몇 분이 걸린다). 기억은 이 PC의 웹뷰 저장소에만 있고 저장소 폴더에는 쓰지 않는다.
-import { ref } from 'vue';
+//
+// 자동 추적(TrackPanel): 켜 두면 게임에서 보고 있는 이상 개체 보스를 Rust가 인식해 알려 주고, 이 화면이 그 보스를 고른다
+// (규칙은 lib/screenTrack.ts). 추천 결과가 없거나 그 보스가 결과에 없으면 「추천을 먼저 실행하라」고 알릴 뿐,
+// 계산을 스스로 시작하지 않는다.
+import { computed, ref } from 'vue';
 import InterceptView from '../components/InterceptView.vue';
 import PathField from '../components/PathField.vue';
 import ResultLoader from '../components/ResultLoader.vue';
 import RunButtons from '../components/RunButtons.vue';
 import RunStatus from '../components/RunStatus.vue';
+import TrackPanel from '../components/TrackPanel.vue';
 import { errorMessage } from '../lib/backend';
 import { DEFAULT_INTERCEPT_BUDGET, DEFAULT_INTERCEPT_TOP, runIntercept } from '../lib/compute';
 import { useEngineRun } from '../lib/engineRun';
 import { forget, recall, remember } from '../lib/remember';
 import { checkInterceptReport } from '../lib/reports';
 import { useResultFile } from '../lib/resultFile';
+import { findBoss, useScreenTrack } from '../lib/screenTrack';
 import type { InterceptReport } from '../types';
 
 /** 마지막 결과 문서를 기억하는 이름. */
@@ -50,6 +56,18 @@ const inputsOpen = ref(report.value === null);
 
 const engine = useEngineRun('intercept');
 const file = useResultFile<InterceptReport>({ key: 'intercept.report-path', label: '요격전 추천 결과', check: checkInterceptReport });
+
+const track = useScreenTrack();
+/**
+ * 자동 추적이 따라간 보스의 추천을 보일 수 없을 때의 안내: 결과가 아직 없거나('none'), 결과에 그 보스가 없다('absent').
+ * 보일 수 있으면 null. 어느 쪽이든 계산을 스스로 시작하지 않는다 — 실행은 사용자가 누른다.
+ */
+const trackedGap = computed<{ kind: 'none' | 'absent'; name: string } | null>(() => {
+  const target = track?.enabled.value ? track.target.value : null;
+  if (!target) return null;
+  if (!report.value) return { kind: 'none', name: target.name };
+  return findBoss(report.value.bosses ?? [], target) ? null : { kind: 'absent', name: target.name };
+});
 
 const count = (value: number | ''): number | undefined => (value === '' ? undefined : value);
 
@@ -183,9 +201,17 @@ function fail(message: string): void {
       <RunStatus :run="engine" />
     </section>
 
+    <TrackPanel />
+
     <p v-if="error" class="screen__error" role="alert" data-testid="error">{{ error }}</p>
 
     <main class="screen__content">
+      <p v-if="trackedGap" class="screen__hint screen__hint--track" role="status" data-testid="track-need-run">
+        게임에서 보고 있는 보스: <strong>{{ trackedGap.name }}</strong> —
+        <template v-if="trackedGap.kind === 'none'">추천 결과가 아직 없다. 요격전 추천을 먼저 실행하라</template>
+        <template v-else>지금 결과에는 이 보스가 없다. 이 보스가 든 보스 묶음으로 요격전 추천을 먼저 실행하라</template>
+        (자동으로 계산을 시작하지 않는다).
+      </p>
       <template v-if="report">
         <p v-if="engine.computing" class="screen__hint" data-testid="stale-note">
           아래는 이전 결과다 — 새 계산이 끝나면 바뀐다.

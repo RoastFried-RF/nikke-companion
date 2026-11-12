@@ -7,6 +7,7 @@ import OverlayStatus from './components/OverlayStatus.vue';
 import { errorMessage, onOverlayState, overlayStatus, quitApp, startupReportPath } from './lib/backend';
 import { provideEngineOwner } from './lib/engineRun';
 import { recall, remember } from './lib/remember';
+import { provideScreenTrack } from './lib/screenTrack';
 import CompareScreen from './screens/CompareScreen.vue';
 import GrowthScreen from './screens/GrowthScreen.vue';
 import InterceptScreen from './screens/InterceptScreen.vue';
@@ -43,6 +44,13 @@ function select(key: TabKey): void {
   tab.value = key;
   remember(LAST_TAB, key);
 }
+
+// 요격전 화면 자동 추적: 게임에서 이상 개체 보스를 보고 있으면 그 보스의 추천을 보인다(스위치는 요격전 화면에 있다).
+// 보스를 고르는 것은 요격전 화면이 하고, 여기서는 다른 탭을 보고 있을 때 요격전 탭으로 옮기기만 한다(끌 수 있다).
+// 같은 인식이 이어지는 동안에는 다시 불리지 않는다 — 사용자가 다른 탭으로 가면 그대로 둔다(lib/screenTrack.ts).
+const track = provideScreenTrack(() => {
+  if (track.autoTab.value && tab.value !== 'intercept') select('intercept');
+});
 
 async function quit(): Promise<void> {
   try {

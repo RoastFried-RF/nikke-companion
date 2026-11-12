@@ -109,3 +109,5 @@
 {"at":"2026-11-12T05:08:39.825Z","event":"verified","task":"P-017","attempt":1,"run":".harness/runs/20261112T043754-P-017-a1","tree":"95569a6977fafc433cbd99c5af94353adda6d72c","reason":null}
 {"at":"2026-11-12T05:08:39.852Z","event":"session_end","stop_reason":"한도 도달: 반복 3회","tasks":{"done":["H-001","P-001","P-002","P-003","P-004","H-002","P-005","P-006","P-007","P-008","P-009","P-010","P-011","P-012","P-013","P-016","P-015","P-018","P-019","P-017"],"blocked":["P-014"]}}
 {"at":"2026-11-12T05:27:40.734Z","event":"session_start","model":"claude-fable-5-2","head":"ef7e65a04b7438c8cfa91b727ef7407d6166ba77","git_status":[]}
+{"at":"2026-11-12T06:03:26.871Z","event":"checkpoint","task":"P-020","commit":"22c66d0a770d373fe289c32d6a8b89785db1227b","tree":"d8f35c29d0ffcbcb1d5447422dd6fade90c74a33"}
+{"at":"2026-11-12T06:03:26.899Z","event":"verified","task":"P-020","attempt":1,"run":".harness/runs/20261112T052740-P-020-a1","tree":"d8f35c29d0ffcbcb1d5447422dd6fade90c74a33","reason":null}

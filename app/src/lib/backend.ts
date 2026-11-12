@@ -16,6 +16,7 @@ import type {
   GameSnapshot,
   OverlaySnapshot,
   ScreenRecognition,
+  ScreenTrackStatus,
 } from '../types';
 
 /** 오버레이 상태가 바뀔 때 Rust가 보내는 이벤트 이름(src-tauri/src/lib.rs의 OVERLAY_STATE_EVENT). */
@@ -29,6 +30,9 @@ export const GAME_WINDOW_EVENT = 'game-window';
 
 /** 단축키(Alt+Shift+S)로 게임 화면을 저장한 결과를 Rust가 보내는 이벤트 이름(GAME_CAPTURE_EVENT). */
 export const GAME_CAPTURE_EVENT = 'game-capture';
+
+/** 요격전 화면 자동 추적의 결과가 바뀔 때 Rust가 보내는 이벤트 이름(src-tauri/src/lib.rs의 SCREEN_TRACK_EVENT). */
+export const SCREEN_TRACK_EVENT = 'screen-track';
 
 /** 비교 결과 파일을 읽는다. 실패하면 한국어 오류 문장으로 거부된다. */
 export function loadReport(path: string): Promise<CompareReport> {
@@ -105,6 +109,25 @@ export function captureGame(label: string | null = null): Promise<CaptureRecord>
  */
 export function recognizeGameScreen(): Promise<ScreenRecognition> {
   return invoke<ScreenRecognition>('recognize_game_screen');
+}
+
+/**
+ * 요격전 화면 자동 추적을 켜거나 끄고 주기(밀리초)를 정한다. 지금 상태를 돌려준다.
+ * 켜 두면 Rust가 주기마다 게임 화면을 찍어 인식만 하고(이미지는 저장하지도 넘기지도 않는다),
+ * 결과가 바뀔 때 `screen-track` 이벤트를 보낸다. 주기는 Rust가 0.5~60초로 맞춘다.
+ */
+export function setScreenTracking(enabled: boolean, intervalMs: number | null = null): Promise<ScreenTrackStatus> {
+  return invoke<ScreenTrackStatus>('set_screen_tracking', { enabled, intervalMs });
+}
+
+/** 자동 추적의 지금 상태(마지막으로 읽은 시각·근거 포함). 캡처하지 않는다 — 추적 스레드가 남긴 것을 읽을 뿐이다. */
+export function screenTrackStatus(): Promise<ScreenTrackStatus> {
+  return invoke<ScreenTrackStatus>('screen_track_status');
+}
+
+/** 자동 추적의 결과(켜짐·상태·인식한 화면과 보스)가 바뀔 때마다 불린다. 돌려받은 함수로 구독을 끊는다. */
+export function onScreenTrack(handler: (status: ScreenTrackStatus) => void): Promise<UnlistenFn> {
+  return listen<ScreenTrackStatus>(SCREEN_TRACK_EVENT, (event) => handler(event.payload));
 }
 
 /** 게임 창 상태가 바뀔 때마다 불린다. 돌려받은 함수로 구독을 끊는다. */

@@ -252,6 +252,31 @@ export interface ScreenRecognition {
   height: number;
 }
 
+/**
+ * 요격전 화면 자동 추적의 상태 이름(src-tauri/src/screen_track.rs의 TrackState).
+ * `read`만 게임 화면을 읽은 것이고, 나머지는 읽지 않았거나(꺼짐·시작 전·오버레이 숨김·게임 없음·최소화) 읽지 못한 것(`failed`)이다.
+ */
+export type ScreenTrackState = 'off' | 'starting' | 'read' | 'overlay_hidden' | 'no_game' | 'minimized' | 'failed';
+
+/** Rust가 넘기는 자동 추적 상태(src-tauri/src/screen_track.rs의 TrackStatus). 이미지는 오지 않는다. */
+export interface ScreenTrackStatus {
+  /** 자동 추적이 켜져 있는가. */
+  enabled: boolean;
+  /** 게임 화면을 읽는 주기(밀리초). */
+  interval_ms: number;
+  state: ScreenTrackState;
+  /** 지금 상태를 설명하는 한국어 한 줄(읽지 않는 이유, 실패 원인, 인식한 화면). */
+  message: string;
+  /** 방금 읽은 화면의 인식 결과. `state`가 `read`일 때만 있다. */
+  recognition: ScreenRecognition | null;
+  /** 마지막으로 게임 화면을 읽은 시각(UTC, ISO 8601). 켠 뒤로 한 번도 읽지 못했으면 null. */
+  read_at: string | null;
+  /** 마지막 읽기에서 캡처 한 번에 걸린 시간(밀리초). */
+  capture_ms: number | null;
+  /** 연속으로 실패한 횟수. */
+  failures: number;
+}
+
 /** 단축키로 저장한 결과(src-tauri/src/lib.rs의 GameCaptureOutcome). 둘 중 하나만 있다. */
 export interface GameCaptureOutcome {
   capture: CaptureRecord | null;

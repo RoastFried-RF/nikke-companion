@@ -9,6 +9,8 @@
 //!   가져가면 게임 입력이 끊긴다. 그래서 전환이 창에 시키는 보임 변화는 "활성화 없이 보이기"와 "숨기기" 둘뿐이고
 //!   (`VisibilityChange`), 활성화하며 보이는 변화는 아예 없다. 클릭 통과 전환은 보임을 바꾸지 않으므로
 //!   포커스와 무관하다.
+//! - 보이기(`Show`): 숨겨져 있으면 보이고, 보이고 있으면 아무것도 바꾸지 않는다. 오버레이를 한 번 더 실행했을 때
+//!   (두 번째 실행은 창을 만들지 않고 끝난다) 이미 떠 있는 창에 시키는 일이다 — 이것도 활성화 없이 보인다.
 
 use serde::Serialize;
 
@@ -21,11 +23,13 @@ pub struct OverlayState {
     pub click_through: bool,
 }
 
-/// 단축키가 일으키는 동작.
+/// 오버레이 상태를 바꾸는 동작. 앞의 둘은 단축키가, `Show`는 두 번째 실행이 일으킨다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverlayAction {
     ToggleClickThrough,
     ToggleVisibility,
+    /// 숨겨져 있으면 보인다(이미 보이면 그대로). 클릭 통과 여부는 건드리지 않는다.
+    Show,
 }
 
 /// 전환 결과. `set_*`가 `Some`인 것만 창에 적용하면 된다(바뀌지 않은 것은 건드리지 않는다).
@@ -93,6 +97,10 @@ impl OverlayState {
                 visible: !self.visible,
                 ..self
             },
+            OverlayAction::Show => Self {
+                visible: true,
+                ..self
+            },
         };
         Transition {
             next,
@@ -135,7 +143,7 @@ fn clamp_i32(v: i64) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use OverlayAction::{ToggleClickThrough, ToggleVisibility};
+    use OverlayAction::{Show, ToggleClickThrough, ToggleVisibility};
 
     fn state(visible: bool, click_through: bool) -> OverlayState {
         OverlayState {
@@ -198,7 +206,7 @@ mod tests {
         // 네 상태 × 두 동작 어디에도 창을 활성화하는 변화가 없다.
         for visible in [false, true] {
             for click_through in [false, true] {
-                for action in [ToggleClickThrough, ToggleVisibility] {
+                for action in [ToggleClickThrough, ToggleVisibility, Show] {
                     let t = state(visible, click_through).apply(action);
                     if let Some(change) = t.visibility_change() {
                         assert!(!change.activates(), "{change:?}");
@@ -219,6 +227,40 @@ mod tests {
     }
 
     #[test]
+    fn a_second_launch_shows_a_hidden_overlay_without_activating_it() {
+        // 숨겨져 있었다면 보인다 — 활성화 없이. 클릭 통과 여부는 숨기기 전 그대로다.
+        for click_through in [false, true] {
+            let t = state(false, click_through).apply(Show);
+            assert_eq!(t.next, state(true, click_through));
+            assert_eq!(t.set_visible, Some(true));
+            assert_eq!(t.set_click_through, None);
+            assert_eq!(
+                t.visibility_change(),
+                Some(VisibilityChange::ShowWithoutActivating)
+            );
+        }
+    }
+
+    #[test]
+    fn a_second_launch_changes_nothing_when_the_overlay_is_already_visible() {
+        for click_through in [false, true] {
+            let t = state(true, click_through).apply(Show);
+            assert_eq!(t.next, state(true, click_through));
+            assert!(t.is_noop());
+            assert_eq!(t.visibility_change(), None);
+        }
+        // 여러 번 실행해도 같다(숨김으로 뒤집히지 않는다).
+        let s = state(false, true)
+            .apply(Show)
+            .next
+            .apply(Show)
+            .next
+            .apply(Show)
+            .next;
+        assert_eq!(s, state(true, true));
+    }
+
+    #[test]
     fn click_through_toggle_is_ignored_while_hidden() {
         for click_through in [false, true] {
             let t = state(false, click_through).apply(ToggleClickThrough);
@@ -232,7 +274,7 @@ mod tests {
         // 네 상태 × 두 동작: set_*는 실제로 바뀐 것과 정확히 일치한다.
         for visible in [false, true] {
             for click_through in [false, true] {
-                for action in [ToggleClickThrough, ToggleVisibility] {
+                for action in [ToggleClickThrough, ToggleVisibility, Show] {
                     let before = state(visible, click_through);
                     let t = before.apply(action);
                     assert_eq!(

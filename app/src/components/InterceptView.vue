@@ -2,20 +2,19 @@
 // 요격전 보스별 추천 결과(docs/data-model.md §요격전 추천 결과)를 그린다: 보스를 골라 그 보스의 상위 편성을 본다.
 // 게임을 하면서 보는 화면이라 보스 이름·약점 속성·1위 편성 5명이 접지 않은 상태에서 맨 위에 보인다.
 // 수치를 고치거나 다시 계산하지 않는다 — 결과 문서의 값을 서식만 입혀 보여 준다. CLI 표(renderInterceptReport)와 같은 내용이다.
-import { computed, ref } from 'vue';
+import { computed, onActivated, ref, watch } from 'vue';
 import { CONTENT_LABELS } from '@core/intercept.mjs';
 import { searchLine } from '@core/render.mjs';
 import { cacheLabel, engineLabel, localTime } from '../lib/format';
 import { recall, remember } from '../lib/remember';
+// LAST_BOSS: 마지막으로 고른 보스(id)를 기억하는 이름. 다시 열면 그 보스가 보인다.
+import { findBoss, LAST_BOSS, useScreenTrack } from '../lib/screenTrack';
 import type { InterceptBoss, InterceptReport } from '../types';
 import CaveatList from './CaveatList.vue';
 import IssueBlocks from './IssueBlocks.vue';
 import SquadRanking from './SquadRanking.vue';
 
 const props = defineProps<{ report: InterceptReport }>();
-
-/** 마지막으로 고른 보스(id)를 기억하는 이름. 다시 열면 그 보스가 보인다. */
-const LAST_BOSS = 'intercept.boss';
 
 /** 속성 이름 → 색을 정하는 CSS 이름. 표시용일 뿐이다(속성 상성 규칙은 루트의 src/core/intercept.mjs에 있다). */
 const ELEMENT_CLASS: Record<string, string> = { 작열: 'fire', 수냉: 'water', 풍압: 'wind', 전격: 'electric', 철갑: 'iron' };
@@ -29,6 +28,25 @@ const boss = computed<InterceptBoss | null>(() => bosses.value.find((b) => b.id 
 function pick(id: string): void {
   picked.value = id;
   remember(LAST_BOSS, id);
+}
+
+// 자동 추적: 게임에서 인식한 보스를 따라갈 때마다(lib/screenTrack.ts의 followStep이 정한다) 그 보스를 고른다.
+// 같은 인식이 이어지는 동안에는 불리지 않으므로, 그 사이에 손으로 고른 보스는 그대로 남는다.
+// 이 결과에 없는 보스면 고른 보스를 바꾸지 않는다(요격전 화면이 「이 결과에 없다」고 알린다).
+const track = useScreenTrack();
+if (track) {
+  // 이 화면이 그려지기 전에 따라간 것은 이미 기억에 적혀 있다(위의 picked가 그것을 읽었다).
+  let applied = track.target.value?.seq ?? 0;
+  const followTarget = (): void => {
+    const target = track.target.value;
+    if (!target || target.seq === applied) return;
+    applied = target.seq;
+    const found = findBoss(bosses.value, target);
+    if (found) pick(found.id);
+  };
+  watch(() => track.target.value?.seq, followTarget);
+  // 다른 탭에 가 있는 동안 따라간 것도 돌아올 때 반영한다.
+  onActivated(followTarget);
 }
 
 /**

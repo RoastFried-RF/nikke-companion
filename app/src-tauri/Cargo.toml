@@ -17,6 +17,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-global-shortcut = "2"
+# 중복 실행 방지: 이미 떠 있으면 두 번째 실행은 창을 만들기 전에 끝나고, 떠 있던 쪽에 알린다(src/lib.rs의 reveal_overlay).
+# 화면에서 부르는 명령이 없어 capability에 더할 권한도 없다. 이 앱의 두 실행끼리만 신호를 주고받는다.
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 # preserve_order: 엔진 데이터의 키 순서(니케·보스 프리셋)를 파일 그대로 화면에 넘긴다 — Node 런타임과 같은 순서.
 serde_json = { version = "1", features = ["preserve_order"] }

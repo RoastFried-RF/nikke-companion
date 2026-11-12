@@ -8,6 +8,7 @@
 //! - `capture`: 캡처한 프레임의 판정(빈 화면)·파일 이름·PNG 저장
 //! - `capture_cli`: 명령줄 도구 `nikke-capture`의 동작
 //! - `recognize`: 요격전 화면 인식 — 캡처한 프레임이 이상 개체의 어느 화면·어느 보스인지(색만 본다, 창·파일을 모른다)
+//! - `screen_track`: 요격전 화면 자동 추적의 규칙 — 언제 읽고 언제 읽지 않는지, 무엇이 바뀌면 화면에 알리는지
 //! - `game_win32`(비공개): 위 규칙에 값을 대 주는 Win32 호출 — 창 열거, 창 사각형, Windows.Graphics.Capture
 //! - `overlay_win32`: 오버레이 창(이 앱의 창)만 다루는 Win32 호출 — 활성화 없이 보이기·숨기기, 파일 고르기 창의 부모
 //! - `engine_win32`(비공개): 이 앱이 띄운 엔진 프로세스를 묶어 끝내는 Job Object
@@ -17,6 +18,12 @@
 //!
 //! 게임은 읽기만 한다: 게임 창을 옮기거나 크기를 바꾸거나 앞으로 가져오지 않고, 입력을 보내지 않는다.
 //! 붙이기가 옮기는 것은 오버레이 창뿐이다.
+//!
+//! 스레드는 둘이다: 게임 창 추적(`track_game` — 창 상태·붙이기)과 화면 추적(`track_screen` — 켜 둔 동안 주기적으로
+//! 게임 화면을 찍어 인식만 한다. 찍은 프레임은 그 자리에서 버린다). 캡처가 붙이기를 늦추지 않게 따로 둔다.
+//!
+//! 오버레이는 한 번만 뜬다(`tauri-plugin-single-instance`): 두 번째 실행은 창을 만들기 전에 끝나고, 이미 떠 있는
+//! 쪽이 숨겨져 있었다면 활성화 없이 보인다(`reveal_overlay`).
 
 pub mod capture;
 pub mod capture_cli;
@@ -31,7 +38,9 @@ pub mod overlay_state;
 pub mod overlay_win32;
 pub mod recognize;
 pub mod report;
+pub mod screen_track;
 
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -49,6 +58,7 @@ use overlay_state::{
     top_right_position, OverlayAction, OverlayState, Transition, VisibilityChange,
 };
 use recognize::Recognition;
+use screen_track::{Reading, TrackSettings, TrackStatus};
 
 /// tauri.conf.json의 창 label.
 const MAIN_WINDOW: &str = "main";
@@ -66,6 +76,10 @@ pub const GAME_WINDOW_EVENT: &str = "game-window";
 /// 단축키로 게임 화면을 저장한 결과(경로 또는 오류)를 화면으로 보내는 이벤트.
 /// 프런트의 `GAME_CAPTURE_EVENT`와 같아야 한다.
 pub const GAME_CAPTURE_EVENT: &str = "game-capture";
+
+/// 요격전 화면 자동 추적의 결과(켜짐·상태·인식한 화면과 보스)가 바뀔 때 화면으로 보내는 이벤트.
+/// 프런트의 `SCREEN_TRACK_EVENT`와 같아야 한다. 이미지는 싣지 않는다.
+pub const SCREEN_TRACK_EVENT: &str = "screen-track";
 
 /// 엔진 설정 파일 이름. 앱 설정 폴더(`%APPDATA%/<identifier>`)에 둔다.
 const SETTINGS_FILE: &str = "settings.json";
@@ -150,6 +164,17 @@ struct GameTracker {
     /// 캡처가 돌고 있는지. 단축키와 단추가 겹쳐도 한 번에 하나만 찍는다.
     capturing: AtomicBool,
     /// 추적 스레드. 붙이기를 바꾸면 깨워서 바로 반영한다.
+    thread: Mutex<Option<thread::Thread>>,
+}
+
+/// 요격전 화면 자동 추적. 규칙과 상태의 모양은 `screen_track`에 있다.
+#[derive(Default)]
+struct ScreenTracker {
+    /// 화면이 정한 설정(켜짐·주기). 추적 스레드는 주기마다 다시 읽는다.
+    settings: Mutex<TrackSettings>,
+    /// 지금 상태. 캡처하는 동안에는 잠그지 않는다(상태 명령이 캡처를 기다리지 않게).
+    log: Mutex<screen_track::Tracker>,
+    /// 추적 스레드. 설정이 바뀌거나 오버레이가 다시 보이면 깨워서 바로 읽게 한다.
     thread: Mutex<Option<thread::Thread>>,
 }
 
@@ -484,6 +509,120 @@ fn start_game_tracker(app: &AppHandle) {
     }
 }
 
+/// 자동 추적의 한 주기: 읽어도 되는지 보고(`screen_track`의 규칙), 되면 게임 화면을 찍어 인식만 한다.
+/// 프레임은 이 함수 안에서 쓰고 버린다 — 저장하지도 화면에 넘기지도 않는다. 게임 창은 읽기만 한다.
+/// 저장용 캡처와 겹치지 않게 같은 표시(`capturing`)를 쓴다 — 겹치면 이번 주기를 건너뛴다.
+fn read_screen(app: &AppHandle, settings: TrackSettings) -> Reading {
+    let visible = lock(&app.state::<Overlay>().state).visible;
+    if let Err(pause) = screen_track::overlay_gate(settings.enabled, visible) {
+        return Reading::Paused(pause);
+    }
+    let status = game_window::locate();
+    let window = match screen_track::game_gate(&status) {
+        Ok(window) => window,
+        Err(reading) => return reading,
+    };
+    let game = app.state::<GameTracker>();
+    if game.capturing.swap(true, Ordering::AcqRel) {
+        return Reading::Busy;
+    }
+    let _guard = BusyGuard(&game.capturing);
+    let started = Instant::now();
+    match game_window::capture_window(window) {
+        Ok((frame, _method)) => {
+            let recognition = recognize::recognize(&frame);
+            Reading::Recognized {
+                recognition,
+                capture_ms: u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX),
+            }
+        }
+        Err(e) => screen_track::reading_from_error(&e),
+    }
+}
+
+/// 추적 상태를 화면에 알린다. 못 보내도 추적은 계속한다.
+fn emit_screen_track(app: &AppHandle, status: TrackStatus) {
+    if let Err(e) = app.emit(SCREEN_TRACK_EVENT, status) {
+        eprintln!("화면 추적 상태를 화면에 알리지 못했다: {e}");
+    }
+}
+
+/// 화면 추적 스레드를 깨운다(설정이 바뀌었거나 오버레이가 다시 보였다) — 주기를 기다리지 않고 바로 다시 본다.
+fn wake_screen_tracker(app: &AppHandle) {
+    let thread = lock(&app.state::<ScreenTracker>().thread).clone();
+    if let Some(thread) = thread {
+        thread.unpark();
+    }
+}
+
+/// 켜 둔 동안 주기마다 게임 화면을 읽어 인식하고, 결과가 바뀔 때만 화면에 알린다. 꺼져 있으면 깨울 때까지 잔다.
+/// 어떤 실패도 상태로만 남기고 다음 주기에 다시 본다 — 이 스레드는 끝나지 않는다.
+fn track_screen(app: AppHandle) {
+    let tracker = app.state::<ScreenTracker>();
+    loop {
+        let settings = *lock(&tracker.settings);
+        if !settings.enabled {
+            // 켜질 때까지 아무것도 하지 않는다(창 열거도 캡처도 없다). 가짜로 깨어나면 다시 확인하고 잔다.
+            thread::park();
+            continue;
+        }
+        // 읽는 도중의 예기치 못한 오류(패닉)도 상태로 바꾼다 — 스레드가 죽으면 추적이 조용히 멈춘다.
+        let reading = catch_unwind(AssertUnwindSafe(|| read_screen(&app, settings)))
+            .unwrap_or_else(|_| Reading::Failed {
+                message: "게임 화면을 읽다가 예기치 못한 오류가 났다".to_string(),
+            });
+        let (utc, _local) = capture::now_stamps();
+        let changed = {
+            let mut log = lock(&tracker.log);
+            log.observe(reading, &utc.iso_utc())
+                .then(|| log.status().clone())
+        };
+        if let Some(status) = changed {
+            emit_screen_track(&app, status);
+        }
+        thread::park_timeout(Duration::from_millis(settings.interval_ms));
+    }
+}
+
+/// 화면 추적 스레드를 띄운다. 처음에는 꺼져 있어 자기만 한다.
+fn start_screen_tracker(app: &AppHandle) {
+    let handle = app.clone();
+    match thread::Builder::new()
+        .name("screen-tracker".to_string())
+        .spawn(move || track_screen(handle))
+    {
+        Ok(joined) => *lock(&app.state::<ScreenTracker>().thread) = Some(joined.thread().clone()),
+        Err(e) => eprintln!("화면 추적을 시작하지 못했다: {e}"),
+    }
+}
+
+/// 요격전 화면 자동 추적을 켜거나 끄고 주기(밀리초, 없으면 2초)를 정한다. 지금 상태를 돌려준다.
+/// 켜면 추적 스레드가 주기마다 게임 화면을 읽어 인식하고, 결과가 바뀔 때 `screen-track` 이벤트를 보낸다.
+/// 화면이 정할 수 있는 것은 이 둘뿐이다 — 무엇을 찍을지·어디에 둘지는 정하지 못한다(찍은 것은 저장하지 않는다).
+#[tauri::command]
+fn set_screen_tracking(app: AppHandle, enabled: bool, interval_ms: Option<u64>) -> TrackStatus {
+    let tracker = app.state::<ScreenTracker>();
+    let settings = TrackSettings::new(enabled, interval_ms);
+    *lock(&tracker.settings) = settings;
+    let (status, changed) = {
+        let mut log = lock(&tracker.log);
+        let changed = log.configure(settings);
+        (log.status().clone(), changed)
+    };
+    if changed {
+        emit_screen_track(&app, status.clone());
+    }
+    wake_screen_tracker(&app);
+    status
+}
+
+/// 자동 추적의 지금 상태: `{enabled, interval_ms, state, message, recognition, read_at, capture_ms, failures}`.
+/// 캡처하지 않는다 — 추적 스레드가 마지막으로 남긴 것을 돌려줄 뿐이다.
+#[tauri::command]
+fn screen_track_status(tracker: State<'_, ScreenTracker>) -> TrackStatus {
+    lock(&tracker.log).status().clone()
+}
+
 /// 현재 오버레이 상태.
 #[tauri::command]
 fn overlay_status(overlay: State<'_, Overlay>) -> OverlaySnapshot {
@@ -564,6 +703,36 @@ fn handle_action(app: &AppHandle, action: OverlayAction) {
     if let Err(e) = app.emit(OVERLAY_STATE_EVENT, overlay.snapshot()) {
         eprintln!("오버레이 상태를 화면에 알리지 못했다: {e}");
     }
+    // 숨기면 화면 추적이 쉬고, 다시 보이면 주기를 기다리지 않고 바로 읽는다.
+    wake_screen_tracker(app);
+}
+
+/// 오버레이를 한 번 더 실행했을 때 이미 떠 있는 쪽이 하는 일: 숨겨져 있었다면 보인다 — 활성화 없이
+/// (게임을 하다가 바로 가기를 눌렀어도 게임의 키보드 포커스는 그대로다). 두 번째 실행은 창을 만들지 않고 끝난다.
+///
+/// 논리 상태가 「보임」이어도 창에 한 번 더 요청한다: 이미 보이는 창에는 아무 일도 일어나지 않고,
+/// 상태와 실제 창이 어긋나 있었다면(그럴 일은 없어야 하지만) 이때 맞춰진다.
+fn reveal_overlay(app: &AppHandle) {
+    let overlay = app.state::<Overlay>();
+    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        return;
+    };
+    let changed = {
+        let mut state = lock(&overlay.state);
+        let transition = state.apply(OverlayAction::Show);
+        if let Err(e) = show_overlay_without_activating(&window) {
+            eprintln!("두 번째 실행을 받았지만 오버레이를 보이지 못했다: {e}");
+            return;
+        }
+        *state = transition.next;
+        !transition.is_noop()
+    };
+    if changed {
+        if let Err(e) = app.emit(OVERLAY_STATE_EVENT, overlay.snapshot()) {
+            eprintln!("오버레이 상태를 화면에 알리지 못했다: {e}");
+        }
+        wake_screen_tracker(app);
+    }
 }
 
 /// 전역 단축키를 등록한다. 하나가 실패해도 나머지는 등록하고, 실패는 화면에 보이도록 남긴다.
@@ -616,10 +785,16 @@ fn place_top_right(window: &WebviewWindow) -> tauri::Result<()> {
 
 pub fn run() {
     tauri::Builder::default()
+        // 맨 먼저 등록한다: 이미 떠 있는 오버레이가 있으면 이 실행은 여기서(창을 만들고 단축키를 등록하기 전에) 끝나고,
+        // 떠 있던 쪽에서 아래 함수가 불린다. 실행 인자와 작업 폴더는 쓰지 않는다.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            reveal_overlay(app);
+        }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Overlay::default())
         .manage(EngineRun::default())
         .manage(GameTracker::default())
+        .manage(ScreenTracker::default())
         .invoke_handler(tauri::generate_handler![
             load_report,
             overlay_status,
@@ -634,7 +809,9 @@ pub fn run() {
             game_window_status,
             set_follow_game,
             capture_game,
-            recognize_game_screen
+            recognize_game_screen,
+            set_screen_tracking,
+            screen_track_status
         ])
         .setup(|app| {
             let window = app
@@ -649,6 +826,7 @@ pub fn run() {
             window.show()?;
             register_shortcuts(app.handle());
             start_game_tracker(app.handle());
+            start_screen_tracker(app.handle());
             Ok(())
         })
         .run(tauri::generate_context!())
