@@ -522,38 +522,19 @@
         "앱에서 샘플 계정으로 추천을 실행해 순위가 보인다",
         "실제 계정 파일로 실행해 인게임 기록과 대조"
       ],
-      "status": "pending",
+      "status": "done",
       "attempts": 1,
       "agent_errors": 0,
       "protected": [],
       "blocked_reason": null,
       "resume_condition": null,
-      "last_failure": {
-        "reason": "검증 실패: rust-test(exit 101)",
-        "commands": [
-          {
-            "name": "rust-test",
-            "cmd": "cargo test --manifest-path app/src-tauri/Cargo.toml",
-            "exit_code": 101,
-            "timed_out": false,
-            "duration_ms": 21971,
-            "log": "verify-6-rust-test.log",
-            "tail": "test engine_runs_in_its_folder_with_utf8_and_batch_arguments ... ok\ntest output_that_is_not_json_or_misses_a_request_is_an_error ... ok\ntest real_engine_keeps_input_order_isolates_row_errors_and_is_deterministic ... ok\ntest a_stuck_engine_is_stopped_at_the_time_limit ... ok\ntest rust_command_and_node_runtime_give_the_same_total_damage ... ok\n\ntest result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.53s\n\n\nrunning 2 tests\ntest stopping_a_long_real_batch_returns_within_seconds_and_leaves_no_engine_process ... FAILED\ntest stopping_also_ends_processes_the_engine_started ... ok\n\nfailures:\n\n---- stopping_a_long_real_batch_returns_within_seconds_and_leaves_no_engine_process stdout ----\n중단: 4/40건 끝난 뒤 멈춤, 돌아오기까지 8.5708ms, 그때 띄워 둔 프로세스 [(20176, \"conhost.exe\"), (27828, \"OverwolfHelper64.exe\"), (31404, \"python.exe\"), (31656, \"OverwolfBrowser.exe\"), (32384, \"python.exe\"), (32404, \"Overwolf.exe\"), (33424, \"OverwolfBrowser.exe\"), (33652, \"OverwolfBrowser.exe\"), (33672, \"OverwolfBrowser.exe\"), (33728, \"OverwolfBrowser.exe\"), (34280, \"OverwolfHelper.exe\"), (41612, \"conhost.exe\"), (43796, \"python.exe\"), (48348, \"conhost.exe\"), (50928, \"python.exe\"), (51412, \"conhost.exe\")]\n\nthread 'stopping_a_long_real_batch_returns_within_seconds_and_leaves_no_engine_process' (50072) panicked at tests\\engine_cancel.rs:203:5:\nassertion `left == right` failed: 멈춘 뒤에도 엔진 프로세스가 남아 있다\n  left: [(27828, \"OverwolfHelper64.exe\"), (31656, \"OverwolfBrowser.exe\"), (32404, \"Overwolf.exe\"), (33424, \"OverwolfBrowser.exe\"), (33652, \"OverwolfBrowser.exe\"), (33672, \"OverwolfBrowser.exe\"), (33728, \"OverwolfBrowser.exe\"), (34280, \"OverwolfHelper.exe\")]\n right: []\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    stopping_a_long_real_batch_returns_within_seconds_and_leaves_no_engine_process\n\ntest result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.62s\n\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.29s\n     Running unittests src\\lib.rs (app\\src-tauri\\target\\debug\\deps\\nikke_companion_lib-b25991a886c36c3c.exe)\n     Running unittests src\\bin\\nikke-capture.rs (app\\src-tauri\\target\\debug\\deps\\nikke_capture-31a6a08ca5db4592.exe)\n     Running unittests src\\main.rs (app\\src-tauri\\target\\debug\\deps\\nikke_companion-6b9b87c78d5a3815.exe)\n     Running tests\\account_fetch.rs (app\\src-tauri\\target\\debug\\deps\\account_fetch-fcdf26745a7773b9.exe)\n     Running tests\\engine_batch.rs (app\\src-tauri\\target\\debug\\deps\\engine_batch-1be646b8cda22ff1.exe)\n     Running tests\\engine_cancel.rs (app\\src-tauri\\target\\debug\\deps\\engine_cancel-572d369bd794f2ac.exe)\nerror: test failed, to rerun pass `--test engine_cancel`\n"
-          }
-        ]
-      },
+      "last_failure": null,
       "manual_status": "pending",
       "evidence": {
-        "run": ".harness/runs/20261111T190531-P-010-a1",
-        "verified_tree": "b620d6aa76fdc9af5c885669bd258bd567e31ca3",
-        "verified_at": "2026-11-11T19:25:44.217Z",
-        "commit": null,
-        "reverified_tree": "e8d0b1644bf59b976303a4b3885010d5eb21ca18",
-        "reverified_at": "2026-11-12T03:47:23.808Z"
-      },
-      "regressed": {
-        "at": "2026-11-12T08:04:00.333Z",
-        "reason": "검증 실패: rust-test(exit 101)"
+        "run": ".harness/runs/20261112T082013-P-010-a1-manual",
+        "verified_tree": "54310c81171cb5a6596232aad9332ea83052492d",
+        "verified_at": "2026-11-12T08:21:58.556Z",
+        "commit": null
       }
     },
     {
