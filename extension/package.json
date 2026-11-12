@@ -1,0 +1,10 @@
+{
+  "name": "nikke-companion-extension",
+  "private": true,
+  "version": "0.1.0",
+  "description": "니케 컴패니언 크롬 확장 — 이 파일은 Node가 lib/*.js를 ES 모듈로 읽게 하려고 있다(테스트용). 의존성은 없다.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/"
+  }
+}

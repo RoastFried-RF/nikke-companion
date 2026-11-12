@@ -1476,9 +1476,19 @@
         "blablalink에 로그인돼 있지 않을 때·오버레이가 꺼져 있을 때 확장의 안내가 맞다"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0,
-      "agent_errors": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261112T090035-P-025-a1",
+        "verified_tree": "e17c2de069516285c3c8f026ec8606611262e778",
+        "verified_at": "2026-11-12T09:34:57.749Z",
+        "commit": null
+      }
     },
     {
       "id": "P-026",

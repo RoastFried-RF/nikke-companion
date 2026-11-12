@@ -13,6 +13,7 @@ import type {
   EngineRequest,
   EngineRow,
   EngineVersion,
+  ExtensionLinkStatus,
   FetchedProfile,
   FetchLine,
   FetchOutcome,
@@ -43,6 +44,9 @@ export const SCREEN_TRACK_EVENT = 'screen-track';
 
 /** 계정 수집 스크립트가 줄을 낼 때마다 Rust가 보내는 이벤트 이름(src-tauri/src/lib.rs의 ACCOUNT_FETCH_EVENT). */
 export const ACCOUNT_FETCH_EVENT = 'account-fetch';
+
+/** 크롬 확장 연결의 상태가 바뀔 때 Rust가 보내는 이벤트 이름(src-tauri/src/lib.rs의 EXTENSION_LINK_EVENT). */
+export const EXTENSION_LINK_EVENT = 'extension-link';
 
 /** 비교 결과 파일을 읽는다. 실패하면 한국어 오류 문장으로 거부된다. */
 export function loadReport(path: string): Promise<CompareReport> {
@@ -192,6 +196,35 @@ export function loginWindowTakeCookie(): Promise<CookieSaved> {
 /** 로그인 창의 세션(쿠키·저장 데이터)을 지운다. 한 일을 알리는 문장이 온다. */
 export function loginWindowClear(): Promise<string> {
   return invoke<string>('login_window_clear');
+}
+
+// ── 크롬 확장 연결 ────────────────────────────────────────────────────────────
+// 이 PC의 크롬 확장이 넘기는 세션 쿠키는 Rust의 수신부가 받아 엔진의 쿠키 파일에 쓴다 — 쿠키는 화면을 지나가지 않는다.
+// 화면이 보는 것은 상태(켜짐·주소·연결 코드·마지막 요청의 결과)뿐이고, 화면이 정하는 것은 켜짐과 「코드 다시 만들기」뿐이다.
+
+/** 크롬 확장 연결의 지금 상태. 쿠키는 오지 않는다. */
+export function extensionLinkStatus(): Promise<ExtensionLinkStatus> {
+  return invoke<ExtensionLinkStatus>('extension_link_status');
+}
+
+/** 크롬 확장 연결을 켜거나 끈다. 켜면 Rust가 이 PC 안에서만 닿는 주소에서 듣기 시작하고, 끄면 닫는다. Rust가 기억한다. */
+export function extensionLinkSet(enabled: boolean): Promise<ExtensionLinkStatus> {
+  return invoke<ExtensionLinkStatus>('extension_link_set', { enabled });
+}
+
+/** 연결 코드를 다시 만든다. 옛 코드는 그 순간부터 받지 않는다 — 확장에 새 코드를 넣어야 한다. */
+export function extensionLinkNewCode(): Promise<ExtensionLinkStatus> {
+  return invoke<ExtensionLinkStatus>('extension_link_new_code');
+}
+
+/** 확장에서 쿠키를 받아 「계정 새로 받기」를 이을 차례면 true(한 번만). */
+export function extensionLinkTakePending(): Promise<boolean> {
+  return invoke<boolean>('extension_link_take_pending');
+}
+
+/** 크롬 확장 연결의 상태가 바뀔 때마다 불린다(쿠키를 받았다·코드가 틀린 요청이 왔다). 돌려받은 함수로 구독을 끊는다. */
+export function onExtensionLink(handler: (status: ExtensionLinkStatus) => void): Promise<UnlistenFn> {
+  return listen<ExtensionLinkStatus>(EXTENSION_LINK_EVENT, (event) => handler(event.payload));
 }
 
 /** 계정 수집 스크립트가 줄을 낼 때마다 불린다(쿠키 값은 가려져 있다). 돌려받은 함수로 구독을 끊는다. */

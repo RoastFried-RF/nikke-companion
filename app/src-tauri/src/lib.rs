@@ -18,14 +18,18 @@
 //! - `cookie`: 세션 쿠키의 규칙 — 붙여넣은 글자·로그인 창의 쿠키 목록을 Cookie 헤더 한 줄로, 출력에서 쿠키 값 가리기(순수)
 //! - `account_sync`: 계정 받기 — 쿠키 파일 쓰기, 엔진의 수집 스크립트 실행, 받은 프로필 읽기, 계정 파일 저장
 //! - `login_window`: blablalink 로그인 창(별도 창, 앱 명령을 부를 수 없다) — 열기, 쿠키 읽기, 세션 지우기
+//! - `extension_link`: 크롬 확장 연결 — 이 PC의 크롬 확장이 넘기는 세션 쿠키를 받는 수신부(루프백에만 묶인다, 연결 코드,
+//!   정해진 요청 하나), 켜고 끄기와 코드의 기억
 //!
 //! 편성 비교·추천의 계산은 화면 쪽의 `src/core`(JS)가 하고, 여기서는 엔진 프로세스만 대신 띄운다.
 //! 이 앱의 Rust 코드는 네트워크 요청을 하지 않는다. 밖으로 나가는 요청은 둘뿐이다: 사용자가 연 로그인 창이
 //! 보여 주는 페이지(blablalink와 로그인 제공자)와, 「계정 새로 받기」가 실행하는 엔진의 수집 스크립트가
-//! blablalink API에 하는 요청.
+//! blablalink API에 하는 요청. 들어오는 요청을 받는 곳은 하나다: 「크롬 확장 연결」을 켰을 때만 127.0.0.1에서 듣는
+//! 수신부(`extension_link`) — 이 PC 밖에서는 닿을 수 없고, 밖으로 연결을 만들지 않는다.
 //!
 //! 세션 쿠키는 계정 접근권이다: 엔진의 `scraper/.session_cookie` 한 곳에만 쓰고, 화면·이벤트·반환값·오류 문장·
-//! 표준 출력 어디에도 내보내지 않는다(`cookie.rs`·`account_sync.rs`의 규칙, `tests/account_fetch.rs`).
+//! 표준 출력 어디에도 내보내지 않는다(`cookie.rs`·`account_sync.rs`·`extension_link.rs`의 규칙,
+//! `tests/account_fetch.rs`·`tests/extension_link.rs`).
 //!
 //! 게임은 읽기만 한다: 게임 창을 옮기거나 크기를 바꾸거나 앞으로 가져오지 않고, 입력을 보내지 않는다.
 //! 붙이기가 옮기는 것도, 게임 위에 머물기가 창 순서를 올리는 것도 오버레이 창뿐이다.
@@ -46,6 +50,7 @@ pub mod cookie;
 pub mod engine;
 #[cfg(windows)]
 mod engine_win32;
+pub mod extension_link;
 #[cfg(windows)]
 mod game_win32;
 pub mod game_window;
@@ -61,7 +66,7 @@ pub mod stay_on_top;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -75,6 +80,7 @@ use account_sync::{
     SyncStatus,
 };
 use capture::CaptureRecord;
+use extension_link::{LinkHub, LinkStatus, Stored};
 use game_window::{
     follow_step, follow_target, FollowStep, GameError, GameWindowInfo, GameWindowStatus,
 };
@@ -108,6 +114,10 @@ pub const SCREEN_TRACK_EVENT: &str = "screen-track";
 /// 계정 수집 스크립트가 줄을 낼 때마다 오버레이 창으로 보내는 이벤트(`{text, warning}` — 쿠키 값은 가려져 있다).
 /// 프런트의 `ACCOUNT_FETCH_EVENT`와 같아야 한다.
 pub const ACCOUNT_FETCH_EVENT: &str = "account-fetch";
+
+/// 크롬 확장 연결의 상태가 바뀔 때(확장에서 쿠키를 받았다·코드가 틀린 요청이 왔다) 오버레이 창으로 보내는 이벤트.
+/// 싣는 것은 상태(`LinkStatus`)뿐이다 — 쿠키는 없다. 프런트의 `EXTENSION_LINK_EVENT`와 같아야 한다.
+pub const EXTENSION_LINK_EVENT: &str = "extension-link";
 
 /// 엔진 설정 파일 이름. 앱 설정 폴더(`%APPDATA%/<identifier>`)에 둔다.
 const SETTINGS_FILE: &str = "settings.json";
@@ -175,6 +185,9 @@ struct EngineRun(engine::BatchSlot);
 /// 계정 수집의 자리. 수집 스크립트를 겹쳐 띄우지 않고, 중단 명령이 도는 수집을 멈춘다(엔진 배치와 같은 방식).
 #[derive(Default)]
 struct FetchRun(engine::BatchSlot);
+
+/// 크롬 확장 연결(수신부·연결 코드·켜짐 여부). 규칙은 `extension_link`에 있다.
+struct ExtensionLink(LinkHub);
 
 /// 캡처가 끝나면(오류로 끝나도) 표시를 내린다.
 struct BusyGuard<'a>(&'a AtomicBool);
@@ -852,6 +865,70 @@ fn screen_track_status(tracker: State<'_, ScreenTracker>) -> TrackStatus {
     lock(&tracker.log).status().clone()
 }
 
+// ── 크롬 확장 연결 ────────────────────────────────────────────────────────────
+//
+// 이 PC의 크롬 확장이 넘기는 세션 쿠키를 받는다(`extension_link`). 쿠키는 수신부 스레드 → 엔진의 쿠키 파일로만 흐른다:
+// 여기서 화면으로 가는 것은 상태(`LinkStatus` — 켜짐·주소·연결 코드·마지막 요청의 결과)뿐이고, 쿠키를 출력하거나
+// 이벤트에 싣지 않는다. 받은 뒤의 「계정 새로 받기」는 화면이 잇는다(`extension_link_take_pending`).
+
+/// 크롬 확장 연결을 연다: 기억해 둔 설정(앱 설정 폴더의 `extension-link.json`)을 읽고, 켜 두었으면 곧바로 듣는다.
+fn open_extension_link(app: &AppHandle) -> ExtensionLink {
+    let file = app
+        .path()
+        .app_config_dir()
+        .map(|dir| dir.join(extension_link::SETTINGS_FILE))
+        .ok();
+    let store = app.clone();
+    // 코드가 맞은 요청의 쿠키를 받는다. 수집이 도는 동안에는 쿠키를 바꾸지 않는다. 쓰는 곳은 붙여넣기와 같은 한 곳이다.
+    let sink = move |cookie: &str| {
+        if store.state::<FetchRun>().0.is_running() {
+            return Stored::Busy;
+        }
+        match fetch_config(&store) {
+            Ok(config) => extension_link::store_in_engine(&config.engine_dir, cookie),
+            Err(_) => Stored::Failed,
+        }
+    };
+    let notify = app.clone();
+    // 오버레이 창에만 상태를 알린다. 못 보내도 받은 것은 남는다(화면이 상태를 물으면 보인다).
+    let changed = move || {
+        if let Some(link) = notify.try_state::<ExtensionLink>() {
+            let _ = notify.emit_to(MAIN_WINDOW, EXTENSION_LINK_EVENT, link.0.status());
+        }
+    };
+    ExtensionLink(LinkHub::open(
+        file,
+        extension_link::DEFAULT_PORT,
+        Arc::new(sink),
+        Arc::new(changed),
+    ))
+}
+
+/// 크롬 확장 연결의 지금 상태: `{enabled, listening, address, code, problem, pending, last, locked_seconds}`. 쿠키는 없다.
+#[tauri::command]
+fn extension_link_status(link: State<'_, ExtensionLink>) -> LinkStatus {
+    link.0.status()
+}
+
+/// 크롬 확장 연결을 켜거나 끈다. 켜면 127.0.0.1에서 듣기 시작하고, 끄면 듣는 소켓을 닫는다. 켜짐 여부는 기억된다.
+/// 화면이 정하는 것은 켜짐뿐이다 — 듣는 주소·포트는 정하지 못한다.
+#[tauri::command]
+async fn extension_link_set(app: AppHandle, enabled: bool) -> Result<LinkStatus, String> {
+    blocking(move || Ok(app.state::<ExtensionLink>().0.set_enabled(enabled))).await
+}
+
+/// 연결 코드를 다시 만든다. 옛 코드는 그 순간부터 받지 않는다.
+#[tauri::command]
+fn extension_link_new_code(link: State<'_, ExtensionLink>) -> LinkStatus {
+    link.0.new_code()
+}
+
+/// 확장에서 쿠키를 받아 「계정 새로 받기」를 이을 차례면 true(한 번만). 화면이 이것을 받고 수집을 시작한다.
+#[tauri::command]
+fn extension_link_take_pending(link: State<'_, ExtensionLink>) -> bool {
+    link.0.take_pending()
+}
+
 /// 현재 오버레이 상태.
 #[tauri::command]
 fn overlay_status(overlay: State<'_, Overlay>) -> OverlaySnapshot {
@@ -879,6 +956,10 @@ fn stop_running_work(app: &AppHandle) {
     let fetch_run = app.state::<FetchRun>();
     if !engine::stop_all_and_wait(&[&engine_run.0, &fetch_run.0], engine::EXIT_GRACE) {
         eprintln!("앱을 끝내는 동안 엔진·수집 프로세스가 제때 끝나지 않았다 — 프로세스 묶음이 닫히며 끝난다");
+    }
+    // 크롬 확장 연결이 듣던 소켓을 닫는다(켜짐 여부는 기억된 그대로다 — 다음 실행 때 다시 열린다).
+    if let Some(link) = app.try_state::<ExtensionLink>() {
+        link.0.shutdown();
     }
 }
 
@@ -1066,7 +1147,11 @@ pub fn run() {
             account_save_file,
             login_window_open,
             login_window_take_cookie,
-            login_window_clear
+            login_window_clear,
+            extension_link_status,
+            extension_link_set,
+            extension_link_new_code,
+            extension_link_take_pending
         ])
         .setup(|app| {
             let window = app
@@ -1079,6 +1164,8 @@ pub fn run() {
                 eprintln!("창을 화면 오른쪽 위로 옮기지 못했다: {e}");
             }
             window.show()?;
+            // 크롬 확장 연결: 켜 둔 채로 끝냈으면 여기서 다시 듣기 시작한다(기본은 꺼짐).
+            app.manage(open_extension_link(app.handle()));
             register_shortcuts(app.handle());
             start_game_tracker(app.handle());
             start_screen_tracker(app.handle());

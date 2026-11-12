@@ -16,6 +16,11 @@ import {
   engineRunBatch,
   engineVersion,
   errorMessage,
+  EXTENSION_LINK_EVENT,
+  extensionLinkNewCode,
+  extensionLinkSet,
+  extensionLinkStatus,
+  extensionLinkTakePending,
   GAME_CAPTURE_EVENT,
   GAME_WINDOW_EVENT,
   gameWindowStatus,
@@ -46,6 +51,7 @@ import captureCliRs from '../src-tauri/src/capture_cli.rs?raw';
 import cookieRs from '../src-tauri/src/cookie.rs?raw';
 import engineRs from '../src-tauri/src/engine.rs?raw';
 import engineWin32Rs from '../src-tauri/src/engine_win32.rs?raw';
+import extensionLinkRs from '../src-tauri/src/extension_link.rs?raw';
 import gameWin32Rs from '../src-tauri/src/game_win32.rs?raw';
 import gameWindowRs from '../src-tauri/src/game_window.rs?raw';
 import libRs from '../src-tauri/src/lib.rs?raw';
@@ -100,10 +106,27 @@ const COMMANDS = [
   'login_window_open',
   'login_window_take_cookie',
   'login_window_clear',
+  'extension_link_status',
+  'extension_link_set',
+  'extension_link_new_code',
+  'extension_link_take_pending',
 ];
 
 /** 계정 받기(P-022)에서 더한 명령 아홉 개. */
-const ACCOUNT_COMMANDS = COMMANDS.slice(16);
+const ACCOUNT_COMMANDS = COMMANDS.slice(16, 25);
+/** 크롬 확장 연결(P-025)에서 더한 명령 네 개. */
+const EXTENSION_COMMANDS = COMMANDS.slice(25);
+/** 크롬 확장 연결의 상태(지어낸 값). 쿠키는 없다 — 연결 코드는 쿠키가 아니다. */
+const linkStatus = {
+  enabled: true,
+  listening: true,
+  address: '127.0.0.1:47615',
+  code: 'ABCD-2345',
+  problem: null,
+  pending: false,
+  last: null,
+  locked_seconds: 0,
+};
 
 /** 지어낸 쿠키. 실제 계정의 값이 아니다. */
 const FAKE_COOKIE = 'game_token=FAKE-TOKEN-contract-0123456789; game_openid=55554444333322221111';
@@ -191,6 +214,8 @@ describe('Rust 명령 호출', () => {
       if (cmd === 'account_read_profile') return fetchedProfile;
       if (cmd === 'account_save_file') return savedAccount;
       if (cmd === 'login_window_clear') return '로그인 창의 쿠키·저장 데이터를 지웠다';
+      if (cmd === 'extension_link_status' || cmd === 'extension_link_set' || cmd === 'extension_link_new_code') return linkStatus;
+      if (cmd === 'extension_link_take_pending') return true;
       return null;
     });
     await expect(loadReport('D:\\r.json')).resolves.toEqual({ schema_version: 1 });
@@ -218,6 +243,10 @@ describe('Rust 명령 호출', () => {
     await expect(loginWindowOpen()).resolves.toBeNull();
     await expect(loginWindowTakeCookie()).resolves.toEqual(cookieSaved);
     await expect(loginWindowClear()).resolves.toBe('로그인 창의 쿠키·저장 데이터를 지웠다');
+    await expect(extensionLinkStatus()).resolves.toEqual(linkStatus);
+    await expect(extensionLinkSet(true)).resolves.toEqual(linkStatus);
+    await expect(extensionLinkNewCode()).resolves.toEqual(linkStatus);
+    await expect(extensionLinkTakePending()).resolves.toBe(true);
     expect(calls.map((c) => c.cmd)).toEqual(COMMANDS);
     expect(calls[0].args).toEqual({ path: 'D:\\r.json' });
     expect(calls[6].args).toEqual({ requests: [{ squad: ['크라운'] }] });
@@ -241,6 +270,11 @@ describe('Rust 명령 호출', () => {
     expect(calls[22].args).toEqual({});
     expect(calls[23].args).toEqual({});
     expect(calls[24].args).toEqual({});
+    // 크롬 확장 연결: 화면이 정하는 것은 켜짐뿐이다 — 듣는 주소·포트·연결 코드·쿠키는 넘기지 않는다.
+    expect(calls[25].args).toEqual({});
+    expect(calls[26].args).toEqual({ enabled: true });
+    expect(calls[27].args).toEqual({});
+    expect(calls[28].args).toEqual({});
   });
 
   it('자동 추적의 주기를 주지 않으면 null을 넘긴다 — Rust가 기본값(2초)을 쓴다', async () => {
@@ -277,6 +311,11 @@ describe('Rust 명령 호출', () => {
     expect(libRs).toMatch(/async fn login_window_open\(app: AppHandle\) -> Result<\(\), SyncFailure>/);
     expect(libRs).toMatch(/async fn login_window_take_cookie\(app: AppHandle\) -> Result<CookieSaved, SyncFailure>/);
     expect(libRs).toMatch(/async fn login_window_clear\(app: AppHandle\) -> Result<String, SyncFailure>/);
+    // 크롬 확장 연결.
+    expect(libRs).toMatch(/fn extension_link_status\(link: State<'_, ExtensionLink>\) -> LinkStatus/);
+    expect(libRs).toMatch(/async fn extension_link_set\(app: AppHandle, enabled: bool\) -> Result<LinkStatus, String>/);
+    expect(libRs).toMatch(/fn extension_link_new_code\(link: State<'_, ExtensionLink>\) -> LinkStatus/);
+    expect(libRs).toMatch(/fn extension_link_take_pending\(link: State<'_, ExtensionLink>\) -> bool/);
   });
 
   it('Rust가 거부한 한국어 문장을 그대로 넘긴다', async () => {
@@ -328,6 +367,7 @@ describe('Rust 명령 호출', () => {
     expect(libRs).toContain(`GAME_CAPTURE_EVENT: &str = "${GAME_CAPTURE_EVENT}"`);
     expect(libRs).toContain(`SCREEN_TRACK_EVENT: &str = "${SCREEN_TRACK_EVENT}"`);
     expect(libRs).toContain(`ACCOUNT_FETCH_EVENT: &str = "${ACCOUNT_FETCH_EVENT}"`);
+    expect(libRs).toContain(`EXTENSION_LINK_EVENT: &str = "${EXTENSION_LINK_EVENT}"`);
   });
 });
 
@@ -401,10 +441,21 @@ describe('계정 받기 — 세션 쿠키의 길(Rust)', () => {
     expect(syncCode).toContain('meta.remove("openid");');
   });
 
-  it('(d) 앱의 Rust 코드는 네트워크 요청을 하지 않는다 — HTTP 크레이트도 소켓도 없다', () => {
-    expect(cargoToml).not.toMatch(/^\s*(reqwest|ureq|hyper|curl|isahc|attohttpc|surf|tungstenite|tokio-tungstenite|tauri-plugin-http|tauri-plugin-websocket|tauri-plugin-upload)\s*=/m);
+  // P-025에서 요구가 바뀌었다: 크롬 확장이 넘기는 쿠키를 받으려고 앱이 **듣는** 소켓 하나를 갖게 됐다(extension_link.rs —
+  // 루프백에만 묶이고, 켰을 때만 열린다). 「밖으로 나가는 요청을 하지 않는다」는 그대로다: HTTP 크레이트가 없고, 소켓 코드는
+  // 그 모듈 하나에만 있으며, 그 모듈에는 연결을 만드는 호출이 없다(아래 「크롬 확장 연결(Rust)」이 더 본다).
+  it('(d) 앱의 Rust 코드는 네트워크 요청을 하지 않는다 — HTTP 크레이트가 없고, 소켓은 크롬 확장 수신부의 듣기 하나뿐이다', () => {
+    expect(cargoToml).not.toMatch(/^\s*(reqwest|ureq|hyper|curl|isahc|attohttpc|surf|tungstenite|tokio-tungstenite|tauri-plugin-http|tauri-plugin-websocket|tauri-plugin-upload|tiny_http|rouille|axum|warp|actix-web|tokio)\s*=/m);
     for (const [file, source] of Object.entries({ 'cookie.rs': cookieCode, 'account_sync.rs': syncCode, 'login_window.rs': loginCode, 'lib.rs': code(libRs) })) {
       expect(source, file).not.toMatch(/std::net|TcpStream|UdpSocket|reqwest|ureq::/);
+    }
+    // 소켓을 쓰는 파일은 앱 전체에서 수신부 모듈 하나다. 어디에도 연결을 만드는 호출(나가는 연결)이 없다.
+    const files = Object.entries(allRust);
+    expect(files.length).toBeGreaterThan(12);
+    for (const [file, source] of files) {
+      const body = code(source.includes('#[cfg(test)]') ? beforeTests(source) : source);
+      expect(/std::net|TcpListener|TcpStream|UdpSocket/.test(body), file).toBe(file.endsWith('/extension_link.rs'));
+      expect(body, file).not.toMatch(/TcpStream::connect|\.connect\(|\.connect_timeout\(|UdpSocket|ToSocketAddrs|reqwest|ureq::/);
     }
     // 쿠키 규칙 모듈은 순수하다: 파일·프로세스·창에 닿지 않는다.
     expect(cookieCode).not.toMatch(/std::fs|std::io|std::path|std::process|std::env|std::thread|tauri|windows::/);
@@ -545,6 +596,171 @@ describe('로그인 창(Rust)', () => {
   });
 });
 
+describe('크롬 확장 연결(Rust)', () => {
+  /** 주석을 뺀 코드. */
+  const code = (source: string) =>
+    source
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+  const beforeTests = (source: string) => source.slice(0, source.indexOf('#[cfg(test)]'));
+  const link = code(beforeTests(extensionLinkRs));
+  /** lib.rs에서 크롬 확장 연결 명령들이 있는 부분. */
+  const glue = code(libRs.slice(libRs.indexOf('// ── 크롬 확장 연결'), libRs.indexOf('/// 현재 오버레이 상태.')));
+
+  it('루프백(127.0.0.1)에만 묶는다 — 듣는 소켓을 만드는 곳은 한 줄이고, 화면은 주소·포트를 정하지 못한다', () => {
+    expect(link.match(/TcpListener::bind\(/g)).toHaveLength(1);
+    expect(link).toContain('TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port))');
+    // 모든 주소·IPv6·방송 주소에 묶는 코드가 없다.
+    expect(link).not.toMatch(/UNSPECIFIED|0\.0\.0\.0|Ipv6Addr|SocketAddrV6|\[::\]|BROADCAST/);
+    // 받은 연결의 상대가 루프백인지도 한 번 더 본다.
+    expect(link).toMatch(/Ok\(\(stream, peer\)\) if peer\.ip\(\)\.is_loopback\(\) => \{\s*serve\(stream, port, &gate, &\*sink, &\*notify\);/);
+    // 밖으로 연결을 만드는 호출이 없다 — 듣고, 들어온 연결에 답할 뿐이다.
+    expect(link).not.toMatch(/TcpStream::connect|\.connect\(|\.connect_timeout\(|UdpSocket/);
+    expect(extensionLinkRs).toContain('pub const DEFAULT_PORT: u16 = 47615;');
+    expect(glue).toMatch(/LinkHub::open\(\s*file,\s*extension_link::DEFAULT_PORT,/);
+    expect(glue).toMatch(/async fn extension_link_set\(app: AppHandle, enabled: bool\) -> Result<LinkStatus, String> \{\s*blocking\(move \|\| Ok\(app\.state::<ExtensionLink>\(\)\.0\.set_enabled\(enabled\)\)\)\.await/);
+    for (const [file, text] of Object.entries(sources)) {
+      expect(text, file).not.toMatch(/47615|127\.0\.0\.1|localhost|\bport\b/i);
+    }
+  });
+
+  it('기본은 꺼짐이고 켰을 때만 열린다 — 끄거나 앱이 끝나면 닫히고, 켜짐 여부는 Rust가 기억한다', () => {
+    expect(link).toMatch(/struct Saved \{\s*#\[serde\(default\)\]\s*enabled: bool,\s*#\[serde\(default\)\]\s*code: String,\s*\}/);
+    // 듣기 시작하는 곳은 둘뿐이다: 기억해 둔 설정이 켜짐일 때, 그리고 켜라는 명령.
+    expect(link.match(/\b(self|hub)\.start\(/g)).toHaveLength(2);
+    expect(link).toMatch(/if saved\.enabled \{\s*hub\.start\(&mut lock\(&hub\.state\)\);/);
+    expect(link).toMatch(/if enabled \{\s*self\.start\(&mut state\);\s*None\s*\} else \{\s*state\.problem = None;\s*state\.receiver\.take\(\)\s*\}/);
+    expect(link.match(/Receiver::start\(/g)).toHaveLength(1);
+    // 수신부를 버리면 듣는 소켓이 닫힌다(끄기·앱 종료 모두 이 길이다).
+    expect(link).toMatch(/impl Drop for Receiver \{\s*fn drop\(&mut self\) \{\s*self\.close\(\);/);
+    expect(link).toMatch(/pub fn shutdown\(&self\) \{\s*let stopped = lock\(&self\.state\)\.receiver\.take\(\);\s*drop\(stopped\);/);
+    // 앱이 끝나는 길에서 닫는다.
+    const stop = code(libRs.slice(libRs.indexOf('fn stop_running_work('), libRs.indexOf('/// 전환 결과에서 바뀐 것만 창에 반영한다.')));
+    expect(stop).toMatch(/if let Some\(link\) = app\.try_state::<ExtensionLink>\(\) \{\s*link\.0\.shutdown\(\);\s*\}/);
+    // 설정 파일은 앱 설정 폴더에 있고(화면이 자리를 정하지 못한다) 켜짐과 코드뿐이다 — 화면은 이 스위치를 따로 기억하지 않는다.
+    expect(extensionLinkRs).toContain('pub const SETTINGS_FILE: &str = "extension-link.json";');
+    expect(glue).toMatch(/\.app_config_dir\(\)\s*\.map\(\|dir\| dir\.join\(extension_link::SETTINGS_FILE\)\)/);
+    expect(code(sources['../src/lib/extensionLink.ts'])).not.toMatch(/\bremember\(|\brecall\(|localStorage|sessionStorage/);
+    // 앱이 켜질 때 한 번 연다(켜 둔 채 끝냈으면 그때 다시 듣는다).
+    expect(code(libRs).match(/open_extension_link\(/g)).toHaveLength(2);
+    expect(code(libRs)).toContain('app.manage(open_extension_link(app.handle()));');
+  });
+
+  it('정해진 요청 하나만 받는다 — 경로·출처·방법·호스트·형식·크기를 머리에서 가리고, 본문은 두 칸짜리 객체다', () => {
+    expect(extensionLinkRs).toContain('pub const SESSION_PATH: &str = "/nikke-companion/v1/session";');
+    expect(extensionLinkRs).toContain('pub const CONTENT_TYPE: &str = "application/json";');
+    expect(extensionLinkRs).toContain('pub const MAX_HEAD_BYTES: usize = 8 * 1024;');
+    expect(extensionLinkRs).toContain('pub const MAX_BODY_BYTES: usize = 32 * 1024;');
+    expect(extensionLinkRs).toContain('pub const REQUEST_DEADLINE: Duration = Duration::from_secs(3);');
+    const screen = link.slice(link.indexOf('pub fn screen('), link.indexOf('const BODY_FIELDS'));
+    const order = ['head.target != SESSION_PATH', 'is_some_and(is_extension_origin)', 'head.method != "POST"', 'head.header("host")?', 'media.as_deref() != Some(CONTENT_TYPE)', 'length > MAX_BODY_BYTES'].map((part) => screen.indexOf(part));
+    expect(order.every((at) => at > -1)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // 머리에서 거부한 요청은 본문을 읽지 않는다: 가린 뒤에야 본문을 읽는다.
+    const read = link.slice(link.indexOf('fn read_request('), link.indexOf('fn drain('));
+    expect(read.indexOf('let length = screen(&head, port)?;')).toBeGreaterThan(-1);
+    expect(read.indexOf('let length = screen(&head, port)?;')).toBeLessThan(read.indexOf('while body.len() < length'));
+    expect(link).toContain('const BODY_FIELDS: [&str; 2] = ["code", "cookie"];');
+    // 답한 뒤 연결을 닫는다(연결 하나에 요청 하나).
+    expect(link).toContain('Connection: close');
+  });
+
+  it('웹 페이지는 부르지 못한다 — 확장의 출처만 받고, 다른 출처 허용 헤더는 코드에 아예 없다', () => {
+    expect(extensionLinkRs).toContain('pub const EXTENSION_ORIGIN: &str = "chrome-extension://";');
+    expect(link).toMatch(/pub fn is_extension_origin\(origin: &str\) -> bool \{\s*origin\s*\.strip_prefix\(EXTENSION_ORIGIN\)\s*\.is_some_and\(\|id\| id\.len\(\) == 32 && id\.bytes\(\)\.all\(\|b\| \(b'a'\.\.=b'p'\)\.contains\(&b\)\)\)/);
+    expect(link).not.toMatch(/access-control|timing-allow-origin|cross-origin-resource-policy: cross/i);
+    // 호스트는 이 수신부의 주소여야 한다(다른 이름으로 이 주소를 가리킨 페이지를 막는다).
+    expect(link).toContain('if head.header("host")? != Some(format!("{}:{port}", Ipv4Addr::LOCALHOST).as_str()) {');
+    // 웹 페이지의 요청은 화면에 알리지도, 틀린 코드로 세지도 않는다: 코드를 견주는 곳은 본문을 읽은 뒤의 한 곳이다.
+    expect(link.match(/gate\.check\(/g)).toHaveLength(1);
+    expect(link).toMatch(/if reply\.notable\(\) \{\s*notify\(reply\);\s*\}/);
+  });
+
+  it('연결 코드: 운영체제의 난수로 만들고, 맞는 요청만 받고, 여러 번 틀리면 잠시 막는다', () => {
+    expect(cargoToml).toMatch(/^getrandom = "0\.3"$/m);
+    expect(link).toContain('getrandom::fill(&mut bytes)');
+    expect(link.match(/getrandom::/g)).toHaveLength(1);
+    expect(extensionLinkRs).toContain('pub const CODE_ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";');
+    expect(extensionLinkRs).toContain('pub const CODE_CHARS: usize = 8;');
+    expect(extensionLinkRs).toContain('pub const MAX_WRONG_CODES: u32 = 5;');
+    expect(extensionLinkRs).toContain('pub const LOCK_FOR: Duration = Duration::from_secs(60);');
+    // 끝까지 견준다(어디서 틀렸는지에 따라 일찍 끝나지 않는다).
+    expect(link).toMatch(/\.fold\(0u8, \|diff, \(a, b\)\| diff \| \(a \^ b\)\)\s*== 0/);
+    // 코드가 맞기 전에는 쿠키를 저장하는 쪽에 넘기지 않는다.
+    const judge = link.slice(link.indexOf('pub fn judge('), link.indexOf('pub fn store_in_engine('));
+    expect(judge.indexOf('gate.check(&submission.code, now)')).toBeGreaterThan(-1);
+    expect(judge.indexOf('gate.check(&submission.code, now)')).toBeLessThan(judge.indexOf('sink(&submission.cookie)'));
+    expect(link.match(/sink\(&submission\.cookie\)/g)).toHaveLength(1);
+    // 코드를 다시 만드는 명령이 있다.
+    expect(glue).toMatch(/fn extension_link_new_code\(link: State<'_, ExtensionLink>\) -> LinkStatus \{\s*link\.0\.new_code\(\)/);
+  });
+
+  it('쿠키는 수신부에서 엔진의 쿠키 파일로만 흐른다 — 붙여넣기와 같은 정리·검사를 거치는 같은 한 곳이다', () => {
+    expect(link).toMatch(/pub fn store_in_engine\(engine_dir: &Path, cookie: &str\) -> Stored \{\s*match account_sync::store_pasted_cookie\(engine_dir, cookie\) \{/);
+    // 이 모듈은 파일에 쿠키를 쓰지 않는다: 쓰는 파일은 설정 파일 하나이고 거기 가는 것은 켜짐과 코드뿐이다.
+    expect(link.match(/fs::write\(/g)).toHaveLength(1);
+    expect(link).toMatch(/let saved = Saved \{\s*enabled: lock\(&self\.state\)\.enabled,\s*code: self\.gate\.code\(\)\.map\(\|code\| code\.shown\(\)\)\.unwrap_or_default\(\),\s*\};/);
+    expect(link).not.toMatch(/\.header\(\)|session_cookie|COOKIE_FILE|cookie_path/);
+    // 접착 코드: 수집이 도는 동안에는 쿠키를 바꾸지 않고, 엔진 폴더는 설정에서 나온다.
+    expect(glue).toMatch(/if store\.state::<FetchRun>\(\)\.0\.is_running\(\) \{\s*return Stored::Busy;\s*\}/);
+    expect(glue).toMatch(/Ok\(config\) => extension_link::store_in_engine\(&config\.engine_dir, cookie\),\s*Err\(_\) => Stored::Failed,/);
+    expect(glue.match(/\bcookie\b/g)).toHaveLength(2);
+  });
+
+  it('쿠키는 답·오류·로그·이벤트·명령 반환값에 실리지 않는다', () => {
+    // 아무것도 출력하지 않는다.
+    for (const [file, source] of Object.entries({ 'extension_link.rs': link, 'lib.rs(크롬 확장 연결)': glue })) {
+      expect(source, file).not.toMatch(/\b(println|eprintln|print|eprint|dbg)!|\blog::|\btracing::/);
+    }
+    // 답은 정해진 낱말로만 만든다: 본문을 만드는 함수에 들어가는 값은 사유의 낱말과 남은 초뿐이다.
+    const body = link.slice(link.indexOf('pub fn body(self) -> String {'), link.indexOf('pub fn to_bytes(self)'));
+    expect(body.match(/format!\(/g)).toHaveLength(2);
+    expect(body).toContain('format!(r#"{{"ok":false,"reason":"locked","retry_after_seconds":{seconds}}}"#)');
+    expect(body).toContain('format!(r#"{{"ok":false,"reason":"{}"}}"#, other.reason())');
+    expect(link).toMatch(/pub fn reason\(self\) -> &'static str/);
+    // 본문을 읽다 난 오류의 문장은 버린다(쿠키가 섞여 나올 수 있다).
+    expect(link).toMatch(/let Ok\(Value::Object\(mut fields\)\) = serde_json::from_slice::<Value>\(raw\) else \{\s*return Err\(Reply::BadRequest\);/);
+    // 확장이 보낸 것을 담는 타입은 값을 가리고, 화면으로 넘길 수(직렬화할 수) 없다.
+    expect(link).toMatch(/#\[derive\(Clone, PartialEq, Eq\)\]\s*pub struct Submission \{\s*code: String,\s*cookie: String,\s*\}/);
+    expect(link).toMatch(/f\.debug_struct\("Submission"\)\s*\.field\("code", &MASK\)\s*\.field\("cookie", &MASK\)/);
+    // 화면에 가는 상태는 이 여덟 칸이고(연결 코드는 쿠키가 아니다) 쿠키가 없다. 화면 쪽 타입도 같다.
+    const status = extensionLinkRs.slice(extensionLinkRs.indexOf('pub struct LinkStatus {'), extensionLinkRs.indexOf('/// 답 하나를 계정 화면에 보일 문장으로.'));
+    const fields = ['enabled', 'listening', 'address', 'code', 'problem', 'pending', 'last', 'locked_seconds'];
+    expect(status.match(/^\s*pub (\w+):/gm)?.map((f) => f.trim())).toEqual(fields.map((f) => `pub ${f}:`));
+    const types = sources['../src/types.ts'];
+    const front = types.slice(types.indexOf('export interface ExtensionLinkStatus {'), types.indexOf('/** 계정 파일을 쓴 결과'));
+    expect(front.match(/^ {2}(\w+):/gm)?.map((f) => f.trim())).toEqual(fields.map((f) => `${f}:`));
+    const activity = extensionLinkRs.slice(extensionLinkRs.indexOf('pub struct LinkActivity {'), extensionLinkRs.indexOf('/// 크롬 확장 연결의 지금 상태.'));
+    expect(activity.match(/^\s*pub (\w+):/gm)?.map((f) => f.trim())).toEqual(['pub at:', 'pub outcome:', 'pub message:']);
+    // 이벤트는 하나다: 상태를 오버레이 창으로만. 알리는 쪽에는 인자가 없다(쿠키가 지나갈 길이 없다).
+    expect(glue.match(/\.emit\w*\(/g)).toHaveLength(1);
+    expect(glue).toContain('notify.emit_to(MAIN_WINDOW, EXTENSION_LINK_EVENT, link.0.status())');
+    expect(extensionLinkRs).toContain('pub type Changed = dyn Fn() + Send + Sync;');
+    // 명령이 돌려주는 것은 상태와 참·거짓뿐이다.
+    expect(glue.match(/-> (LinkStatus|Result<LinkStatus, String>|bool|ExtensionLink) \{/g)).toHaveLength(5);
+  });
+
+  it('받은 뒤의 「계정 새로 받기」는 화면이 잇는다 — 차례는 한 번만 가져가고, 계산 중에는 탭을 옮기지 않는다', () => {
+    expect(link).toMatch(/pub fn take_pending\(&self\) -> bool \{\s*std::mem::take\(&mut lock\(&self\.activity\)\.pending\)/);
+    expect(link).toContain('activity.pending |= reply == Reply::Received;');
+    const rule = sources['../src/lib/extensionLink.ts'];
+    expect(rule).toContain('export function arrivalStep(state: ArrivalState, input: ArrivalInput): ArrivalStep');
+    expect(rule.match(/extensionLinkTakePending\(\)/g)).toHaveLength(1);
+    const app = sources['../src/App.vue'];
+    expect(app).toMatch(
+      /provideExtensionLink\(\{\s*computing: \(\) => computingTab\.value !== null,\s*onAccount: \(\) => tab\.value === 'account',\s*openAccount: \(\) => select\('account'\),\s*\}\);/,
+    );
+    expect(app).toContain('watch([computingTab, tab], () => extension.settle());');
+    expect(app.match(/select\('account'\)/g)).toHaveLength(1);
+    // 계정 화면은 차례를 가져간 뒤에야 같은 「계정 새로 받기」를 돌린다. 쿠키는 화면에 오지 않는다.
+    const screen = sources['../src/screens/AccountScreen.vue'];
+    expect(screen).toMatch(/const mine = await extension\.claim\(\);\s*busy\.value = '';\s*if \(!mine\) return;/);
+    expect(screen.match(/await fetchAccount\(\);/g)).toHaveLength(1);
+    expect(rule).not.toMatch(/accountSaveCookie|cookie/i);
+  });
+});
+
 describe('게임 창 추적·캡처(Rust)', () => {
   /** 주석을 뺀 코드. 금지한 호출을 주석에서 이름만 든 것은 세지 않는다. */
   const code = (source: string) =>
@@ -563,6 +779,7 @@ describe('게임 창 추적·캡처(Rust)', () => {
     'account_sync.rs': accountSyncRs,
     'cookie.rs': cookieRs,
     'login_window.rs': loginWindowRs,
+    'extension_link.rs': extensionLinkRs,
     'lib.rs': libRs,
   };
 
@@ -913,11 +1130,14 @@ describe('엔진 호출(Rust)', () => {
 
   it('새 화면을 위해 Rust 명령이나 권한을 더하지 않았다 — 결과 파일은 read_json_file로 읽는다', () => {
     // 화면 넷(P-017)까지는 14개였다. 그 뒤에 더한 것은 자동 추적(P-021)의 둘 — 켜기/끄기와 상태 — 과
-    // 계정 받기(P-022)의 아홉이다(계정 화면은 쿠키 파일·수집 프로세스·로그인 창을 다뤄 명령이 필요하다).
-    expect(COMMANDS).toHaveLength(25);
+    // 계정 받기(P-022)의 아홉(계정 화면은 쿠키 파일·수집 프로세스·로그인 창을 다뤄 명령이 필요하다),
+    // 크롬 확장 연결(P-025)의 넷이다(수신부를 켜고 끄기·상태·연결 코드 다시 만들기·받은 쿠키로 수집 잇기 — 25 → 29).
+    expect(COMMANDS).toHaveLength(29);
     expect(COMMANDS.slice(14, 16)).toEqual(['set_screen_tracking', 'screen_track_status']);
     expect(ACCOUNT_COMMANDS).toHaveLength(9);
     for (const cmd of ACCOUNT_COMMANDS) expect(cmd).toMatch(/^(account|login_window)_/);
+    expect(EXTENSION_COMMANDS).toHaveLength(4);
+    for (const cmd of EXTENSION_COMMANDS) expect(cmd).toMatch(/^extension_link_/);
     expect(sources['../src/lib/resultFile.ts']).toContain('await readJsonFile(target)');
     // Tauri API를 직접 부르는 곳은 여전히 lib/backend.ts 하나다.
     for (const [file, text] of Object.entries(sources)) {

@@ -149,7 +149,7 @@ impl fmt::Display for SyncError {
             Self::Cookie(e) => write!(f, "{e}"),
             Self::CookieFileMissing => write!(
                 f,
-                "쿠키 파일이 없다 — 1단계에서 쿠키를 먼저 받아라(로그인 창 또는 붙여넣기)"
+                "쿠키 파일이 없다 — 1단계에서 쿠키를 먼저 받아라(크롬 확장, 붙여넣기 또는 로그인 창)"
             ),
             Self::CookieFileInvalid => write!(
                 f,

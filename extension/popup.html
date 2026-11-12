@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>니케 컴패니언 연결</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <h1>니케 컴패니언 연결</h1>
+
+      <label for="code">연결 코드</label>
+      <input id="code" type="text" autocomplete="off" spellcheck="false" maxlength="12" placeholder="ABCD-EFGH" />
+      <p class="hint">오버레이 계정 화면의 「크롬 확장 연결」에 보이는 여덟 글자. 한 번 넣으면 기억한다.</p>
+
+      <button id="send" type="button">오버레이로 보내기</button>
+
+      <p id="status" role="status" data-state="idle">blablalink에 로그인된 상태에서 누른다.</p>
+
+      <p class="hint">
+        누를 때만 이 브라우저의 blablalink 로그인 쿠키를 읽어, 이 PC의 오버레이(127.0.0.1)에만 보낸다. 쿠키를 저장하지 않고 다른 곳에
+        보내지 않는다.
+      </p>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

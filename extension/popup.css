@@ -1,0 +1,91 @@
+:root {
+  color-scheme: dark;
+}
+
+body {
+  width: 300px;
+  margin: 0;
+  padding: 12px;
+  background: #10131c;
+  color: #e8ecf4;
+  font: 13px/1.5 'Segoe UI', 'Malgun Gothic', sans-serif;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+label {
+  font-weight: 700;
+}
+
+input {
+  padding: 6px 8px;
+  border: 1px solid #39425a;
+  border-radius: 6px;
+  background: #171b28;
+  color: inherit;
+  font: 15px/1.2 Consolas, 'D2Coding', monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+button {
+  margin-top: 4px;
+  padding: 8px;
+  border: none;
+  border-radius: 6px;
+  background: #5db2ff;
+  color: #06121d;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.hint {
+  margin: 0;
+  color: #9aa4ba;
+  font-size: 12px;
+}
+
+#status {
+  margin: 2px 0;
+  padding: 6px 8px;
+  border: 1px solid #39425a;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+
+#status[data-state='received'] {
+  border-color: #58d68d;
+  color: #58d68d;
+}
+
+#status[data-state='sending'] {
+  border-color: #5db2ff;
+}
+
+#status[data-state='overlay_off'],
+#status[data-state='wrong_code'],
+#status[data-state='locked'],
+#status[data-state='not_logged_in'],
+#status[data-state='no_code'],
+#status[data-state='busy'],
+#status[data-state='cookie_rejected'],
+#status[data-state='store_failed'],
+#status[data-state='cookies_unreadable'],
+#status[data-state='unexpected'] {
+  border-color: #ffb454;
+  color: #ffb454;
+}

@@ -1,16 +1,20 @@
 <script setup lang="ts">
 // 계정 화면: 터미널에서 손으로 하던 세 단계를 여기서 한다.
-//   1 쿠키 받기 — blablalink 로그인 창(Rust가 그 창의 쿠키를 읽는다) 또는 붙여넣기
+//   1 쿠키 받기 — 방법 셋: 크롬 확장(권장 — 이미 로그인된 브라우저에서 단추 한 번. Rust의 수신부가 받는다),
+//     붙여넣기, 앱 안의 blablalink 로그인 창(Rust가 그 창의 쿠키를 읽는다)
 //   2 계정 새로 받기 — 엔진의 수집 스크립트 실행(Rust). 스크립트가 낸 줄과 경고를 빠짐없이 보인다
 //   3 변환·저장 — 루트의 src/core/import-profile.mjs로 계정 상태로 바꿔 계정 파일로 저장, 다른 화면의 계정 칸에 넣는다
+// 크롬 확장으로 받으면 2 → 3이 저절로 이어진다(확장의 단추 한 번으로 끝까지).
 //
 // 세션 쿠키는 계정 접근권이다. 이 화면의 규칙:
 //   - 붙여넣은 글자는 Rust에 한 번 넘기고 곧바로 입력 칸에서 지운다. 입력 칸은 가려진 형식이다.
 //   - 쿠키를 기억하지 않는다(lib/remember.ts에 넣지 않는다). 화면에 다시 보이지 않는다 — Rust도 돌려주지 않는다.
-//   - 로그인 창으로 받을 때는 쿠키가 이 화면을 지나가지도 않는다(Rust 안에서만 흐른다).
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+//   - 크롬 확장·로그인 창으로 받을 때는 쿠키가 이 화면을 지나가지도 않는다(Rust 안에서만 흐른다).
+//     화면에 보이는 연결 코드는 쿠키가 아니다(확장에 한 번 넣는 여덟 글자).
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import AccountFailure from '../components/AccountFailure.vue';
 import { useAccountLink } from '../lib/accountLink';
+import { useExtensionLink } from '../lib/extensionLink';
 import { importFetchedProfile, type ImportedAccount } from '../lib/accountSync';
 import {
   accountFetchCancel,
@@ -34,7 +38,7 @@ const DEFAULT_NAME = 'me';
 const STOP_RETRY_MS = 100;
 
 /** 지금 하는 일. 한 번에 하나만 한다. */
-type Busy = '' | 'cookie' | 'login' | 'take' | 'clear' | 'fetch' | 'import';
+type Busy = '' | 'cookie' | 'login' | 'take' | 'clear' | 'claim' | 'fetch' | 'import';
 /** 실패가 난 단계 — 그 단계 아래에 안내를 보인다. */
 type Step = 1 | 2 | 3;
 
@@ -55,6 +59,16 @@ const elapsed = ref(0);
 const imported = ref<ImportedAccount | null>(null);
 
 const link = useAccountLink();
+/** 크롬 확장 연결(App.vue가 내려 준다 — 상태는 Rust가 들고 있다). 화면만 따로 띄우면 null이고 그 칸은 없다. */
+const extension = useExtensionLink();
+const extensionStatus = computed(() => extension?.status.value ?? null);
+/** 크롬 확장 연결의 지금 상태를 한 줄로. */
+const extensionState = computed(() => {
+  const s = extensionStatus.value;
+  if (!s) return '상태를 확인하지 못했다';
+  if (!s.enabled) return '꺼짐';
+  return s.listening ? `켜짐 · ${s.address}에서 듣는 중` : '켜 두었지만 열지 못했다';
+});
 const fetching = computed(() => busy.value === 'fetch' || busy.value === 'import');
 const warnings = computed(() => lines.value.filter((line) => line.warning));
 const account = computed(() => name.value.trim() || DEFAULT_NAME);
@@ -124,6 +138,29 @@ async function takeCookie(): Promise<void> {
 
 async function clearSession(): Promise<void> {
   await cookieTask('clear', () => loginWindowClear());
+}
+
+async function toggleExtension(event: Event): Promise<void> {
+  const box = event.target as HTMLInputElement;
+  await extension?.setEnabled(box.checked);
+  // 스위치는 Rust가 알려 준 상태를 따른다 — 켜지 못했으면 되돌아간다.
+  box.checked = extensionStatus.value?.enabled === true;
+}
+
+/**
+ * 크롬 확장에서 쿠키를 받았으면(Rust의 수신부가 이미 쿠키 파일에 썼다) 「계정 새로 받기」를 이어서 돌린다.
+ * 다른 일을 하는 중이면 끝난 뒤에 잇는다(아래 watch가 다시 부른다). 차례는 한 번만 가져간다.
+ */
+async function continueFromExtension(): Promise<void> {
+  if (!extension || busy.value || !extensionStatus.value?.pending) return;
+  busy.value = 'claim';
+  const mine = await extension.claim();
+  busy.value = '';
+  if (!mine) return;
+  failure.value = null;
+  cookieNote.value = '크롬 확장에서 쿠키를 받았다 — 계정을 새로 받는다.';
+  await refresh();
+  await fetchAccount();
 }
 
 /** 계정 새로 받기: 수집 → 받은 프로필 읽기 → 변환 → 계정 파일 저장 → 다른 화면의 계정 칸에 넣기. */
@@ -204,6 +241,8 @@ async function stop(): Promise<void> {
 
 onMounted(refresh);
 onBeforeUnmount(stopTimer);
+// 확장에서 쿠키를 받았을 때, 그리고 하던 일이 끝났을 때 본다. 이 화면을 처음 열 때 이미 받아 둔 것이 있어도 잇는다.
+watch([() => extensionStatus.value?.pending, busy], continueFromExtension, { immediate: true });
 </script>
 
 <template>
@@ -223,37 +262,75 @@ onBeforeUnmount(stopTimer);
         </h2>
         <p class="step__hint">
           계정을 받으려면 blablalink 로그인 세션 쿠키가 있어야 한다. 쿠키는 <strong>계정 접근권</strong>이다 — 이 앱은 엔진의 쿠키 파일
-          한 곳에만 저장하고, 화면에 다시 보이지 않는다. 받는 방법은 둘이다.
+          한 곳에만 저장하고, 화면에 다시 보이지 않는다. 받는 방법은 셋이다.
         </p>
 
-        <div class="step__way">
-          <p class="step__way-title">가. 로그인 창 <span class="step__sub">개발자 도구 없이</span></p>
-          <div class="panel__row">
-            <button class="panel__button" type="button" :disabled="busy !== ''" data-testid="login-open" @click="openLogin">
-              blablalink 로그인
-            </button>
-            <button class="panel__button" type="button" :disabled="busy !== ''" data-testid="login-take" @click="takeCookie">
-              {{ busy === 'take' ? '가져오는 중…' : '쿠키 가져오기' }}
-            </button>
-            <button
-              class="step__quiet"
-              type="button"
-              title="로그인 창의 쿠키·저장 데이터를 지운다 — 다른 계정으로 바꾸거나 공용 PC에서 쓴 뒤에"
-              :disabled="busy !== ''"
-              data-testid="login-clear"
-              @click="clearSession"
-            >
-              로그인 세션 지우기
-            </button>
-          </div>
-          <p class="step__hint">
-            「blablalink 로그인」으로 뜨는 별도 창에서 직접 로그인하고 게임 계정을 연동한 뒤 「쿠키 가져오기」를 누른다. 아이디와 비밀번호는
-            그 페이지에 넣는다(앱은 읽지 않는다). 그 창에서 로그인이 막히면(예: 구글 계정) 아래 붙여넣기를 쓴다.
+        <!-- 방법 1 ───────────────────────────────────────────────────────── -->
+        <div class="step__way" data-testid="way-extension">
+          <p class="step__way-title">
+            방법 1 · 크롬 확장 <span class="badge badge--accent">권장</span>
+            <span class="step__sub">이미 로그인된 브라우저에서 단추 한 번 — 비밀번호를 몰라도 된다</span>
           </p>
+          <template v-if="extension">
+            <div class="panel__row">
+              <label class="link__switch">
+                <input
+                  type="checkbox"
+                  :checked="extensionStatus?.enabled === true"
+                  :disabled="busy !== '' || extension.busy.value"
+                  data-testid="link-toggle"
+                  @change="toggleExtension"
+                />
+                크롬 확장 연결
+              </label>
+              <span
+                class="badge"
+                :class="extensionStatus?.listening ? 'badge--accent' : extensionStatus?.enabled ? 'badge--warn' : 'badge--muted'"
+                data-testid="link-state"
+              >
+                {{ extensionState }}
+              </span>
+            </div>
+            <p v-if="extensionStatus?.enabled && extensionStatus.code" class="link__code-row">
+              연결 코드 <code class="link__code" data-testid="link-code">{{ extensionStatus.code }}</code>
+              <button
+                class="step__quiet"
+                type="button"
+                title="코드를 새로 만든다 — 옛 코드는 곧바로 받지 않는다. 확장에 새 코드를 넣어야 한다"
+                :disabled="busy !== '' || extension.busy.value"
+                data-testid="link-new-code"
+                @click="extension.newCode()"
+              >
+                코드 다시 만들기
+              </button>
+            </p>
+            <p v-if="extensionStatus?.problem || extension.problem.value" class="screen__error" role="alert" data-testid="link-problem">
+              {{ extensionStatus?.problem || extension.problem.value }}
+            </p>
+            <p v-if="extensionStatus?.last" class="step__hint" role="status" data-testid="link-last" :data-outcome="extensionStatus.last.outcome">
+              마지막 요청({{ when(extensionStatus.last.at) }}): {{ extensionStatus.last.message }}
+            </p>
+            <p class="step__hint">
+              켜 두면 이 PC 안에서만 닿는 주소에서 확장의 요청을 기다린다(다른 PC·웹 페이지는 부르지 못한다). 확장의 「오버레이로 보내기」를
+              누르면 쿠키 저장부터 2·3단계까지 저절로 이어진다. 연결 코드는 쿠키가 아니다 — 확장에 한 번 넣어 두는 값이다.
+            </p>
+            <details class="fold" :open="extensionStatus?.enabled !== true" data-testid="link-howto">
+              <summary>확장을 설치하고 연결하는 순서 (처음 한 번)</summary>
+              <ol class="step__list">
+                <li>크롬(엣지 등 크로뮴 계열)의 주소 칸에 <code>chrome://extensions</code>를 넣어 연다.</li>
+                <li>오른쪽 위의 「개발자 모드」를 켠다.</li>
+                <li>「압축해제된 확장 프로그램을 로드합니다」를 눌러 이 앱 저장소(nikke-companion)의 <code>extension</code> 폴더를 고른다.</li>
+                <li>여기서 「크롬 확장 연결」을 켠다 — 연결 코드가 보인다.</li>
+                <li>브라우저 도구 모음의 확장 아이콘(니케 컴패니언 연결)을 눌러 「연결 코드」 칸에 그 코드를 넣는다.</li>
+                <li>같은 브라우저에서 blablalink.com에 로그인된 상태로 확장의 「오버레이로 보내기」를 누른다 — 이 화면에서 계정 받기가 이어진다.</li>
+              </ol>
+            </details>
+          </template>
         </div>
 
-        <div class="step__way">
-          <p class="step__way-title">나. 붙여넣기 <span class="step__sub">브라우저에서 복사</span></p>
+        <!-- 방법 2 ───────────────────────────────────────────────────────── -->
+        <div class="step__way" data-testid="way-paste">
+          <p class="step__way-title">방법 2 · 쿠키 붙여넣기 <span class="step__sub">브라우저의 개발자 도구에서 복사</span></p>
           <form class="panel__row" @submit.prevent="saveCookie">
             <input
               v-model="pasted"
@@ -279,6 +356,34 @@ onBeforeUnmount(stopTimer);
               <li>위 칸에 붙여넣고 「쿠키 저장」을 누른다.</li>
             </ol>
           </details>
+        </div>
+
+        <!-- 방법 3 ───────────────────────────────────────────────────────── -->
+        <div class="step__way" data-testid="way-login">
+          <p class="step__way-title">방법 3 · 앱 안의 로그인 창 <span class="step__sub">비밀번호로 로그인하는 사용자용</span></p>
+          <div class="panel__row">
+            <button class="panel__button" type="button" :disabled="busy !== ''" data-testid="login-open" @click="openLogin">
+              blablalink 로그인
+            </button>
+            <button class="panel__button" type="button" :disabled="busy !== ''" data-testid="login-take" @click="takeCookie">
+              {{ busy === 'take' ? '가져오는 중…' : '쿠키 가져오기' }}
+            </button>
+            <button
+              class="step__quiet"
+              type="button"
+              title="로그인 창의 쿠키·저장 데이터를 지운다 — 다른 계정으로 바꾸거나 공용 PC에서 쓴 뒤에"
+              :disabled="busy !== ''"
+              data-testid="login-clear"
+              @click="clearSession"
+            >
+              로그인 세션 지우기
+            </button>
+          </div>
+          <p class="step__hint">
+            「blablalink 로그인」으로 뜨는 별도 창에서 직접 로그인하고 게임 계정을 연동한 뒤 「쿠키 가져오기」를 누른다. 아이디와 비밀번호는
+            그 페이지에 넣는다(앱은 읽지 않는다). 자동 로그인으로 써서 비밀번호를 모르거나 그 창에서 로그인이 막히면(예: 구글 계정) 방법 1·2를
+            쓴다.
+          </p>
         </div>
 
         <p v-if="cookieNote" class="step__done" role="status" data-testid="cookie-note">{{ cookieNote }}</p>
@@ -498,6 +603,34 @@ onBeforeUnmount(stopTimer);
 .step__stop:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+.link__switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.link__code-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+
+/* 연결 코드는 사람이 보고 옮겨 적는 값이다 — 크게, 글자 사이를 띄워 보인다. */
+.link__code {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: Consolas, 'D2Coding', monospace;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  user-select: all;
 }
 
 .step__list {

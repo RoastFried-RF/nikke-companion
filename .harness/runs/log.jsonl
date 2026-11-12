@@ -147,3 +147,5 @@
 {"at":"2026-11-12T08:21:58.559Z","event":"manual_verify","task":"P-010","passed":true,"tree":"54310c81171cb5a6596232aad9332ea83052492d","reason":null}
 {"at":"2026-11-12T08:21:58.763Z","event":"checkpoint","task":"P-010","commit":"d381ee9d19677f900de00cba3352a625fd20c603","tree":"54310c81171cb5a6596232aad9332ea83052492d"}
 {"at":"2026-11-12T08:22:05.118Z","event":"session_start","model":"claude-fable-5-2","head":"d381ee9d19677f900de00cba3352a625fd20c603","git_status":["M .harness/runs/log.jsonl"]}
+{"at":"2026-11-12T09:00:35.121Z","event":"checkpoint","task":"P-024","commit":"18c9edfc0f5918df5c1e80724fc76af5e86959f4","tree":"fe276a33a3a323c22f7bf608869e80f301f89bc9"}
+{"at":"2026-11-12T09:00:35.148Z","event":"verified","task":"P-024","attempt":1,"run":".harness/runs/20261112T082205-P-024-a1","tree":"fe276a33a3a323c22f7bf608869e80f301f89bc9","reason":null}

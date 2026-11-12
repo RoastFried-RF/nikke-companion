@@ -7,6 +7,7 @@ import OverlayStatus from './components/OverlayStatus.vue';
 import { provideAccountLink } from './lib/accountLink';
 import { errorMessage, onOverlayState, overlayStatus, quitApp, startupReportPath } from './lib/backend';
 import { provideEngineOwner } from './lib/engineRun';
+import { provideExtensionLink } from './lib/extensionLink';
 import { recall, remember } from './lib/remember';
 import { provideScreenTrack } from './lib/screenTrack';
 import AccountScreen from './screens/AccountScreen.vue';
@@ -62,6 +63,16 @@ const track = provideScreenTrack({
 });
 // 계산이 시작·끝나거나 탭이 바뀌면 미뤄 둔 이동을 다시 보게 한다(계산이 끝났으면 그때 옮긴다).
 watch([computingTab, tab], () => track.settle());
+
+// 크롬 확장 연결: 이 PC의 크롬 확장이 쿠키를 넘기면(Rust의 수신부가 받는다 — 쿠키는 화면에 오지 않는다) 계정 탭을 열고,
+// 계정 화면이 「계정 새로 받기」를 이어서 돌린다. 언제 여는지는 lib/extensionLink.ts의 규칙(arrivalStep)이 정한다:
+// 계산이 도는 동안에는 옮기지 않고 미뤄 뒀다가 계산이 끝나면 한 번 옮긴다.
+const extension = provideExtensionLink({
+  computing: () => computingTab.value !== null,
+  onAccount: () => tab.value === 'account',
+  openAccount: () => select('account'),
+});
+watch([computingTab, tab], () => extension.settle());
 
 async function quit(): Promise<void> {
   try {
@@ -137,6 +148,11 @@ onBeforeUnmount(() => {
     <p v-if="track.pendingMove.value" class="screen__hint screen__hint--track" role="status" data-testid="track-pending-move">
       게임에서 보고 있는 보스: <strong>{{ track.target.value?.name }}</strong> — 계산이 끝나면 요격전 탭으로 옮긴다(계산 중에는 탭을 옮기지
       않는다).
+    </p>
+
+    <!-- 확장에서 쿠키를 받았는데 계산 중이라 계정 탭을 열지 않았다. 계정 탭을 직접 열면 곧바로 받는다. -->
+    <p v-if="extension.waiting.value" class="screen__hint screen__hint--track" role="status" data-testid="link-pending-move">
+      크롬 확장에서 쿠키를 받았다 — 계산이 끝나면 계정 탭으로 옮겨 계정을 새로 받는다(계정 탭을 지금 열어도 된다).
     </p>
 
     <template v-if="ready">

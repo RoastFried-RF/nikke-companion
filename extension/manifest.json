@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "니케 컴패니언 연결",
+  "version": "0.1.0",
+  "description": "blablalink에 로그인된 이 브라우저의 세션 쿠키를, 단추를 눌렀을 때만, 이 PC에서 돌고 있는 니케 컴패니언 오버레이(127.0.0.1)에 넘긴다.",
+  "minimum_chrome_version": "103",
+  "permissions": ["cookies"],
+  "host_permissions": ["https://*.blablalink.com/*", "http://127.0.0.1/*"],
+  "action": {
+    "default_title": "니케 컴패니언 연결",
+    "default_popup": "popup.html"
+  }
+}

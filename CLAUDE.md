@@ -16,6 +16,7 @@
 ```bash
 node --test tests/unit/                  # 단위 테스트 (엔진 호출 없음, 빠름)
 node --test tests/integration/           # 실제 엔진 호출 (수십 초)
+node --test extension/                   # 크롬 확장(extension/)의 테스트 (브라우저 없이, 빠름)
 node scripts/verify.mjs <작업ID>         # 그 작업의 검증 명령 실행 + 증거 기록
 node scripts/verify.mjs --all            # 완료된 작업을 현재 코드로 재검증
 node scripts/autopilot.mjs --max-iterations 3   # 자율 실행 루프
@@ -84,17 +85,33 @@ cargo test --manifest-path app/src-tauri/Cargo.toml --test exit_cleanup         
 ```
 
 오버레이의 **계정** 탭에서 계정을 받는다(터미널의 세 단계 — 쿠키 저장 → `profile_fetch.py` → `import-profile` — 를 대신한다):
-1 쿠키 받기(blablalink 로그인 창의 「쿠키 가져오기」 또는 붙여넣기) → 2 계정 새로 받기(엔진의 수집 스크립트 실행) → 3 변환·저장
+1 쿠키 받기(방법 셋: 크롬 확장 — 권장 · 붙여넣기 · 앱 안의 blablalink 로그인 창) → 2 계정 새로 받기(엔진의 수집 스크립트 실행) → 3 변환·저장
 (`data/accounts/<이름>.json`, 있던 파일은 `.bak`) → 추천·비교, 요격전, 성장 화면의 계정 칸에 들어간다. 자세한 것은 `app/README.md` §계정 받기.
 **세션 쿠키는 계정 접근권이다**: 앱은 쿠키를 엔진의 `scraper/.session_cookie` 한 곳에만 쓰고, 화면·로그·오류·이벤트·반환값·
-localStorage에 내보내지 않으며, 스스로 네트워크로 보내지 않는다(Rust `src-tauri/src/cookie.rs`·`account_sync.rs`·`login_window.rs`).
-로그인 창은 앱 명령을 부를 수 없다(capability에 없다). **에이전트는 실제 `vendor/nikke-calc/scraper/.session_cookie`,
+localStorage에 내보내지 않으며, 스스로 네트워크로 보내지 않는다(Rust `src-tauri/src/cookie.rs`·`account_sync.rs`·`login_window.rs`·
+`extension_link.rs`). 로그인 창은 앱 명령을 부를 수 없다(capability에 없다). **에이전트는 실제 `vendor/nikke-calc/scraper/.session_cookie`,
 `vendor/nikke-calc/profiles/`, `data/accounts/`의 파일을 읽지도 출력하지도 실행에 쓰지도 않고, 실제 수집을 돌리지 않는다** — 개발과
 테스트는 지어낸 쿠키, 가짜 수집 스크립트, 샘플 프로필(`data/samples/profile.sample.json`)로만 한다.
 
 ```bash
 cargo test --manifest-path app/src-tauri/Cargo.toml --test account_fetch                                   # 가짜 엔진 폴더·가짜 수집 스크립트로 수집·중단·쿠키 비노출(평소 cargo test에도 들어 있다)
 cargo test --manifest-path app/src-tauri/Cargo.toml --test live_login_window -- --ignored --nocapture       # 로그인 창을 실제로 띄운다(임시 세션 — 로그인하지 않는다. 네트워크 필요)
+```
+
+**크롬 확장으로 계정 받기**(P-025 — 계정 받기의 기본 경로. 자동 로그인으로 써서 비밀번호를 모르는 계정도 된다): 저장소의
+`extension/`(Manifest V3 — `chrome://extensions`의 개발자 모드에서 「압축해제된 확장 프로그램을 로드합니다」로 설치)이 blablalink에
+로그인된 크롬에서 단추 한 번으로 `api.blablalink.com` 요청에 실릴 쿠키를 Cookie 헤더 한 줄로 만들어 이 PC의 오버레이에 넘긴다.
+오버레이는 계정 탭에서 **크롬 확장 연결**을 켰을 때만(기본 꺼짐, Rust가 기억) `127.0.0.1:47615`에서 듣고(`src-tauri/src/extension_link.rs` —
+루프백에만 묶인다, 정해진 요청 하나, 출처가 크롬 확장인 것만, 화면에 보이는 **연결 코드**가 맞는 것만 — 다섯 번 틀리면 1분 막는다),
+받은 쿠키를 붙여넣기와 같은 검사를 거쳐 같은 한 곳에 쓴 뒤 계정 화면이 「계정 새로 받기」를 저절로 잇는다. 쿠키는 답·로그·이벤트·
+반환값에 실리지 않고 화면을 지나가지도 않는다. 확장의 권한은 `cookies`와 호스트 권한 둘(blablalink, 127.0.0.1)뿐이고 백그라운드에서
+돌지 않는다. 확장을 고치면 `chrome://extensions`에서 다시 로드한다. 자세한 것은 `app/README.md` §크롬 확장으로 계정 받기,
+`extension/README.md`. **에이전트는 사용자의 크롬에 확장을 설치하거나 실제 blablalink에 로그인하지 않는다** — 가짜 쿠키와 가짜
+요청으로만 개발·테스트한다(실제 포트 47615와 앱의 설정 폴더도 테스트에 쓰지 않는다).
+
+```bash
+node --test extension/                                                                                     # 확장: 쿠키 목록 → 헤더(순수 모듈), 보내기 흐름(가짜 요청), manifest 권한, 오버레이와의 계약
+cargo test --manifest-path app/src-tauri/Cargo.toml --test extension_link                                  # 수신부를 실제로 열고(빈 포트) 가짜 요청을 보낸다: 루프백 전용·연결 코드·거부·쿠키 비노출(평소 cargo test에도 들어 있다)
 ```
 
 게임 창·화면 캡처·요격전 화면 인식(실행 중인 니케가 필요하다 — `--recognize <PNG>`와 `live_recognize`만 빼고. 게임은 읽기만 한다 —

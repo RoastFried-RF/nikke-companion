@@ -28,6 +28,10 @@ fn main() {
             "login_window_open",
             "login_window_take_cookie",
             "login_window_clear",
+            "extension_link_status",
+            "extension_link_set",
+            "extension_link_new_code",
+            "extension_link_take_pending",
         ]),
     );
     tauri_build::try_build(attributes).expect("tauri-build 실패");

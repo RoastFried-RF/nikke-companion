@@ -562,6 +562,36 @@ export interface FetchedProfile {
   option_table: unknown;
 }
 
+/** 크롬 확장 연결의 수신부에 마지막으로 온 요청(extension_link.rs의 LinkActivity). 쿠키는 없다. */
+export interface ExtensionLinkActivity {
+  /** 언제(ISO, UTC). */
+  at: string;
+  /** 결과의 종류: received · wrong_code · locked · not_logged_in · cookie_rejected · busy · store_failed. */
+  outcome: string;
+  /** 한국어 문장. */
+  message: string;
+}
+
+/** 크롬 확장 연결의 지금 상태(extension_link.rs의 LinkStatus). 쿠키는 없다 — 연결 코드는 쿠키가 아니다. */
+export interface ExtensionLinkStatus {
+  /** 사용자가 켜 두었는가(Rust가 기억한다). */
+  enabled: boolean;
+  /** 지금 듣고 있는가. 켜 두었는데 듣지 못하면 이유가 `problem`에 있다. */
+  listening: boolean;
+  /** 듣는 주소(이 PC 안에서만 닿는 주소와 포트). */
+  address: string;
+  /** 연결 코드(여덟 글자, 가운데 붙임표). 확장에 한 번 넣는다. */
+  code: string;
+  /** 열지 못한 이유(한국어 문장). */
+  problem: string | null;
+  /** 확장에서 쿠키를 받았고 화면이 아직 「계정 새로 받기」를 잇지 않았다. */
+  pending: boolean;
+  /** 마지막으로 온 요청. */
+  last: ExtensionLinkActivity | null;
+  /** 코드를 여러 번 틀려 막힌 시간이 얼마나 남았는가(초). 막혀 있지 않으면 0. */
+  locked_seconds: number;
+}
+
 /** 계정 파일을 쓴 결과(account_sync.rs의 SavedAccount). */
 export interface SavedAccount {
   path: string;
