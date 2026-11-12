@@ -225,6 +225,45 @@ describe('샘플에 없는 경우(샘플을 복사해 바꾼 결과)', () => {
       '후보: 조합 30개 중 6개 생성 → 6개 계산 → 상위 5개 표시',
     );
     expect(render().find('[data-testid="suggestion"]').exists()).toBe(false);
+    // 탐색 요약이 없는 결과(배치 탐색이 생기기 전의 파일)에서는 그 줄을 그리지 않는다.
+    expect(w.find('[data-testid="search"]').exists()).toBe(false);
+  });
+
+  it('추천 결과의 탐색 요약(시뮬 횟수·예산·못 본 수)과 배치 메모를 보인다', () => {
+    const search = {
+      refine: true,
+      budget: 24,
+      refine_top: 5,
+      sims: 24,
+      stage1: { requested: 6, skipped: 0 },
+      stage2: { combos: 5, variants: 65, requested: 18, skipped: 47, improved: 2 },
+      best_stage1_total: 3869896802,
+      best_total: 4026347573,
+    };
+    const memo = '배치 탐색: 배치를 바꿔 총딜이 1단계 배치의 101.4%가 됐다 (변형 4개 계산). 바꾼 것 — 버스트 2단계 순서 프리카 → 크라운.';
+    const w = render(
+      variant((r) => {
+        r.suggestion = { considered: 30, generated: 6, simulated: 6, shown: 3, search };
+        r.ranking[0].notes = [...r.ranking[0].notes, memo];
+      }),
+    );
+    expect(w.find('[data-testid="search"]').text()).toBe(
+      '탐색: 시뮬 24건 / 예산 24건 (1단계 조합 6건 + 2단계 배치 18건) · 예산이 모자라 못 본 것: 배치 변형 47개 · 배치를 바꾼 조합 2/5개',
+    );
+    expect(w.findAll('[data-testid="ranking-entry"]')[0].findAll('[data-testid="note"]').at(-1)?.text()).toBe(memo);
+
+    const off = render(
+      variant((r) => {
+        r.suggestion = {
+          considered: 30,
+          generated: 6,
+          simulated: 6,
+          shown: 3,
+          search: { ...search, refine: false, budget: 120, refine_top: null, sims: 6, stage2: null },
+        };
+      }),
+    );
+    expect(off.find('[data-testid="search"]').text()).toBe('탐색: 시뮬 6건 / 예산 120건 (1단계 조합 6건 · 배치 탐색 끔)');
   });
 
   it('수가 아닌 값은 지어내지 않고 값 오류로 표시한다', () => {

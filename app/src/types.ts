@@ -18,6 +18,51 @@ export interface RankingEntry {
   notes: string[];
   engine_warnings: string[];
   ungrown_members: string[];
+  /**
+   * 배치 탐색(추천의 2단계)의 결과. 2단계 대상이 아니었던 조합은 null, 배치 탐색을 하지 않은 결과에는 칸이 없다.
+   * 배치로 얻은 차이는 `notes`에도 문장으로 실린다 — 화면은 그 메모를 그대로 보인다.
+   */
+  placement?: PlacementResult | null;
+}
+
+/** 한 멤버 조합의 배치 탐색 결과(루트 src/core/search.mjs의 pickBestPlacement). */
+export interface PlacementResult {
+  /** 1단계 배치가 아닌 다른 배치가 가장 좋았나. */
+  changed: boolean;
+  /** 바꾼 것(문장). */
+  changes: string[];
+  original_members: string[];
+  original_total_damage: number;
+  /** 1단계 배치 대비 총딜 비율(1 이상). 1단계 총딜이 0이면 null. */
+  gain_ratio: number | null;
+  variants: { total: number; simulated: number; skipped: number; failed: number };
+}
+
+/** 추천의 탐색 요약(루트 src/core/candidates.mjs의 suggestSquads). 정본은 docs/data-model.md §배치 탐색. */
+export interface SearchSummary {
+  /** 배치 탐색(2단계)을 했나. */
+  refine: boolean;
+  /** 전체 시뮬 횟수의 상한. */
+  budget: number;
+  refine_top: number | null;
+  /** 엔진에 맡긴 요청 수(1단계 + 2단계). 예산을 넘지 않는다. */
+  sims: number;
+  stage1: { requested: number; skipped: number };
+  stage2: { combos: number; variants: number; requested: number; skipped: number; improved: number } | null;
+  best_stage1_total: number | null;
+  best_total: number | null;
+}
+
+/** 추천이 엔진 배치를 맡기기 직전에 알리는 진행 상황(suggestSquads의 `deps.onStage`). */
+export interface SearchStage {
+  /** 1 = 멤버 조합, 2 = 배치 변형. */
+  stage: 1 | 2;
+  stages: 1 | 2;
+  /** 이번 단계에 맡기는 요청 수. */
+  requests: number;
+  /** 이 단계 전까지 쓴 시뮬 횟수. */
+  used: number;
+  budget: number;
 }
 
 /** 시뮬 전에 걸러진 편성(미보유·중복·인원 수·모르는 이름). */
@@ -64,6 +109,8 @@ export interface SuggestionSummary {
   generated: number;
   simulated: number;
   shown: number;
+  /** 탐색 요약(시뮬 횟수·예산·단계별 건수). 배치 탐색이 생기기 전의 결과 파일에는 없다. */
+  search?: SearchSummary;
 }
 
 export interface CompareReport {

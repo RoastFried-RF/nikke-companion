@@ -1,10 +1,13 @@
 // 후보 편성 생성: 보유 니케 → 버스트 1·2·3단계를 갖춘 5인 편성 몇 개.
-// 엔진을 부르지 않는다. 전수 탐색도 아니다 — 무엇을 기준으로 줄였는지는 결과의 caveats에 적는다.
-// 형식 설명은 docs/data-model.md §후보 생성.
+// 생성(generateCandidates)은 엔진을 부르지 않는다. 전수 탐색도 아니다 — 무엇을 기준으로 줄였는지는 결과의 caveats에 적는다.
+// 추천(suggestSquads)은 후보를 엔진으로 계산하고(1단계), 상위 조합의 배치를 바꿔 다시 계산한다(2단계 — 변형 규칙은 search.mjs).
+// 형식 설명은 docs/data-model.md §후보 생성·§배치 탐색.
 import { validateAccount, unconfirmedFields } from './account.mjs';
 import { compareSquads, InputError, SQUAD_SIZE } from './compare.mjs';
 import { engineAccess } from './runtime.mjs';
+import { DEFAULT_BUDGET, DEFAULT_REFINE_TOP, pickBestPlacement, planRefinement, variantName } from './search.mjs';
 
+export { DEFAULT_BUDGET, DEFAULT_REFINE_TOP };
 export const DEFAULT_LIMIT = 30;
 export const DEFAULT_TOP = 5;
 /** 단계별로 후보 풀에 남기는 인원. 조합 수가 수백 개를 넘지 않게 잡은 값이다. */
@@ -155,7 +158,7 @@ export function generateCandidates(account, catalog, options = {}) {
         ? `조건에 맞는 조합 ${found.length}개 중 투자 점수 합이 높은 ${kept.length}개만 후보로 남겼다 (limit ${limit}).`
         : `조건에 맞는 조합 ${found.length}개를 모두 후보로 썼다 (limit ${limit}).`,
     );
-    caveats.push('배치는 1→2→3단계 순, 같은 단계 안에서는 투자 점수 순이다. 다른 배치 순서와 버스트 쿨타임 회전은 따로 비교하지 않았다.');
+    caveats.push('후보의 배치는 조합마다 하나만 만든다: 1→2→3단계 순, 같은 단계 안에서는 투자 점수 순이다. 다른 배치는 추천의 배치 탐색(2단계)이 다룬다.');
     if (usable.some((u) => u.stage === ANY_STAGE)) caveats.push('어느 단계에서나 버스트를 쓰는 니케는 비어 있는 단계 하나를 채우는 것으로 봤다.');
     const unconfirmed = usable.filter((u) => unconfirmedFields(account, u.name).length).map((u) => u.name);
     if (unconfirmed.length) caveats.push(`미확인 칸은 투자 점수에서 미육성으로 셌다: ${unconfirmed.join(', ')}.`);
@@ -180,16 +183,46 @@ export function generateCandidates(account, catalog, options = {}) {
   };
 }
 
+/** 두 번의 엔진 배치가 남긴 캐시 통계를 더한다. 둘 다 캐시를 쓰지 않았으면 null. */
+function mergeCacheStats(first, second) {
+  if (!first || !second) return first ?? second ?? null;
+  return {
+    hits: first.hits + second.hits,
+    misses: first.misses + second.misses,
+    stored: first.stored + second.stored,
+    warnings: [...new Set([...(first.warnings ?? []), ...(second.warnings ?? [])])],
+  };
+}
+
 /**
- * 계정 + 전투 조건 → 후보 생성 → 엔진 비교 → 상위 top개.
- * 결과는 compareSquads의 비교 결과에 `suggestion`(생성 요약)과 생성 기준 caveats를 더한 것이다.
+ * 계정 + 전투 조건 → 후보 생성 → 엔진 비교 → 상위 top개. 탐색은 두 단계다(형식은 docs/data-model.md §배치 탐색).
+ *
+ *   1단계  멤버 조합: generateCandidates가 만든 후보(조합마다 배치 하나)를 계산한다.
+ *   2단계  배치: 1단계 총딜 상위 `refineTop`개 조합에만, 엔진 문서에 근거한 배치 변형(src/core/search.mjs)을
+ *          만들어 다시 계산한다. 조합마다 원래 배치(1단계 결과)를 언제나 후보에 넣으므로 2단계 뒤의 최고 총딜은
+ *          1단계 최고 이상이다. 순위에는 조합마다 가장 좋은 배치 하나만 남기고, 배치로 얻은 차이를 메모로 남긴다.
+ *
+ * 시뮬 예산(`budget`)은 엔진에 맡기는 요청 수(1단계 + 2단계)의 상한이다 — 캐시에서 채워져 엔진이 실제로 돌지
+ * 않은 요청도 센다(같은 입력이면 캐시가 차 있든 비어 있든 같은 결과가 나오게). 예산이 모자라 건너뛴 것은
+ * caveats와 `suggestion.search`에 몇 개인지 적는다.
+ *
+ * 결과는 compareSquads의 비교 결과에 `suggestion`(생성·탐색 요약)과 생성 기준 caveats를 더한 것이다.
  * @param {{account: object, condition: object}} input
- * @param {{limit?: number, top?: number, stageCaps?: object}} [options]
- * @param {object} [deps] compareSquads와 같다
+ * @param {{limit?: number, top?: number, stageCaps?: object, refine?: boolean, budget?: number, refineTop?: number}} [options]
+ *   `refine`(기본 true)을 끄면 1단계만 한다. `budget` 기본 120, `refineTop` 기본 5.
+ * @param {object} [deps] compareSquads와 같다. 더해서 `onStage({stage, stages, requests, used, budget})` —
+ *   엔진 배치를 맡기기 직전에 부른다(진행 표시용. `used`는 그 전까지 쓴 시뮬 횟수)
  */
 export async function suggestSquads({ account, condition }, options = {}, deps = {}) {
   const top = options.top ?? DEFAULT_TOP;
   if (!isPositiveInt(top)) throw new InputError('추천 옵션이 잘못됐다', [{ path: '/top', message: 'top은 1 이상의 정수여야 한다' }]);
+  const refine = options.refine ?? true;
+  if (typeof refine !== 'boolean') throw new InputError('추천 옵션이 잘못됐다', [{ path: '/refine', message: 'refine은 true 또는 false여야 한다' }]);
+  const budget = options.budget ?? DEFAULT_BUDGET;
+  if (!isPositiveInt(budget)) throw new InputError('추천 옵션이 잘못됐다', [{ path: '/budget', message: 'budget은 1 이상의 정수여야 한다' }]);
+  const refineTop = options.refineTop ?? DEFAULT_REFINE_TOP;
+  if (!isPositiveInt(refineTop)) throw new InputError('추천 옵션이 잘못됐다', [{ path: '/refineTop', message: 'refineTop은 1 이상의 정수여야 한다' }]);
+
   const catalog = await engineAccess(deps).catalog();
   const a = validateAccount(account, catalog);
   if (!a.ok) throw new InputError('계정 상태가 잘못됐다', a.errors);
@@ -198,14 +231,95 @@ export async function suggestSquads({ account, condition }, options = {}, deps =
   if (generated.squads.length === 0) {
     throw new InputError('후보 편성이 없다', generated.caveats.map((message) => ({ path: '/account/nikkes', message })));
   }
+  const onStage = typeof deps.onStage === 'function' ? deps.onStage : () => {};
+  const stages = refine ? 2 : 1;
 
-  const report = await compareSquads({ account, condition, squads: generated.squads }, { ...deps, catalog });
+  // ── 1단계: 멤버 조합. 후보는 투자 점수 합 순이라, 예산이 모자라면 뒤쪽 후보를 건너뛴다.
+  const stage1Squads = generated.squads.slice(0, budget);
+  const stage1Skipped = generated.squads.length - stage1Squads.length;
+  onStage({ stage: 1, stages, requests: stage1Squads.length, used: 0, budget });
+  const report = await compareSquads({ account, condition, squads: stage1Squads }, { ...deps, catalog });
   const simulated = report.ranking.length;
+  const bestStage1 = report.ranking[0]?.total_damage ?? null;
+
+  // ── 2단계: 상위 조합의 배치 변형.
+  let stage2 = null;
+  if (refine) {
+    const membersOf = new Map(stage1Squads.map((s) => [s.name, s.members]));
+    const targets = report.ranking.slice(0, refineTop);
+    const planned = planRefinement(
+      targets.map((r) => ({ name: r.name, members: membersOf.get(r.name) })),
+      catalog,
+      budget - stage1Squads.length,
+    );
+    const computed = new Map();
+    if (planned.requested > 0) {
+      const variantSquads = planned.plan.flatMap((p) => p.selected.map((v, i) => ({ name: variantName(p.name, i + 1), members: v.members })));
+      onStage({ stage: 2, stages, requests: variantSquads.length, used: stage1Squads.length, budget });
+      const second = await compareSquads({ account, condition, squads: variantSquads }, { ...deps, catalog });
+      for (const r of second.ranking) computed.set(r.name, r);
+      report.rejected = [...report.rejected, ...second.rejected];
+      report.failed = [...report.failed, ...second.failed];
+      report.cache = mergeCacheStats(report.cache, second.cache);
+    }
+    const refined = new Map(targets.map((r, i) => [r.name, pickBestPlacement(r, planned.plan[i], computed)]));
+    // 1단계 순위 순서에서 시작해 다시 정렬한다(안정 정렬) — 같은 총딜이면 1단계 순서를 지킨다.
+    report.ranking = report.ranking.map((r) => refined.get(r.name) ?? { ...r, placement: null });
+    report.ranking.sort((x, y) => y.total_damage - x.total_damage);
+    const best = report.ranking[0]?.total_damage ?? 0;
+    report.ranking.forEach((r, i) => {
+      r.rank = i + 1;
+      r.relative_to_best = best > 0 ? r.total_damage / best : 0;
+    });
+    stage2 = {
+      combos: targets.length,
+      variants: planned.total,
+      requested: planned.requested,
+      skipped: planned.skipped,
+      improved: [...refined.values()].filter((r) => r.placement.changed).length,
+    };
+  }
+
   report.ranking = report.ranking.slice(0, top);
-  report.suggestion = { ...generated.summary, simulated, top, shown: report.ranking.length };
+  const sims = stage1Squads.length + (stage2?.requested ?? 0);
+  report.suggestion = {
+    ...generated.summary,
+    simulated,
+    top,
+    shown: report.ranking.length,
+    search: {
+      refine,
+      budget,
+      refine_top: refine ? refineTop : null,
+      sims,
+      stage1: { requested: stage1Squads.length, skipped: stage1Skipped },
+      stage2,
+      best_stage1_total: bestStage1,
+      best_total: report.ranking[0]?.total_damage ?? null,
+    },
+  };
+
+  const searchCaveats = [];
+  if (stage1Skipped > 0) {
+    searchCaveats.push(`시뮬 예산 ${budget}건이 모자라 후보 ${stage1Skipped}개(투자 점수 합이 낮은 쪽)를 계산하지 못했다.`);
+  }
+  if (stage2) {
+    searchCaveats.push(
+      `배치 탐색(2단계): 1단계 총딜 상위 ${stage2.combos}개 조합에만, 같은 버스트 단계 안의 순서와 3번 자리(카메라)를 바꾼 배치 ` +
+        `${stage2.requested}개를 더 계산했다(근거: 엔진 문서 GAMEPLAY.md §버스트 사용 순서와 배치, CONTROL.md §카메라). ` +
+        '모든 순열을 본 것이 아니고, 순위에는 조합마다 가장 좋은 배치 하나만 남겼다.',
+    );
+    if (stage2.skipped > 0) {
+      searchCaveats.push(`시뮬 예산 ${budget}건이 모자라 배치 변형 ${stage2.variants}개 중 ${stage2.skipped}개를 계산하지 못했다.`);
+    }
+    searchCaveats.push('누가 버스트를 쓰지 않을지 같은 운용 지정, 스킬로 버스트 단계가 바뀌는 니케, 무기 변경으로 차지형이 되는 니케는 배치 탐색에서 따로 보지 않았다.');
+  } else {
+    searchCaveats.push('배치 탐색(2단계)을 하지 않았다 — 조합마다 생성기가 만든 배치 하나만 계산했다.');
+  }
   report.caveats = [
     ...report.caveats,
     ...generated.caveats,
+    ...searchCaveats,
     simulated > report.ranking.length
       ? `후보 ${simulated}개를 계산해 총딜 상위 ${report.ranking.length}개만 표시한다.`
       : `계산한 후보 ${simulated}개를 모두 표시한다.`,

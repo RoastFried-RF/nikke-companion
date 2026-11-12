@@ -192,9 +192,10 @@ function fakeEngine(log = []) {
 }
 const now = () => new Date('2026-11-12T00:00:00Z');
 
+// 1단계(멤버 조합)만 본다 — 배치 탐색(2단계)을 끈다. 2단계는 search.test.mjs가 확인한다.
 test('suggest: 후보를 엔진으로 비교해 총딜 상위 top개만 남기고, 생성 기준을 결과에 싣는다', async () => {
   const log = [];
-  const report = await suggestSquads({ account: big, condition }, { limit: 8, top: 3 }, { catalog, runBatch: fakeEngine(log), now });
+  const report = await suggestSquads({ account: big, condition }, { limit: 8, top: 3, refine: false }, { catalog, runBatch: fakeEngine(log), now });
   assert.equal(log.length, 8, '후보 수만큼만 엔진을 부른다');
   for (const req of log) for (const m of req.squad) assert.ok(Object.hasOwn(big.nikkes, m), m);
   assert.deepEqual(report.ranking.map((r) => [r.rank, r.name, r.total_damage]), [[1, '후보 8', 8000], [2, '후보 7', 7000], [3, '후보 6', 6000]]);
@@ -221,6 +222,9 @@ test('suggest: 후보를 만들 수 없거나 계정·옵션이 잘못되면 엔
   await assert.rejects(suggestSquads({ account: { ...big, schema_version: 9 }, condition }, {}, deps), InputError);
   await assert.rejects(suggestSquads({ account: accountOf({ ...big.nikkes, '없는 니케': {} }), condition }, {}, deps), InputError);
   await assert.rejects(suggestSquads({ account: big, condition }, { top: 0 }, deps), InputError);
+  for (const bad of [{ budget: 0 }, { budget: 1.5 }, { budget: '120' }, { refine: 'yes' }, { refineTop: 0 }]) {
+    await assert.rejects(suggestSquads({ account: big, condition }, bad, deps), InputError, JSON.stringify(bad));
+  }
   await assert.rejects(suggestSquads({ account: big, condition: { ...condition, boss: '없는 보스' } }, {}, deps), InputError);
   assert.equal(log.length, 0);
 });

@@ -2,9 +2,10 @@
 // 엔진 실행은 가짜다. 후보 생성·검증·순위는 루트의 실제 계산 코드(src/core)가 한다.
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ComputeError, defaultDeps, runCompare, runSuggest, type ComputeDeps } from '../src/lib/compute';
+import { suggestSquads } from '@core/candidates.mjs';
+import { ComputeError, DEFAULT_BUDGET, defaultDeps, runCompare, runSuggest, type ComputeDeps } from '../src/lib/compute';
 import { simCache, tauriRuntime } from '../src/lib/runtime';
-import type { EngineRequest } from '../src/types';
+import type { EngineRequest, SearchStage } from '../src/types';
 import {
   ACCOUNT_PATH,
   catalog,
@@ -25,7 +26,10 @@ afterEach(() => {
   simCache.clear();
 });
 
-const suggestInput = { accountPath: ACCOUNT_PATH, conditionPath: CONDITION_PATH, limit: 6, top: 3 };
+// 아래의 추천 테스트는 1단계(멤버 조합)의 길을 본다 — 배치 탐색(2단계)을 끈다. 2단계는 맨 아래 「배치 탐색과 시뮬 예산」이 본다.
+const suggestInput = { accountPath: ACCOUNT_PATH, conditionPath: CONDITION_PATH, limit: 6, top: 3, refine: false };
+/** 화면의 기본값처럼 배치 탐색을 켠 추천. */
+const refineInput = { accountPath: ACCOUNT_PATH, conditionPath: CONDITION_PATH, limit: 6, top: 6 };
 const compareInput = { accountPath: ACCOUNT_PATH, conditionPath: CONDITION_PATH, squadsPath: SQUADS_PATH };
 const failure = (p: Promise<unknown>) =>
   p.then(
@@ -260,6 +264,96 @@ describe('시뮬 결과 캐시 (메모리 저장소)', () => {
     expect(seen.batches).toHaveLength(2);
     expect(seen.cmds).not.toContain('engine_version');
     expect(simCache.size).toBe(0);
+  });
+});
+
+describe('배치 탐색과 시뮬 예산 (추천의 2단계)', () => {
+  const comboKey = (members: string[]) => [...members].sort().join('|');
+
+  it('CLI와 같은 함수(suggestSquads)를 쓴다 — 같은 입력이면 같은 문서다', async () => {
+    const viaApp = await runSuggest({ ...refineInput, budget: 20 }, { runtime: fakeRuntime(), readJson, now });
+    const direct = await suggestSquads(
+      { account: (await readJson(ACCOUNT_PATH)) as object, condition: (await readJson(CONDITION_PATH)) as object },
+      { limit: 6, top: 6, budget: 20 },
+      { runtime: fakeRuntime(), now },
+    );
+    expect(viaApp).toEqual(direct);
+    // 다시 실행해도 같다.
+    expect(await runSuggest({ ...refineInput, budget: 20 }, { runtime: fakeRuntime(), readJson, now })).toEqual(viaApp);
+  });
+
+  it('기본으로 배치 탐색을 하고, 엔진에 맡기는 요청은 예산을 넘지 않는다', async () => {
+    const runtime = fakeRuntime();
+    const report = await runSuggest(refineInput, { runtime, readJson, now });
+    // 엔진 배치는 두 번: 1단계 멤버 조합, 2단계 배치 변형.
+    expect(runtime.calls).toEqual(['loadCatalog', 'runBatch', 'runBatch']);
+    expect(runtime.batches[0]).toHaveLength(6);
+    const sims = runtime.batches[0].length + runtime.batches[1].length;
+    expect(sims).toBeLessThanOrEqual(DEFAULT_BUDGET);
+    expect(report.suggestion?.search).toMatchObject({ refine: true, budget: DEFAULT_BUDGET, sims, stage1: { requested: 6, skipped: 0 } });
+    expect(report.suggestion?.search?.stage2?.requested).toBe(runtime.batches[1].length);
+
+    // 2단계는 1단계 상위 5개 조합의 멤버로만 만든 배치다.
+    const stage1 = await runSuggest({ ...refineInput, refine: false }, { runtime: fakeRuntime(), readJson, now });
+    const top5 = new Set(stage1.ranking.slice(0, 5).map((r) => comboKey(r.members.map((m) => m.name))));
+    for (const request of runtime.batches[1]) expect(top5).toContain(comboKey(request.squad as string[]));
+
+    // 조합마다 한 줄, 총딜은 1단계 이상, 2단계 대상에는 배치 메모가 붙는다.
+    expect(new Set(report.ranking.map((r) => comboKey(r.members.map((m) => m.name)))).size).toBe(report.ranking.length);
+    const before = new Map(stage1.ranking.map((r) => [r.name, r.total_damage]));
+    for (const r of report.ranking) {
+      expect(r.total_damage).toBeGreaterThanOrEqual(before.get(r.name) as number);
+      if (r.placement) {
+        expect(r.placement.gain_ratio).toBe(r.total_damage / r.placement.original_total_damage);
+        expect(r.notes.filter((n) => n.startsWith('배치 탐색:'))).toHaveLength(1);
+      }
+    }
+    expect(report.ranking.filter((r) => r.placement)).toHaveLength(5);
+    expect(report.ranking[0].total_damage).toBeGreaterThanOrEqual(stage1.ranking[0].total_damage);
+    // 가짜 엔진은 자리마다 값이 달라 배치를 바꾸면 실제로 더 높아진다.
+    expect(report.suggestion?.search?.stage2?.improved).toBeGreaterThan(0);
+  });
+
+  it('예산이 모자라면 그만큼만 계산하고 못 본 수를 적는다. 단계마다 진행 상황을 알린다', async () => {
+    const runtime = fakeRuntime();
+    const stages: SearchStage[] = [];
+    const report = await runSuggest({ ...refineInput, budget: 16 }, { runtime, readJson, now, onStage: (s) => stages.push(s) });
+    expect(runtime.batches.map((b) => b.length)).toEqual([6, 10]);
+    expect(stages).toEqual([
+      { stage: 1, stages: 2, requests: 6, used: 0, budget: 16 },
+      { stage: 2, stages: 2, requests: 10, used: 6, budget: 16 },
+    ]);
+    const search = report.suggestion?.search;
+    expect(search?.sims).toBe(16);
+    expect(search?.stage2?.skipped).toBeGreaterThan(0);
+    expect(report.caveats).toContain(
+      `시뮬 예산 16건이 모자라 배치 변형 ${search?.stage2?.variants}개 중 ${search?.stage2?.skipped}개를 계산하지 못했다.`,
+    );
+
+    const invalid = await failure(runSuggest({ ...refineInput, budget: 0 }, { runtime: fakeRuntime(), readJson, now }));
+    expect((invalid as Error).message).toMatch(/^입력 오류 — .*budget은 1 이상의 정수여야 한다/);
+  });
+
+  it('캐시가 차 있어도 예산과 결과는 같다 — 두 번째 실행은 엔진을 부르지 않는다', async () => {
+    const calls: string[] = [];
+    mockIPC((cmd, args) => {
+      const payload = (args ?? {}) as Record<string, unknown>;
+      calls.push(cmd);
+      if (cmd === 'read_json_file') return documents[payload.path as string];
+      if (cmd === 'engine_catalog') return catalog;
+      if (cmd === 'engine_version') return FAKE_EVALUATOR;
+      if (cmd === 'engine_run_batch') return (payload.requests as EngineRequest[]).map((r) => fakeRow(r));
+      throw `모르는 명령: ${cmd}`;
+    });
+    const first = await runSuggest({ ...refineInput, budget: 16 }, { ...defaultDeps, now });
+    expect(first.cache).toEqual({ hits: 0, misses: 16, stored: 16, warnings: [] });
+    expect(calls.filter((c) => c === 'engine_run_batch')).toHaveLength(2);
+
+    const second = await runSuggest({ ...refineInput, budget: 16 }, { ...defaultDeps, now });
+    expect(second.cache).toEqual({ hits: 16, misses: 0, stored: 0, warnings: [] });
+    expect(calls.filter((c) => c === 'engine_run_batch')).toHaveLength(2);
+    expect({ ...second, cache: null }).toEqual({ ...first, cache: null });
+    expect(second.suggestion?.search?.sims).toBe(16);
   });
 });
 

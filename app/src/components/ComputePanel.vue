@@ -3,8 +3,8 @@
 // 계산은 루트의 src/core가 하고(lib/compute.ts), 엔진 프로세스는 Rust가 띄운다. 결과는 부모가 그린다.
 import { onBeforeUnmount, reactive, ref } from 'vue';
 import { errorMessage, onEngineProgress, pickJsonFile } from '../lib/backend';
-import { DEFAULT_LIMIT, DEFAULT_TOP, defaultDeps, runCompare, runSuggest, type ComputeDeps } from '../lib/compute';
-import type { CompareReport, EngineProgress } from '../types';
+import { DEFAULT_BUDGET, DEFAULT_LIMIT, DEFAULT_TOP, defaultDeps, runCompare, runSuggest, type ComputeDeps } from '../lib/compute';
+import type { CompareReport, EngineProgress, SearchStage } from '../types';
 
 type Mode = 'suggest' | 'compare';
 type Field = 'account' | 'condition' | 'squads';
@@ -55,10 +55,16 @@ const mode = ref<Mode>(remembered('mode') === 'compare' ? 'compare' : 'suggest')
 /** 빈 칸이면 계산 코드의 기본값을 쓴다. 값의 범위는 계산 코드가 확인한다. */
 const limit = ref<number | ''>('');
 const top = ref<number | ''>('');
+/** 전체 시뮬 횟수의 상한(추천의 1단계 + 2단계). 빈 칸이면 계산 코드의 기본값. */
+const budget = ref<number | ''>('');
+/** 상위 조합의 배치 순서도 탐색하나(추천의 2단계). 계산 코드의 기본값과 같이 켜 둔다. */
+const refine = ref(remembered('refine') !== 'off');
 
 const computing = ref(false);
 /** 엔진에 넘긴 요청 수와 끝난 수. 엔진을 부르기 전에는 null. */
 const progress = ref<EngineProgress | null>(null);
+/** 추천이 지금 어느 단계인지와 쓴 예산(계산 코드가 단계마다 알려 준다). 비교에서는 null. */
+const stage = ref<SearchStage | null>(null);
 const elapsed = ref(0);
 let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -82,6 +88,7 @@ async function run(): Promise<void> {
   if (computing.value || props.disabled) return;
   computing.value = true;
   progress.value = null;
+  stage.value = null;
   elapsed.value = 0;
   emit('start');
 
@@ -110,17 +117,30 @@ async function run(): Promise<void> {
           return defaultDeps.runtime.runBatch(requests, options);
         },
       },
+      // 단계가 바뀌면 앞 단계의 건수를 지운다. 이 단계의 요청이 모두 캐시에 있으면 엔진을 부르지 않는다.
+      onStage: (s) => {
+        stage.value = s;
+        progress.value = null;
+      },
     };
     const report =
       mode.value === 'suggest'
         ? await runSuggest(
-            { accountPath: paths.account, conditionPath: paths.condition, limit: count(limit.value), top: count(top.value) },
+            {
+              accountPath: paths.account,
+              conditionPath: paths.condition,
+              limit: count(limit.value),
+              top: count(top.value),
+              refine: refine.value,
+              budget: count(budget.value),
+            },
             deps,
           )
         : await runCompare({ accountPath: paths.account, conditionPath: paths.condition, squadsPath: paths.squads }, deps);
     remember('account', paths.account.trim());
     remember('condition', paths.condition.trim());
     if (mode.value === 'compare') remember('squads', paths.squads.trim());
+    else remember('refine', refine.value ? 'on' : 'off');
     remember('mode', mode.value);
     emit('done', report);
   } catch (e) {
@@ -130,7 +150,14 @@ async function run(): Promise<void> {
     stopTimer();
     computing.value = false;
     progress.value = null;
+    stage.value = null;
   }
+}
+
+/** 진행 줄 앞에 붙이는 단계 이름. 배치 탐색을 끈 추천(단계가 하나)과 비교에서는 붙이지 않는다. */
+function stageLabel(s: SearchStage | null): string {
+  if (!s || s.stages < 2) return '';
+  return `${s.stage}/${s.stages}단계(${s.stage === 1 ? '멤버 조합' : '배치'}) `;
 }
 
 onBeforeUnmount(stopTimer);
@@ -177,7 +204,7 @@ onBeforeUnmount(stopTimer);
       </div>
     </template>
 
-    <div class="compute__row">
+    <div class="compute__row compute__row--wrap">
       <template v-if="mode === 'suggest'">
         <label class="compute__count">
           후보
@@ -205,6 +232,23 @@ onBeforeUnmount(stopTimer);
             data-testid="suggest-top"
           />
         </label>
+        <label class="compute__count" title="엔진 시뮬 횟수의 상한 (멤버 조합 + 배치 탐색)">
+          예산
+          <input
+            v-model.number="budget"
+            type="number"
+            min="1"
+            step="1"
+            :placeholder="String(DEFAULT_BUDGET)"
+            :disabled="computing"
+            aria-label="전체 시뮬 횟수의 상한"
+            data-testid="suggest-budget"
+          />
+        </label>
+        <label class="compute__check" title="상위 조합의 배치 순서도 바꿔 가며 계산한다">
+          <input v-model="refine" type="checkbox" :disabled="computing" data-testid="suggest-refine" />
+          배치 탐색
+        </label>
       </template>
       <span class="compute__spacer"></span>
       <button class="compute__run" type="button" :disabled="computing || disabled" data-testid="run-compute" @click="run">
@@ -214,7 +258,7 @@ onBeforeUnmount(stopTimer);
 
     <p v-if="computing" class="compute__progress" role="status" aria-live="polite" data-testid="compute-progress">
       <template v-if="progress">
-        엔진 계산 중 — {{ progress.done }}/{{ progress.total }}건 끝남
+        엔진 계산 중 — {{ stageLabel(stage) }}{{ progress.done }}/{{ progress.total }}건 끝남
         <span
           class="compute__bar"
           role="progressbar"
@@ -225,7 +269,12 @@ onBeforeUnmount(stopTimer);
           <span class="compute__bar-fill" :style="{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }"></span>
         </span>
       </template>
+      <template v-else-if="stage">{{ stageLabel(stage) }}계산 준비 중</template>
       <template v-else>입력 파일과 엔진 데이터를 읽는 중</template>
+      <!-- 예산은 엔진에 맡긴 요청 수로 센다(캐시에서 채운 요청도 센다) — 계산 코드가 단계마다 알려 준 값이다. -->
+      <span v-if="stage" class="compute__budget" data-testid="compute-budget">
+        예산 {{ stage.budget }}건 중 {{ stage.used + stage.requests }}건
+      </span>
       <span class="compute__elapsed" data-testid="compute-elapsed">{{ elapsed }}초</span>
     </p>
   </section>
@@ -318,20 +367,41 @@ onBeforeUnmount(stopTimer);
   background: transparent;
 }
 
+.compute__row--wrap {
+  flex-wrap: wrap;
+}
+
+.compute__check {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.compute__budget {
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .compute__spacer {
   flex: 1;
 }
 
 .compute__progress {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   margin: 0;
   color: var(--accent);
 }
 
 .compute__bar {
   flex: 1;
+  min-width: 48px;
   height: 4px;
   border-radius: 2px;
   background: var(--line);

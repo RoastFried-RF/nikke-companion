@@ -24,6 +24,8 @@ node src/cli.mjs compare --account data/samples/account.sample.json --condition 
 
 `compare`·`suggest`·`growth`는 시뮬 결과를 `data/cache/sim/`(gitignore)에 캐시한다. `--no-cache`로 끄고, 폴더를 지우면
 비워진다(`docs/data-model.md` §시뮬 결과 캐시).
+`suggest`는 상위 조합의 배치 순서도 탐색한다(2단계). `--no-refine`으로 끄고, `--budget <시뮬 횟수>`(기본 120)로 전체
+시뮬 횟수를 묶는다(`docs/data-model.md` §배치 탐색).
 
 데스크톱 앱(`app/`, Tauri v2 + Vue 3 — 자체 package.json. 자세한 것은 `app/README.md`):
 

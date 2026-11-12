@@ -23,6 +23,23 @@ export function cacheLines(cache) {
   ];
 }
 
+/**
+ * 추천의 탐색 요약 한 줄(`suggestion.search` — docs/data-model.md §배치 탐색): 쓴 시뮬 횟수와 예산, 단계별 건수,
+ * 예산이 모자라 못 본 것. 칸이 없으면(배치 탐색이 생기기 전의 문서) 빈 문자열. 오버레이도 같은 문장을 쓴다.
+ */
+export function searchLine(search) {
+  if (!search) return '';
+  const parts = [`1단계 조합 ${search.stage1.requested}건`];
+  if (search.stage2) parts.push(`2단계 배치 ${search.stage2.requested}건`);
+  let line = `탐색: 시뮬 ${search.sims}건 / 예산 ${search.budget}건 (${parts.join(' + ')}${search.stage2 ? '' : ' · 배치 탐색 끔'})`;
+  const missed = [];
+  if (search.stage1.skipped > 0) missed.push(`후보 ${search.stage1.skipped}개`);
+  if (search.stage2?.skipped > 0) missed.push(`배치 변형 ${search.stage2.skipped}개`);
+  if (missed.length) line += ` · 예산이 모자라 못 본 것: ${missed.join(', ')}`;
+  if (search.stage2) line += ` · 배치를 바꾼 조합 ${search.stage2.improved}/${search.stage2.combos}개`;
+  return line;
+}
+
 function headerLines(report) {
   const acct = report.account;
   return [
@@ -103,6 +120,8 @@ export function renderReport(report) {
   if (report.suggestion) {
     const s = report.suggestion;
     out.push(`후보: 조합 ${s.considered}개 중 ${s.generated}개 생성 → ${s.simulated}개 계산 → 상위 ${s.shown}개 표시`);
+    const line = searchLine(s.search);
+    if (line) out.push(line);
   }
   out.push('');
 

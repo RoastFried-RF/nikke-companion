@@ -34,10 +34,11 @@ test('실제 카탈로그와 샘플 계정으로 만든 후보는 모두 조건�
   assert.deepEqual(generateCandidates(account, catalog), r);
 });
 
+// 1단계(멤버 조합)만 본다 — `--no-refine`. 배치 탐색(2단계)은 아래의 다른 테스트가 실제 엔진으로 확인한다.
 test('CLI suggest: 샘플 계정으로 후보를 만들어 실제 엔진으로 비교하고 상위 편성을 출력한다', () => {
   const out = path.join(os.tmpdir(), `nikke-suggest-${process.pid}.json`);
   try {
-    const run = cli('--account', ACCOUNT, '--condition', CONDITION, '--limit', '6', '--top', '3', '--json', out);
+    const run = cli('--no-refine', '--account', ACCOUNT, '--condition', CONDITION, '--limit', '6', '--top', '3', '--json', out);
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /\[검증용 데이터\]/);
     assert.match(run.stdout, /1위 {2}후보 \d+ {2}총딜 /);
@@ -70,10 +71,81 @@ test('CLI suggest: 샘플 계정으로 후보를 만들어 실제 엔진으로 �
   }
 });
 
+test('CLI suggest --refine: 배치 탐색 뒤의 1위 총딜은 --no-refine의 1위 이상이고, 시뮬 횟수는 예산을 넘지 않는다', () => {
+  // 두 실행이 임시 캐시 폴더를 함께 쓴다 — 1단계의 여섯 후보는 한 번만 실제 엔진으로 계산한다(전부 실제 엔진 결과다).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nikke-refine-'));
+  const BUDGET = 16;
+  const run = (name, ...args) => {
+    const out = path.join(dir, `${name}.json`);
+    const r = spawnSync(
+      process.execPath,
+      ['src/cli.mjs', 'suggest', '--cache-dir', path.join(dir, 'cache'), '--account', ACCOUNT, '--condition', CONDITION, '--limit', '6', '--top', '6', '--json', out, ...args],
+      { cwd: ROOT, encoding: 'utf8' },
+    );
+    assert.equal(r.status, 0, r.stderr);
+    return { stdout: r.stdout, report: JSON.parse(fs.readFileSync(out, 'utf8')) };
+  };
+  try {
+    const plain = run('plain', '--no-refine');
+    assert.equal(plain.report.cache.misses, 6, '1단계 후보를 실제 엔진으로 계산했다');
+    assert.equal(plain.report.suggestion.search.stage2, null);
+    assert.match(plain.stdout, /^탐색: 시뮬 6건 \/ 예산 120건 \(1단계 조합 6건 · 배치 탐색 끔\)$/m);
+
+    // --refine은 기본이다(적지 않아도 같다). 예산은 1단계 6건 + 2단계 10건.
+    const refined = run('refined', '--budget', String(BUDGET));
+    const search = refined.report.suggestion.search;
+    assert.equal(search.refine, true);
+    assert.equal(search.budget, BUDGET);
+    assert.ok(search.sims <= BUDGET, `시뮬 ${search.sims}건`);
+    assert.deepEqual(search.stage1, { requested: 6, skipped: 0 });
+    assert.equal(search.stage2.combos, 5);
+    assert.equal(search.stage2.requested, BUDGET - 6);
+    assert.equal(refined.report.cache.hits + refined.report.cache.misses, search.sims, '엔진에 맡긴 요청 수가 곧 시뮬 횟수다');
+    assert.equal(refined.report.cache.misses, search.stage2.requested, '배치 변형은 모두 실제 엔진으로 새로 계산했다');
+    assert.equal(refined.report.failed.length, 0, JSON.stringify(refined.report.failed));
+
+    // 수락 조건: --refine 결과의 1위 총딜 ≥ --no-refine 1위 총딜.
+    assert.ok(refined.report.ranking[0].total_damage >= plain.report.ranking[0].total_damage);
+    assert.equal(search.best_stage1_total, plain.report.ranking[0].total_damage);
+    assert.equal(search.best_total, refined.report.ranking[0].total_damage);
+
+    // 조합마다 한 줄이고, 조합별 총딜은 1단계 이상이다. 2단계 대상에는 배치 메모가 있다.
+    const before = new Map(plain.report.ranking.map((r) => [r.name, r]));
+    assert.equal(new Set(refined.report.ranking.map((r) => [...r.members.map((m) => m.name)].sort().join('|'))).size, refined.report.ranking.length);
+    let refinedCombos = 0;
+    for (const r of refined.report.ranking) {
+      const original = before.get(r.name);
+      assertValidMembers(r.members.map((m) => m.name), r.name);
+      assert.deepEqual(r.members.map((m) => m.name).sort(), original.members.map((m) => m.name).sort(), r.name);
+      assert.ok(r.total_damage >= original.total_damage, r.name);
+      if (r.placement === null) continue;
+      refinedCombos += 1;
+      assert.equal(r.placement.original_total_damage, original.total_damage);
+      assert.deepEqual(r.placement.original_members, original.members.map((m) => m.name));
+      assert.equal(r.placement.changed, r.total_damage > original.total_damage);
+      assert.equal(r.notes.filter((n) => n.startsWith('배치 탐색')).length, 1);
+    }
+    assert.equal(refinedCombos, 5);
+    if (search.stage2.skipped > 0) {
+      assert.ok(refined.report.caveats.some((c) => c.includes(`배치 변형 ${search.stage2.variants}개 중 ${search.stage2.skipped}개를 계산하지 못했다`)));
+    }
+    assert.match(refined.stdout, /^탐색: 시뮬 16건 \/ 예산 16건 \(1단계 조합 6건 \+ 2단계 배치 10건\)/m);
+    assert.match(refined.stdout, /! 배치 탐색: /);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('CLI suggest: 잘못된 인자는 엔진을 부르기 전에 종료 코드 2', () => {
   const badLimit = cli('--account', ACCOUNT, '--condition', CONDITION, '--limit', '0');
   assert.equal(badLimit.status, 2);
   assert.match(badLimit.stderr, /입력 오류.*--limit/);
+  const badBudget = cli('--account', ACCOUNT, '--condition', CONDITION, '--budget', '0');
+  assert.equal(badBudget.status, 2);
+  assert.match(badBudget.stderr, /입력 오류.*--budget/);
+  const both = cli('--account', ACCOUNT, '--condition', CONDITION, '--refine', '--no-refine');
+  assert.equal(both.status, 2);
+  assert.match(both.stderr, /입력 오류.*--refine과 --no-refine을 함께 줄 수 없다/);
   const noCondition = cli('--account', ACCOUNT);
   assert.equal(noCondition.status, 2);
   assert.match(noCondition.stderr, /입력 오류.*--condition/);

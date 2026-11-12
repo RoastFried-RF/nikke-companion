@@ -2,6 +2,7 @@
 // 비교 결과(docs/data-model.md §비교 결과)를 그린다. 수치를 고치거나 다시 계산하지 않는다 —
 // 결과 파일에 있는 값을 서식만 입혀 보여 준다. CLI 표(src/core/render.mjs)와 같은 내용이다.
 import { computed } from 'vue';
+import { searchLine } from '@core/render.mjs';
 import { damageRaw, damageUnit, percent } from '../lib/format';
 import type { CompareReport } from '../types';
 
@@ -37,6 +38,12 @@ const cacheLabel = computed(() => {
   return `적중 ${cache.hits}건 · 엔진 계산 ${cache.misses}건 · 새로 저장 ${cache.stored}건`;
 });
 const cacheWarnings = computed(() => props.report.cache?.warnings ?? []);
+
+/**
+ * 추천의 탐색 요약 한 줄(쓴 시뮬 횟수·예산·단계별 건수·예산으로 못 본 것) — CLI 표와 같은 문장을 루트의
+ * src/core/render.mjs가 만든다. 결과에 칸이 없으면(비교 결과, 옛 추천 결과) 그리지 않는다.
+ */
+const searchLabel = computed(() => searchLine(props.report.suggestion?.search));
 
 const conditionLabel = computed(() => {
   const c = props.report.condition ?? {};
@@ -80,6 +87,7 @@ function barWidth(relative: unknown): string {
         후보: 조합 {{ report.suggestion.considered }}개 중 {{ report.suggestion.generated }}개 생성 →
         {{ report.suggestion.simulated }}개 계산 → 상위 {{ report.suggestion.shown }}개 표시
       </div>
+      <div v-if="searchLabel" class="meta__line" data-testid="search">{{ searchLabel }}</div>
       <details v-if="assumptions.length" class="fold" data-testid="assumptions">
         <summary>가정 {{ assumptions.length }}개</summary>
         <ul class="bullets">

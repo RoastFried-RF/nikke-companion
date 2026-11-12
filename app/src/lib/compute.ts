@@ -2,13 +2,13 @@
 // 계산 규칙은 여기에 없다. suggestSquads·compareSquads에 런타임을 넘겨 부를 뿐이다(CLI의 suggest·compare와 같은 길).
 
 import { withCache } from '@core/cache.mjs';
-import { DEFAULT_LIMIT, DEFAULT_TOP, suggestSquads } from '@core/candidates.mjs';
+import { DEFAULT_BUDGET, DEFAULT_LIMIT, DEFAULT_TOP, suggestSquads } from '@core/candidates.mjs';
 import { compareSquads, InputError } from '@core/compare.mjs';
-import type { CompareReport, EngineRuntime, SimCacheStore } from '../types';
+import type { CompareReport, EngineRuntime, SearchStage, SimCacheStore } from '../types';
 import { errorMessage, readJsonFile } from './backend';
 import { simCache, tauriRuntime } from './runtime';
 
-export { DEFAULT_LIMIT, DEFAULT_TOP };
+export { DEFAULT_BUDGET, DEFAULT_LIMIT, DEFAULT_TOP };
 
 /** 계산에 필요한 바깥 일. 테스트에서 가짜로 바꿔 끼운다. */
 export interface ComputeDeps {
@@ -21,6 +21,11 @@ export interface ComputeDeps {
    * `cache` 통계가 실린다. 주지 않으면 캐시 없이 계산한다(결과의 `cache`는 null). 기본은 메모리 저장소다.
    */
   cache?: SimCacheStore | null;
+  /**
+   * 추천이 엔진 배치를 맡기기 직전에 부른다(1단계 멤버 조합, 2단계 배치 변형) — 진행 표시용.
+   * 계산 코드의 `deps.onStage`로 그대로 넘긴다.
+   */
+  onStage?: (stage: SearchStage) => void;
   now?: () => Date;
 }
 
@@ -33,6 +38,10 @@ export interface SuggestInput {
   limit?: number;
   /** 표시할 상위 편성 수. 주지 않으면 계산 코드의 기본값. */
   top?: number;
+  /** 상위 조합의 배치 순서도 탐색하나(2단계). 주지 않으면 계산 코드의 기본값(켬). */
+  refine?: boolean;
+  /** 전체 시뮬 횟수의 상한(1단계 + 2단계). 주지 않으면 계산 코드의 기본값. */
+  budget?: number;
 }
 
 export interface CompareInput {
@@ -64,17 +73,20 @@ function asComputeError(e: unknown): ComputeError {
 function coreDeps(deps: ComputeDeps): object {
   // 캐시는 주어진 런타임의 바깥을 감싼다 — 런타임의 runBatch는 저장소에 없던 요청만 받는다(진행 건수도 그 수다).
   const runtime = deps.cache ? withCache(deps.runtime, deps.cache) : deps.runtime;
-  return deps.now ? { runtime, now: deps.now } : { runtime };
+  return { runtime, ...(deps.now ? { now: deps.now } : {}), ...(deps.onStage ? { onStage: deps.onStage } : {}) };
 }
 
-/** 계정 + 전투 조건 → 후보 편성 생성 → 엔진 비교 → 상위 편성. */
+/**
+ * 계정 + 전투 조건 → 후보 편성 생성 → 엔진 비교(1단계) → 상위 조합의 배치 탐색(2단계) → 상위 편성.
+ * CLI의 `suggest`와 같은 함수(`suggestSquads`)다 — 배치 변형 규칙과 시뮬 예산도 그 함수가 정한다.
+ */
 export async function runSuggest(input: SuggestInput, deps: ComputeDeps = defaultDeps): Promise<CompareReport> {
   try {
     const account = await readInput(deps, '계정', input.accountPath);
     const condition = await readInput(deps, '전투 조건', input.conditionPath);
     const report = await suggestSquads(
       { account: account as object, condition: condition as object },
-      { limit: input.limit, top: input.top },
+      { limit: input.limit, top: input.top, refine: input.refine, budget: input.budget },
       coreDeps(deps),
     );
     return report as unknown as CompareReport;

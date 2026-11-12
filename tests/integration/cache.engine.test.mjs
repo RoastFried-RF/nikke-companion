@@ -166,7 +166,8 @@ test('CLI: compare·suggest·growth는 기본으로 캐시를 쓰고 표에 한 
     assert.deepEqual(readReport().ranking, growthReport.ranking);
 
     // suggest: 처음에는 계산하고, 다시 돌리면 엔진 없이 같은 순위다.
-    const suggestArgs = ['--account', ACCOUNT, '--condition', CONDITION, '--limit', '4', '--top', '2', '--json', out, '--cache-dir', cacheDir];
+    // 1단계 후보 네 건만 본다(--no-refine). 배치 탐색과 캐시가 함께 도는 것은 suggest.engine.test.mjs가 확인한다.
+    const suggestArgs = ['--no-refine', '--account', ACCOUNT, '--condition', CONDITION, '--limit', '4', '--top', '2', '--json', out, '--cache-dir', cacheDir];
     const suggest = cli('suggest', suggestArgs);
     assert.equal(suggest.status, 0, suggest.stderr);
     const suggestReport = readReport();

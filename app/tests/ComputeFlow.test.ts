@@ -43,8 +43,11 @@ interface PendingBatch {
   fail: (reason: unknown) => void;
 }
 let batches: PendingBatch[] = [];
+/** 엔진 배치를 테스트가 붙들고 있나(`holdEngine`). */
+let held = false;
 
 function holdEngine(): void {
+  held = true;
   api.engineRunBatch.mockImplementation(
     (requests) =>
       new Promise<EngineRow[]>((resolve, reject) => {
@@ -68,6 +71,14 @@ async function fillPaths(w: Wrapper): Promise<void> {
   await at(w, 'condition-path').setValue(CONDITION_PATH);
 }
 
+/**
+ * 배치 탐색(추천의 2단계)을 끈다 — 엔진 배치가 한 번뿐인 1단계의 흐름만 보는 테스트가 쓴다.
+ * 켠 채로의 흐름(배치 두 번, 단계·예산 표시)은 아래 「배치 탐색과 예산」이 본다.
+ */
+async function refineOff(w: Wrapper): Promise<void> {
+  await at(w, 'suggest-refine').setValue(false);
+}
+
 /** 실행 단추만 누른다(계산이 어디까지 갔는지는 기다리지 않는다). */
 async function press(w: Wrapper): Promise<void> {
   await at(w, 'run-compute').trigger('click');
@@ -86,11 +97,16 @@ async function settle(w: Wrapper, engineCalls = Number.POSITIVE_INFINITY): Promi
   await flushPromises();
 }
 
-/** 실행 단추를 누르고, 계산이 엔진에 닿거나 끝날 때까지 기다린다. */
+/**
+ * 실행 단추를 누르고, 계산이 엔진에 닿거나 끝날 때까지 기다린다.
+ * 엔진을 붙들지 않았으면(`holdEngine`을 부르지 않았다) 끝날 때까지 기다린다 — 추천은 엔진 배치가 두 번(멤버 조합,
+ * 배치 변형)일 수 있고 그 사이에 캐시 키를 만드는 진짜 비동기가 끼어, 첫 배치에 닿은 것만으로는 끝난 것이 아니다.
+ */
 async function start(w: Wrapper): Promise<void> {
   const engineCalls = api.engineRunBatch.mock.calls.length;
   await press(w);
   await settle(w, engineCalls);
+  if (!held) await settle(w);
 }
 
 beforeEach(() => {
@@ -98,6 +114,7 @@ beforeEach(() => {
   localStorage.clear();
   simCache.clear(); // 시뮬 결과 캐시는 앱이 켜져 있는 동안 남는다 — 테스트끼리 섞이지 않게 비운다.
   batches = [];
+  held = false;
   api.overlayStatus.mockResolvedValue({ visible: true, click_through: false, shortcut_problems: [] });
   api.startupReportPath.mockResolvedValue(null);
   api.loadReport.mockResolvedValue(loaded);
@@ -136,6 +153,7 @@ describe('추천 실행', () => {
     await fillPaths(w);
     await at(w, 'suggest-limit').setValue('6');
     await at(w, 'suggest-top').setValue('3');
+    await refineOff(w);
     await start(w);
 
     expect(api.readJsonFile.mock.calls.map((c) => c[0])).toEqual([ACCOUNT_PATH, CONDITION_PATH]);
@@ -163,6 +181,7 @@ describe('추천 실행', () => {
     api.loadReport.mockClear();
     await fillPaths(w);
     await at(w, 'suggest-limit').setValue('6');
+    await refineOff(w);
     await start(w);
 
     const progress = at(w, 'compute-progress');
@@ -240,6 +259,103 @@ describe('추천 실행', () => {
   });
 });
 
+describe('배치 탐색과 예산 (추천의 2단계)', () => {
+  it('배치 탐색은 처음부터 켜져 있고, 예산 칸은 계산 코드의 기본값을 보인다', async () => {
+    const w = await render();
+    expect((at(w, 'suggest-refine').element as HTMLInputElement).checked).toBe(true);
+    expect(at(w, 'suggest-budget').attributes('placeholder')).toBe('120');
+    expect((at(w, 'suggest-budget').element as HTMLInputElement).value).toBe('');
+  });
+
+  it('두 단계를 차례로 계산하며 단계와 쓴 예산을 보이고, 결과에 탐색 요약과 배치 메모를 그린다', async () => {
+    holdEngine();
+    const w = await render();
+    await fillPaths(w);
+    await at(w, 'suggest-limit').setValue('6');
+    await at(w, 'suggest-top').setValue('6');
+    await at(w, 'suggest-budget').setValue('16');
+    await start(w);
+
+    // 1단계: 멤버 조합 6건.
+    expect(batches).toHaveLength(1);
+    expect(batches[0].requests).toHaveLength(6);
+    const progress = at(w, 'compute-progress');
+    expect(progress.text()).toContain('엔진 계산 중 — 1/2단계(멤버 조합) 0/6건 끝남');
+    expect(at(w, 'compute-budget').text()).toBe('예산 16건 중 6건');
+    emitProgress({ done: 6, total: 6 });
+    await flushPromises();
+    expect(progress.text()).toContain('1/2단계(멤버 조합) 6/6건 끝남');
+
+    // 2단계: 남은 예산 10건만큼의 배치 변형. 건수는 새 배치에 맞춰 다시 센다.
+    batches[0].finish();
+    await settle(w, 1);
+    expect(batches).toHaveLength(2);
+    expect(batches[1].requests).toHaveLength(10);
+    expect(progress.text()).toContain('엔진 계산 중 — 2/2단계(배치) 0/10건 끝남');
+    expect(at(w, 'compute-budget').text()).toBe('예산 16건 중 16건');
+    expect(w.find('[role="progressbar"]').attributes('aria-valuemax')).toBe('10');
+    emitProgress({ done: 4, total: 10 });
+    await flushPromises();
+    expect(progress.text()).toContain('2/2단계(배치) 4/10건 끝남');
+    expect(at(w, 'run-compute').attributes('disabled')).toBeDefined();
+
+    batches[1].finish();
+    await settle(w);
+    expect(at(w, 'compute-progress').exists()).toBe(false);
+    expect(at(w, 'error').exists()).toBe(false);
+    // 엔진에 맡긴 요청은 예산을 넘지 않는다.
+    expect(batches.reduce((n, b) => n + b.requests.length, 0)).toBe(16);
+    expect(at(w, 'search').text()).toMatch(
+      /^탐색: 시뮬 16건 \/ 예산 16건 \(1단계 조합 6건 \+ 2단계 배치 10건\) · 예산이 모자라 못 본 것: 배치 변형 \d+개 · 배치를 바꾼 조합 \d\/5개$/,
+    );
+    expect(at(w, 'cache').text()).toBe('캐시: 적중 0건 · 엔진 계산 16건 · 새로 저장 16건');
+    // 조합마다 한 줄이고(이름이 겹치지 않는다) 2단계 대상 다섯 조합에 배치 메모가 붙는다.
+    const names = texts(w, 'squad-name');
+    expect(names).toHaveLength(6);
+    expect(new Set(names).size).toBe(6);
+    expect(texts(w, 'note').filter((n) => n.startsWith('배치 탐색:'))).toHaveLength(5);
+    expect(w.text()).toMatch(/시뮬 예산 16건이 모자라 배치 변형 \d+개 중 \d+개를 계산하지 못했다\./);
+  });
+
+  it('배치 탐색으로 고른 1위는 끄고 계산한 1위 이상이다', async () => {
+    const w = await render();
+    await fillPaths(w);
+    await at(w, 'suggest-limit').setValue('6');
+    await refineOff(w);
+    await start(w);
+    const plainBest = at(w, 'total-raw').text();
+    expect(at(w, 'search').text()).toBe('탐색: 시뮬 6건 / 예산 120건 (1단계 조합 6건 · 배치 탐색 끔)');
+    expect(texts(w, 'note').some((n) => n.startsWith('배치 탐색:'))).toBe(false);
+
+    await at(w, 'suggest-refine').setValue(true);
+    await start(w);
+    const number = (text: string) => Number(text.replace(/[^\d]/g, ''));
+    expect(number(at(w, 'total-raw').text())).toBeGreaterThanOrEqual(number(plainBest));
+    expect(api.engineRunBatch.mock.calls.reduce((n, c) => n + c[0].length, 0)).toBeLessThanOrEqual(120);
+  });
+
+  it('배치 탐색을 끈 것을 기억했다가 다음 실행 때 그대로 둔다', async () => {
+    const first = await render();
+    await fillPaths(first);
+    await refineOff(first);
+    await start(first);
+    expect(api.engineRunBatch).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    const second = await render();
+    expect((at(second, 'suggest-refine').element as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('예산이 잘못되면 입력 오류로 알리고 엔진을 부르지 않는다', async () => {
+    const w = await render();
+    await fillPaths(w);
+    await at(w, 'suggest-budget').setValue('0');
+    await start(w);
+    expect(at(w, 'error').text()).toMatch(/^입력 오류 — .*budget은 1 이상의 정수여야 한다/);
+    expect(api.engineRunBatch).not.toHaveBeenCalled();
+  });
+});
+
 describe('비교 실행', () => {
   it('편성 파일 칸은 비교를 고르면 나온다', async () => {
     const w = await render();
@@ -248,6 +364,8 @@ describe('비교 실행', () => {
     await at(w, 'mode-compare').setValue(true);
     expect(at(w, 'squads-path').exists()).toBe(true);
     expect(at(w, 'suggest-limit').exists()).toBe(false);
+    expect(at(w, 'suggest-budget').exists()).toBe(false);
+    expect(at(w, 'suggest-refine').exists()).toBe(false);
     expect(at(w, 'run-compute').text()).toBe('비교 실행');
   });
 
@@ -335,6 +453,7 @@ describe('시뮬 결과 캐시', () => {
     await fillPaths(w);
     await at(w, 'suggest-limit').setValue('6');
     await at(w, 'suggest-top').setValue('3');
+    await refineOff(w);
     await start(w);
     expect(api.engineRunBatch).toHaveBeenCalledTimes(1);
     expect(at(w, 'cache').text()).toBe('캐시: 적중 0건 · 엔진 계산 6건 · 새로 저장 6건');
@@ -353,6 +472,7 @@ describe('시뮬 결과 캐시', () => {
     api.engineVersion.mockResolvedValue({ repo: 'fake/engine', commit: null, dirty: null });
     const w = await render();
     await fillPaths(w);
+    await refineOff(w);
     await start(w);
     await start(w);
     expect(api.engineRunBatch).toHaveBeenCalledTimes(2);

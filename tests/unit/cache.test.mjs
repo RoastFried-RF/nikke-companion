@@ -598,9 +598,19 @@ test('추천(suggest)과 성장 비교(growth)의 결과에도 cache가 실리�
   const rt = engineRuntime();
   const runtime = withCache(rt, createMemoryStore());
   const suggested = await suggestSquads({ account, condition }, { top: 2 }, { runtime, now });
-  const generated = suggested.suggestion.generated;
-  assert.deepEqual(suggested.cache, { hits: 0, misses: generated, stored: generated, warnings: [] });
-  assert.deepEqual((await suggestSquads({ account, condition }, { top: 2 }, { runtime, now })).cache, { hits: generated, misses: 0, stored: 0, warnings: [] });
+  // 추천은 두 단계(멤버 조합 → 배치 변형)로 엔진을 부른다. 결과의 cache는 두 단계를 더한 값이다.
+  const { sims, stage1, stage2 } = suggested.suggestion.search;
+  assert.equal(stage1.requested, suggested.suggestion.generated);
+  assert.ok(stage2.requested > 0, '배치 변형도 계산했다');
+  assert.equal(sims, stage1.requested + stage2.requested);
+  assert.equal(rt.batches.length, 2);
+  assert.deepEqual(suggested.cache, { hits: 0, misses: sims, stored: sims, warnings: [] });
+  assert.deepEqual((await suggestSquads({ account, condition }, { top: 2 }, { runtime, now })).cache, { hits: sims, misses: 0, stored: 0, warnings: [] });
+  assert.equal(rt.batches.length, 2, '두 번째 추천은 엔진을 부르지 않는다');
+
+  // 배치 탐색을 끄면 1단계만이다 — 이미 계산한 후보라 모두 적중한다.
+  const plain = await suggestSquads({ account, condition }, { top: 2, refine: false }, { runtime, now });
+  assert.deepEqual(plain.cache, { hits: stage1.requested, misses: 0, stored: 0, warnings: [] });
 
   const input = { account, condition, squad: SQUADS[0], upgrades: [{ nikke: '가', add: { core_enhancement: 1 } }, { nikke: '나', set: { breakthrough: 3 } }] };
   const growth = await compareGrowth(input, { runtime: withCache(rt, createMemoryStore()), now });

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // 명령줄 진입점.
 //   node src/cli.mjs compare --account <계정.json> --condition <조건.json> --squads <편성.json> [--json <결과.json>]
-//   node src/cli.mjs suggest --account <계정.json> --condition <조건.json> [--limit <후보 수>] [--top <표시 수>] [--json <결과.json>]
+//   node src/cli.mjs suggest --account <계정.json> --condition <조건.json> [--limit <후보 수>] [--top <표시 수>]
+//                           [--refine | --no-refine] [--budget <시뮬 횟수>] [--refine-top <조합 수>] [--json <결과.json>]
 //   node src/cli.mjs growth  --account <계정.json> --condition <조건.json> --squads <편성.json> [--squad <편성 이름>] --upgrades <후보.json> [--json <결과.json>]
 //   node src/cli.mjs detect-changes --from <커밋> --to <커밋> [--engine <엔진 저장소 경로>] [--json <결과.json>]
 //   node src/cli.mjs import-profile <엔진 프로필.json> [--name <계정 이름>] [--out-dir <폴더>] [--force] [--json <결과.json>]
@@ -21,7 +22,9 @@ const USAGE = [
   '사용법:',
   '  node src/cli.mjs compare --account <계정.json> --condition <조건.json> --squads <편성.json> [--json <결과.json>]',
   '  node src/cli.mjs suggest --account <계정.json> --condition <조건.json> [--limit <후보 수, 기본 30>] [--top <표시 수, 기본 5>] [--json <결과.json>]',
-  '  node src/cli.mjs growth  --account <계정.json> --condition <조건.json> --squads <편성.json> [--squad <기준 편성 이름, 기본 첫 편성>] --upgrades <후보.json> [--json <결과.json>]',
+  '      [--refine] 상위 조합의 배치 순서도 탐색한다(기본)   [--no-refine] 조합마다 배치 하나만 계산한다',
+  '      [--budget <전체 시뮬 횟수의 상한, 기본 120>]   [--refine-top <배치를 탐색할 상위 조합 수, 기본 5>]',
+  '  node src/cli.mjs growth --account <계정.json> --condition <조건.json> --squads <편성.json> [--squad <기준 편성 이름, 기본 첫 편성>] --upgrades <후보.json> [--json <결과.json>]',
   '  node src/cli.mjs detect-changes --from <엔진 커밋> --to <엔진 커밋> [--engine <엔진 저장소, 기본 vendor/nikke-calc>] [--json <결과.json>]',
   '  node src/cli.mjs import-profile <엔진 프로필.json> [--name <계정 이름, 기본 프로필 이름>] [--out-dir <폴더, 기본 data/accounts>] [--force] [--json <결과.json>]',
   'compare·suggest·growth는 같은 엔진 판·같은 요청의 시뮬 결과를 다시 계산하지 않는다(캐시):',
@@ -29,7 +32,7 @@ const USAGE = [
 ].join('\n');
 
 /** 값을 받지 않는 인자. 뒤에 오는 낱말을 값으로 삼키지 않는다. */
-const FLAGS = new Set(['force', 'no-cache']);
+const FLAGS = new Set(['force', 'no-cache', 'refine', 'no-refine']);
 
 /** `--이름 값`은 opts에, 이름 없는 낱말은 차례대로 opts._에 담는다. */
 function parseArgs(argv) {
@@ -122,9 +125,19 @@ try {
     report = importProfileFile({ file: opts._[0], name: opts.name, outDir: opts['out-dir'], force: opts.force === true }, { engineDir: opts.engine });
     render = renderImportReport;
   } else if (command === 'suggest') {
+    if (opts.refine === true && opts['no-refine'] === true) {
+      throw new InputError('인자가 잘못됐다', [{ path: '--refine', message: '--refine과 --no-refine을 함께 줄 수 없다' }]);
+    }
     report = await suggestSquads(
       { account: readJsonFile('account', opts.account), condition: readJsonFile('condition', opts.condition) },
-      { limit: readCount('limit', opts.limit), top: readCount('top', opts.top) },
+      {
+        limit: readCount('limit', opts.limit),
+        top: readCount('top', opts.top),
+        // 배치 탐색(2단계)은 기본으로 켜져 있다. 예산은 1단계 + 2단계를 합친 시뮬 횟수의 상한이다.
+        refine: opts['no-refine'] === true ? false : undefined,
+        budget: readCount('budget', opts.budget),
+        refineTop: readCount('refine-top', opts['refine-top']),
+      },
       deps,
     );
   } else {
