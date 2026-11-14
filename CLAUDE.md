@@ -8,7 +8,7 @@
 1. `docs/spec.md` — 요구사항, 단계, 결정 기록, 미검증 가정
    (요격전 작업이면 `docs/intercept.md`도 — 게임 화면에서 확인한 보스 정보와 모르는 것)
    (계산기 작업이면 `docs/calculators.md`도 — 값의 출처 조사: 무엇이 엔진 데이터에 없어 만들지 않았는지)
-2. `.harness/progress.md` — 지금 상황과 다음 행동
+2. `.harness/progress.md` — 지금 상황과 다음 행동 (다음에 할 일의 후보는 `docs/plan.md`, 다른 PC에서의 준비는 `README.md`)
 3. `.harness/tasks.json` — 작업 목록(수락 조건·검증 명령·상태)
 4. 맡은 작업과 관련된 코드
 
