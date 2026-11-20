@@ -1,0 +1,42 @@
+$ node --test tests/unit/format.acceptance.test.mjs
+TAP version 13
+# Subtest: 1억 이상은 억 단위 소수 둘째 자리까지, 버림
+ok 1 - 1억 이상은 억 단위 소수 둘째 자리까지, 버림
+  ---
+  duration_ms: 0.9649
+  ...
+# Subtest: 1조 이상은 조 단위 소수 둘째 자리까지, 버림
+ok 2 - 1조 이상은 조 단위 소수 둘째 자리까지, 버림
+  ---
+  duration_ms: 0.1152
+  ...
+# Subtest: 1만 이상 1억 미만은 만 단위 정수, 버림
+ok 3 - 1만 이상 1억 미만은 만 단위 정수, 버림
+  ---
+  duration_ms: 0.0832
+  ...
+# Subtest: 1만 미만은 그대로
+ok 4 - 1만 미만은 그대로
+  ---
+  duration_ms: 0.0728
+  ...
+# Subtest: 음수·정수가 아닌 값·유한하지 않은 값은 RangeError
+ok 5 - 음수·정수가 아닌 값·유한하지 않은 값은 RangeError
+  ---
+  duration_ms: 0.2897
+  ...
+# Subtest: 결과 표는 총딜을 단위 표기로 보여 주고 원값도 함께 남긴다
+ok 6 - 결과 표는 총딜을 단위 표기로 보여 주고 원값도 함께 남긴다
+  ---
+  duration_ms: 0.426
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 79.0905
+

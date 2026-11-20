@@ -1,0 +1,14 @@
+$ cargo test --manifest-path app/src-tauri/Cargo.toml --test live_game -- --ignored
+
+running 5 tests
+test captures_game_content_even_when_another_window_covers_it ... ok
+test captures_the_client_area_without_touching_the_game_window ... ok
+test cli_prints_window_info_and_saves_a_capture ... ok
+test finds_the_game_window_and_not_the_launcher ... ok
+test saves_a_png_that_matches_the_client_area ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.29s
+
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.29s
+     Running tests\live_game.rs (app\src-tauri\target\debug\deps\live_game-9f68e40356f5d76e.exe)

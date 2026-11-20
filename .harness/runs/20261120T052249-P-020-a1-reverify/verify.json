@@ -1,0 +1,56 @@
+{
+  "task": "P-020",
+  "started_at": "2026-11-20T05:22:49.102Z",
+  "head": "c125dd22cc35a0f9111d7a2275b81bafd1af4bd9",
+  "tree": "ca7f86632f2beed5c7715e92bca79ee619846cd2",
+  "dirty": true,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "unit",
+      "cmd": "node --test tests/unit/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 2776,
+      "log": "verify-1-unit.log"
+    },
+    {
+      "name": "integration",
+      "cmd": "node --test tests/integration/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 149099,
+      "log": "verify-2-integration.log"
+    },
+    {
+      "name": "install",
+      "cmd": "npm --prefix app install",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 900,
+      "log": "verify-3-install.log"
+    },
+    {
+      "name": "frontend-build",
+      "cmd": "npm --prefix app run build",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 8487,
+      "log": "verify-4-frontend-build.log"
+    },
+    {
+      "name": "frontend-test",
+      "cmd": "npm --prefix app test",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 12211,
+      "log": "verify-5-frontend-test.log"
+    }
+  ],
+  "passed": true,
+  "reason": null,
+  "env_skipped": [],
+  "env_only": false,
+  "tree_after": "ca7f86632f2beed5c7715e92bca79ee619846cd2",
+  "finished_at": "2026-11-20T05:25:42.887Z"
+}
