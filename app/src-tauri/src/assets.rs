@@ -93,20 +93,14 @@ impl GameImage {
 pub struct ImageDirs {
     /// 엔진 폴더(`vendor/nikke-calc`). 엔진 계산과 같은 설정에서 나온다.
     pub engine_dir: Option<PathBuf>,
-    /// 저장소 루트(`data/`가 있는 곳).
-    pub repo_root: Option<PathBuf>,
+    pub data_root: Option<PathBuf>,
+    pub captures: Option<PathBuf>,
+    pub bundle: Option<PathBuf>,
 }
 
 impl ImageDirs {
-    fn under_repo(&self, parts: &[&str]) -> Option<PathBuf> {
-        self.repo_root
-            .as_ref()
-            .map(|root| parts.iter().fold(root.clone(), |dir, part| dir.join(part)))
-    }
-
     fn assets(&self, parts: &[&str]) -> Option<PathBuf> {
-        self.under_repo(&ASSETS_SUBDIR)
-            .map(|dir| parts.iter().fold(dir, |dir, part| dir.join(part)))
+        self.data_root.as_ref().map(|root| parts.iter().fold(root.join(ASSETS_SUBDIR[1]), |dir, part| dir.join(part)))
     }
 
     fn engine(&self, parts: &[&str]) -> Option<PathBuf> {
@@ -306,8 +300,8 @@ pub fn boss_image(dirs: &ImageDirs, id: &str) -> GameImage {
         return GameImage::missing();
     }
     let known = dirs
-        .under_repo(&BOSS_BUNDLE_FILE)
-        .is_some_and(|file| boss_ids(&file).iter().any(|known| known == id));
+        .bundle.as_ref()
+        .is_some_and(|file| boss_ids(file).iter().any(|known| known == id));
     if !known {
         return GameImage::missing();
     }
@@ -318,7 +312,7 @@ pub fn boss_image(dirs: &ImageDirs, id: &str) -> GameImage {
         return GameImage::loaded(mime, &bytes, ImageSource::Assets);
     }
     if let Some((mime, bytes)) = dirs
-        .under_repo(&BOSS_CAPTURES_SUBDIR)
+        .captures.as_ref().map(|dir| dir.join(BOSS_CAPTURES_SUBDIR[2]))
         .and_then(|dir| read_image(&dir, &format!("{id}.png")))
     {
         return GameImage::loaded(mime, &bytes, ImageSource::Capture);
@@ -501,7 +495,9 @@ mod tests {
         fn dirs(&self) -> ImageDirs {
             ImageDirs {
                 engine_dir: Some(self.engine.0.clone()),
-                repo_root: Some(self.repo.0.clone()),
+                data_root: Some(self.repo.0.join("data")),
+                captures: Some(self.repo.0.join("data/captures")),
+                bundle: Some(self.repo.0.join("data/intercept/anomaly.json")),
             }
         }
 
@@ -584,7 +580,7 @@ mod tests {
         broken.write("image/가나.webp", &fake_webp(1));
         let dirs = ImageDirs {
             engine_dir: Some(broken.0.clone()),
-            repo_root: None,
+            ..ImageDirs::default()
         };
         assert_eq!(portrait(&dirs, &NameIndex::new(), "가나"), GameImage::missing());
         // 최상위가 객체가 아닌 카탈로그.
@@ -639,7 +635,7 @@ mod tests {
         engine.write("image/a_b.webp", &fake_webp(5));
         let dirs = ImageDirs {
             engine_dir: Some(engine.0.clone()),
-            repo_root: None,
+            ..ImageDirs::default()
         };
         let index = NameIndex::new();
         for name in ["../secret", "..\\secret", "C:\\secret"] {
@@ -832,7 +828,7 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let dirs = ImageDirs {
             engine_dir: Some(root.join("vendor/nikke-calc")),
-            repo_root: None,
+            ..ImageDirs::default()
         };
         let index = NameIndex::new();
         for name in ["크라운", "라피 : 레드 후드", "D : 킬러 와이프", "E.H.", "아스카 : WILLE"] {

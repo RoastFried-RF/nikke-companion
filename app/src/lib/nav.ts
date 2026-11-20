@@ -22,6 +22,7 @@ export const SETTINGS_SECTIONS = [
   { key: 'engine', label: '계산 도구' },
   // P-033: 커뮤니티 도구 목록(누르면 기본 브라우저로 연다)과 이 앱이 하지 않는 것.
   { key: 'links', label: '다른 도구' },
+  { key: 'updates', label: '앱 정보·업데이트' },
   { key: 'advanced', label: '고급' },
 ] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]['key'];

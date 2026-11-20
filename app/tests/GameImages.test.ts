@@ -81,7 +81,7 @@ describe('이미지 읽기의 규칙(Rust)', () => {
     // 보스: 글자 검사와 묶음 확인이 파일 읽기보다 먼저다.
     const boss = rules.slice(rules.indexOf('pub fn boss_image('), rules.indexOf('pub struct IconSlot'));
     expect(boss.indexOf('if !is_boss_id(id) {')).toBeGreaterThan(-1);
-    expect(boss.indexOf('if !is_boss_id(id) {')).toBeLessThan(boss.indexOf('boss_ids(&file)'));
+    expect(boss.indexOf('if !is_boss_id(id) {')).toBeLessThan(boss.indexOf('boss_ids(file)'));
     expect(boss.indexOf('if !known {')).toBeLessThan(boss.indexOf('read_webp_or_png('));
     // 아이콘: 표에서 찾은 자리의 이름만 쓴다 — 화면이 준 글자는 파일 이름에 들어가지 않는다.
     const icon = rules.slice(rules.indexOf('pub fn icon('));
@@ -111,7 +111,12 @@ describe('이미지 읽기의 규칙(Rust)', () => {
     expect(rules).not.toMatch(/std::net|std::process|Command::new|tauri|windows::|reqwest|ureq/);
     expect(rules).not.toMatch(/fs::write|fs::remove|fs::create_dir|fs::rename|fs::copy|File::create|OpenOptions/);
     // 화면이 폴더를 정하지 못한다: 엔진 폴더는 엔진 계산과 같은 설정에서, 저장소 루트는 실행 파일 자리에서 찾는다.
-    expect(glue).toMatch(/engine_dir: engine_config\(app\)\.ok\(\)\.map\(\|config\| config\.engine_dir\),\s*repo_root: capture::find_repo_root\(&search_from\),/);
+    // P-035: 설치판의 받은 이미지·캡처는 사용자 자료에서, 보스 묶음은 설치 자원에서만 읽는다.
+    expect(glue).toContain('install_paths::Layout::detect(&dirs)');
+    expect(glue).toContain('engine_dir: engine_config(app).ok().map(|config| config.engine_dir)');
+    expect(glue).toContain('data_root: layout.current_data()');
+    expect(glue).toContain('captures: capture::default_capture_dir().ok()');
+    expect(glue).toContain('install_paths::Layout::Installed => app.path().resource_dir().ok()');
     expect(glue).not.toMatch(/std::env::var|PathBuf::from\(/);
     expect(glue.match(/#\[tauri::command\]/g)).toHaveLength(3);
   });

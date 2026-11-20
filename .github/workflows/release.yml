@@ -1,0 +1,59 @@
+name: Windows release
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+      - name: 태그와 앱 판 비교
+        shell: pwsh
+        run: |
+          $version = (Get-Content -Raw app/package.json | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_NAME -cne "v$version") { throw "태그와 앱 판이 다르다" }
+      - run: rustup update stable
+      - run: rustup default stable
+      - run: npm ci
+        working-directory: app
+      - run: npm --prefix app test
+      - run: node --test tests/unit/
+      - name: 변경 내용 준비
+        id: notes
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          result-encoding: string
+          script: |
+            const { data } = await github.rest.repos.generateReleaseNotes({
+              ...context.repo, tag_name: process.env.GITHUB_REF_NAME,
+            });
+            if (data.body?.trim()) return data.body;
+            const tag = await exec.getExecOutput('git', [
+              'for-each-ref', '--format=%(contents:subject)', context.ref,
+            ], { silent: true });
+            if (!tag.stdout.trim()) throw new Error('게시할 변경 내용이 비어 있다');
+            return tag.stdout.trim();
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: 니케 컴패니언 ${{ github.ref_name }}
+          releaseBody: ${{ steps.notes.outputs.result }}
+          releaseDraft: false
+          prerelease: false
+          uploadUpdaterJson: true

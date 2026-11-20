@@ -66,6 +66,7 @@ pub mod capture_cli;
 pub mod clipboard;
 pub mod cookie;
 pub mod engine;
+mod install_paths;
 #[cfg(windows)]
 mod engine_win32;
 pub mod extension_link;
@@ -416,19 +417,23 @@ fn engine_config(app: &AppHandle) -> Result<engine::EngineConfig, String> {
         .app_config_dir()
         .map(|dir| dir.join(SETTINGS_FILE))
         .ok();
-    let settings = match &settings_path {
+    let mut settings = match &settings_path {
         Some(path) => engine::load_settings_file(path).map_err(|e| e.to_string())?,
         None => engine::EngineSettings::default(),
     };
-    let mut search_from: Vec<PathBuf> = Vec::new();
-    if let Some(dir) = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf))
-    {
-        search_from.push(dir);
-    }
-    if let Ok(dir) = std::env::current_dir() {
-        search_from.push(dir);
+    let search_from = install_paths::search_dirs();
+    let layout = install_paths::Layout::detect(&search_from);
+    let configured = std::env::var(engine::ENV_ENGINE_DIR).ok().is_some_and(|s| !s.trim().is_empty())
+        || settings.engine_dir.as_ref().is_some_and(|s| !s.trim().is_empty());
+    if layout == install_paths::Layout::Installed && !configured {
+        let data = layout.current_data().ok_or("사용자 데이터 폴더를 찾을 수 없다")?;
+        let resource = app.path().resource_dir().map_err(|_| "설치 폴더를 찾을 수 없다")?;
+        let engine = install_paths::installed_engine(
+            &resource,
+            &data,
+            &app.package_info().version.to_string(),
+        )?;
+        settings.engine_dir = Some(engine.to_string_lossy().into_owned());
     }
     engine::resolve_config(&settings, |name| std::env::var(name).ok(), &search_from).map_err(|e| {
         match (&e, &settings_path) {
@@ -438,6 +443,11 @@ fn engine_config(app: &AppHandle) -> Result<engine::EngineConfig, String> {
             _ => e.to_string(),
         }
     })
+}
+
+#[tauri::command]
+fn update_mode() -> bool {
+    !tauri::is_dev() && install_paths::Layout::detect(&install_paths::search_dirs()) == install_paths::Layout::Installed
 }
 
 /// 오래 걸리는 일을 화면 응답을 막지 않는 스레드에서 돌린다.
@@ -472,6 +482,7 @@ async fn engine_version(app: AppHandle) -> Result<Value, String> {
 async fn engine_run_batch(app: AppHandle, requests: Vec<Value>) -> Result<Vec<Value>, String> {
     let config = engine_config(&app)?;
     blocking(move || {
+        if let Some(problem) = account_sync::python_problem(&config.python) { return Err(problem); }
         let run = app.state::<EngineRun>();
         // 표는 이 함수가 끝날 때(오류로 끝나도) 버려져 자리가 빈다 — 중단 뒤에 다시 실행할 수 있다.
         let ticket = run.0.begin().map_err(|e| e.to_string())?;
@@ -496,6 +507,7 @@ async fn engine_run_views(
 ) -> Result<Vec<Value>, String> {
     let config = engine_config(&app)?;
     blocking(move || {
+        if let Some(problem) = account_sync::python_problem(&config.python) { return Err(problem); }
         let run = app.state::<EngineRun>();
         let ticket = run.0.begin().map_err(|e| e.to_string())?;
         let progress = |done: usize, total: usize| {
@@ -550,19 +562,17 @@ fn pick_json_file_dialog(_window: &WebviewWindow, _title: &str) -> Result<Option
 
 /// 이미지를 찾을 폴더들: 엔진 폴더(엔진 계산과 같은 설정)와 저장소 루트. 찾지 못한 쪽의 이미지는 「없음」이 된다.
 fn image_dirs(app: &AppHandle) -> assets::ImageDirs {
-    let mut search_from: Vec<PathBuf> = Vec::new();
-    if let Some(dir) = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf))
-    {
-        search_from.push(dir);
-    }
-    if let Ok(dir) = std::env::current_dir() {
-        search_from.push(dir);
-    }
+    let dirs = install_paths::search_dirs();
+    let layout = install_paths::Layout::detect(&dirs);
+    let bundle_root = match &layout {
+        install_paths::Layout::Repository(root) => Some(root.clone()),
+        install_paths::Layout::Installed => app.path().resource_dir().ok(),
+    };
     assets::ImageDirs {
         engine_dir: engine_config(app).ok().map(|config| config.engine_dir),
-        repo_root: capture::find_repo_root(&search_from),
+        data_root: layout.current_data(),
+        captures: capture::default_capture_dir().ok(),
+        bundle: bundle_root.map(|root| root.join("data/intercept/anomaly.json")),
     }
 }
 
@@ -2063,6 +2073,7 @@ pub fn run() {
                 eprintln!("두 번째 실행을 받았지만 앱 창을 앞으로 가져오지 못했다: {e}");
             }
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Overlay::default())
         .manage(LaunchMode::default())
@@ -2128,7 +2139,8 @@ pub fn run() {
             save_decks,
             copy_text,
             set_account_hidden,
-            open_tool_link
+            open_tool_link,
+            update_mode
         ])
         .setup(|app| {
             let window = app
@@ -2174,6 +2186,12 @@ pub fn run() {
             } else {
                 // 숨긴 채로 시작한다: 게임 창을 찾았을 때(`track_game`) 또는 앱 창의 단추·단축키로 보인다.
                 lock(&app.state::<Overlay>().state).visible = false;
+            }
+            // 설치판은 마지막으로 본 화면과 관계없이 첫 실행과 판 변경 때 엔진을 준비한다.
+            // 설정·계산에서 같은 함수를 호출하면 준비 오류를 한국어로 표시하고 다시 시도한다.
+            if install_paths::Layout::detect(&install_paths::search_dirs()) == install_paths::Layout::Installed {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || engine_config(&handle));
             }
             // 크롬 확장 연결: 켜 둔 채로 끝냈으면 여기서 다시 듣기 시작한다(기본은 꺼짐).
             app.manage(open_extension_link(app.handle()));

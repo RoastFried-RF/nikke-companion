@@ -2,7 +2,7 @@
 // 이 앱은 네트워크 요청을 하지 않는다. 밖으로 나가는 통로는 Tauri IPC(invoke·이벤트)뿐이다
 // (tests/contract.test.ts가 프런트 코드에 네트워크 API가 없는지 확인한다).
 
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke, Resource } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type {
@@ -507,4 +507,27 @@ export function errorMessage(e: unknown): string {
   if (typeof e === 'string') return e;
   if (e instanceof Error) return e.message;
   return String(e);
+}
+
+/** 설치판에서만 서명된 새 판을 확인한다. 확인 결과의 번호는 현재 앱 창에서만 유효하다. */
+export const updateMode = () => invoke<boolean>('update_mode');
+export interface AvailableUpdate { rid: number; version: string; body?: string }
+export const checkUpdate = () => invoke<AvailableUpdate | null>('plugin:updater|check', { timeout: 30000 });
+type DownloadEvent = { event: 'Started'; data: { contentLength?: number } }
+  | { event: 'Progress'; data: { chunkLength: number } } | { event: 'Finished' };
+export async function installUpdate(update: AvailableUpdate, progress: (bytes: number, total?: number) => void) {
+  let received = 0;
+  let total: number | undefined;
+  const onEvent = new Channel<DownloadEvent>();
+  onEvent.onmessage = (message) => {
+    if (message.event === 'Started') total = message.data.contentLength;
+    if (message.event === 'Progress') received += message.data.chunkLength;
+    progress(received, total);
+  };
+  try {
+    await invoke('plugin:updater|download_and_install', { rid: update.rid, onEvent });
+  } finally {
+    // 재확인은 새 번호를 받는다. 창에 남아 있던 이전 판 정보도 해제한다.
+    await new Resource(update.rid).close().catch(() => {});
+  }
 }

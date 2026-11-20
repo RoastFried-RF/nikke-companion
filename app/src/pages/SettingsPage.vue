@@ -10,6 +10,7 @@ import AdvancedPage from './AdvancedPage.vue';
 import AccountSection from './settings/AccountSection.vue';
 import EngineSection from './settings/EngineSection.vue';
 import LinksSection from './settings/LinksSection.vue';
+import UpdateSection from './settings/UpdateSection.vue';
 import OverlaySection from './settings/OverlaySection.vue';
 
 defineProps<{
@@ -57,6 +58,7 @@ function open(key: SettingsSection): void {
       <OverlaySection v-else-if="section === 'overlay'" />
       <EngineSection v-else-if="section === 'engine'" />
       <LinksSection v-else-if="section === 'links'" />
+      <UpdateSection v-else-if="section === 'updates'" />
       <AdvancedPage v-else :startup-path="startupPath" />
     </KeepAlive>
   </div>

@@ -5,6 +5,8 @@ import { emptyPlan, PLAN_KIND, PLAN_SCHEMA_VERSION } from '@core/plan.mjs';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  installUpdate,
+  updateMode,
   ACCOUNT_FETCH_EVENT,
   accountFetchCancel,
   accountFetchProfile,
@@ -187,6 +189,8 @@ const COMMANDS = [
   // 둘 다 데스크톱 앱 창의 것이다.
   'set_account_hidden',
   'open_tool_link',
+  // P-035: 앱 창이 실행 위치에 따라 업데이트 확인을 결정한다.
+  'update_mode',
 ];
 
 /**
@@ -212,6 +216,8 @@ const OVERLAY_COMMANDS = [
   'game_icon',
 ];
 /** 데스크톱 앱 창이 부르지 않는 명령: 앱 창 열기(자기 자신이다)와 오버레이 창의 것(위젯의 모양·핀·창 크기 맞춤·숨기기, 계산 진행 읽기). */
+// P-035: 재시도할 때 오래된 서명 정보를 들고 있던 앱 창의 자원을 해제한다.
+const updatePermissions = ['core:resources:allow-close', 'updater:allow-check', 'updater:allow-download-and-install'];
 const NOT_FOR_APP = ['show_app_window', 'overlay_shape', 'overlay_pin', 'overlay_fit', 'overlay_hide', 'compute_activity'];
 /** 오버레이 창이 부르지 못하는 위젯 명령: 설정 바꾸기·자리 초기화·계산 진행 알리기는 데스크톱 앱 창의 일이다. */
 const WIDGET_APP_ONLY = ['set_overlay_prefs', 'reset_overlay_position', 'announce_activity'];
@@ -373,6 +379,7 @@ describe('Rust 명령 호출', () => {
       if (cmd === 'extension_link_take_pending') return true;
       if (cmd === 'nikke_portrait' || cmd === 'boss_image' || cmd === 'game_icon') return missingImage;
       if (['shared_state', 'set_default_account', 'set_overlay_launch', 'save_intercept_result', 'set_account_hidden'].includes(cmd)) return sharedSnapshot;
+      if (cmd === 'update_mode') return true;
       if (cmd === 'open_tool_link') return openedLink;
       if (cmd === 'read_account') return { name: 'me', modified_at: null, account: { schema_version: 1, nikkes: {} } };
       if (cmd === 'set_overlay_visible' || cmd === 'overlay_hide') return { visible: false, click_through: false, shortcut_problems: [] };
@@ -451,6 +458,7 @@ describe('Rust 명령 호출', () => {
     expect(calls[50].args).toEqual({ name: null });
     expect(calls[51].args).toEqual({ name: null, decks: deckBook });
     expect(calls[52].args).toEqual({ text: deckCopy });
+    await expect(updateMode()).resolves.toBe(true);
     expect(calls.map((c) => c.cmd)).toEqual(COMMANDS);
     expect(WIDGET_COMMANDS).toHaveLength(9);
     expect(calls[0].args).toEqual({ path: 'D:\\r.json' });
@@ -598,6 +606,17 @@ describe('Rust 명령 호출', () => {
     expect(front.match(/^ {2}(\w+):/gm)?.map((f) => f.trim())).toEqual(['kind:', 'message:', 'cookie_help:', 'lines:', 'warnings:']);
   });
 
+  it('서명 확인 실패 때 이전 판 번호를 닫고 재시작하지 않는다', async () => {
+    const calls: string[] = [];
+    mockIPC((command, args) => {
+      calls.push(command);
+      if (command === 'plugin:updater|download_and_install') throw new Error('서명 오류');
+      expect(args).toEqual({ rid: 71 });
+    });
+    await expect(installUpdate({ rid: 71, version: '0.1.1' }, () => {})).rejects.toThrow('서명 오류');
+    expect(calls).toEqual(['plugin:updater|download_and_install', 'plugin:resources|close']);
+  });
+
   it('errorMessage는 문자열·Error·그 밖의 값을 문장으로 바꾼다', () => {
     expect(errorMessage('가')).toBe('가');
     expect(errorMessage(new Error('나'))).toBe('나');
@@ -668,7 +687,7 @@ describe('계정 받기 — 세션 쿠키의 길(Rust)', () => {
     const front = types.slice(types.indexOf('export interface CookieSaved {'), types.indexOf('/** 수집 스크립트가 낸 줄 하나'));
     expect(front.match(/^ {2}(\w+):/gm)?.map((f) => f.trim())).toEqual(['saved_at:', 'count:']);
     // 상태에도 쿠키의 내용은 없다 — 있는지와 언제 썼는지뿐이다.
-    const status = accountSyncRs.slice(accountSyncRs.indexOf('pub struct SyncStatus {'), accountSyncRs.indexOf('/// python을 실행할 수 있는지 본다'));
+    const status = accountSyncRs.slice(accountSyncRs.indexOf('pub struct SyncStatus {'), accountSyncRs.indexOf('const PYTHON_HELP'));
     expect(status.match(/^\s*pub (\w+):/gm)?.map((f) => f.trim())).toEqual([
       'pub name:',
       'pub cookie_saved:',
@@ -1015,7 +1034,8 @@ describe('크롬 확장 연결(Rust)', () => {
     expect(app.match(/nav\.openSettings\('account'\)/g)).toHaveLength(1);
     // 계정 화면은 차례를 가져간 뒤에야 같은 「계정 새로 받기」를 돌린다. 쿠키는 화면에 오지 않는다.
     const screen = sources['../src/screens/AccountScreen.vue'];
-    expect(screen).toMatch(/const mine = await extension\.claim\(\);\s*busy\.value = '';\s*if \(!mine\) return;/);
+    // P-035: 확장의 차례를 받아 상태를 읽는 동안에도 설치가 시작되지 않게 잠금을 유지한다.
+    expect(screen).toMatch(/const mine = await extension\.claim\(\);\s*if \(mine\) await refresh\(\);\s*busy\.value = '';\s*if \(!mine\) return;/);
     expect(screen.match(/await fetchAccount\(\);/g)).toHaveLength(1);
     expect(rule).not.toMatch(/accountSaveCookie|cookie/i);
   });
@@ -1307,7 +1327,9 @@ describe('중복 실행 방지(Rust)', () => {
     const run = code(libRs.slice(libRs.indexOf('pub fn run()')));
     const single = run.indexOf('.plugin(tauri_plugin_single_instance::init(');
     expect(single).toBeGreaterThan(-1);
-    expect(run.match(/\.plugin\(/g)).toHaveLength(2);
+    // P-035: 단일 실행 다음에 업데이트 플러그인을 등록한다. Windows 설치 프로그램이 앱을 다시 띄운다.
+    expect(run.match(/\.plugin\(/g)).toHaveLength(3);
+    expect(single).toBeLessThan(run.indexOf('.plugin(tauri_plugin_updater'));
     expect(single).toBeLessThan(run.indexOf('.plugin(tauri_plugin_global_shortcut'));
     expect(single).toBeLessThan(run.indexOf('register_shortcuts('));
     // 떠 있던 쪽이 하는 일은 하나다: 데스크톱 앱 창을 앞으로 가져온다. 실행 인자와 작업 폴더는 쓰지 않는다.
@@ -1397,14 +1419,15 @@ describe('권한(capability)', () => {
 
   it('데스크톱 앱 창은 쓰는 것만 허용한다 — 창 끌기와 끝내기 명령은 없다', () => {
     const forApp = COMMANDS.filter((c) => !NOT_FOR_APP.includes(c));
-    expect([...appCapability.permissions].sort()).toEqual(['core:event:allow-listen', 'core:event:allow-unlisten', ...allow(forApp)].sort());
+    expect([...appCapability.permissions].sort()).toEqual(['core:event:allow-listen', 'core:event:allow-unlisten', ...allow(forApp), ...updatePermissions].sort());
     expect(appCapability.windows).toEqual(['app']);
     // P-028: 38 → 42(위젯 상태 읽기·오버레이 설정 바꾸기·자리 초기화·계산 진행 알리기).
     // P-029: 42 → 44(요격전 계획 읽기·저장 — 손으로 적은 기록과 즐겨찾기를 계정 폴더에 둔다).
     // P-030: 44 → 47(덱 빌더 — 저장한 편성 읽기·저장, 편성을 글자로 클립보드에 쓰기).
     // P-032: 47 → 48(버스트 흐름 — 계산 도구의 버스트 보기를 돌려 글 받기).
     // P-033: 48 → 50(계정을 목록에서 숨기기·다시 보이기, 목록의 도구를 기본 브라우저로 열기).
-    expect(forApp).toHaveLength(50);
+    // P-035: 앱 창에만 설치판 판정 한 개를 더했다.
+    expect(forApp).toHaveLength(51);
     // 끝내기 명령은 어느 창에도 없다 — 앱에 그런 명령이 없다.
     for (const p of [...capability.permissions, ...appCapability.permissions]) expect(p).not.toMatch(/quit|exit/);
     expect(COMMANDS).not.toContain('quit_app');
@@ -1419,7 +1442,7 @@ describe('권한(capability)', () => {
   it('묶음 권한(default)이나 파일·셸·네트워크 권한이 없다', () => {
     for (const p of [...capability.permissions, ...appCapability.permissions]) {
       expect(p).not.toMatch(/default$/);
-      expect(p).not.toMatch(/^(fs|shell|http|websocket|opener|process|dialog|updater):/);
+      if (!updatePermissions.includes(p)) expect(p).not.toMatch(/^(fs|shell|http|websocket|opener|process|dialog|updater):/);
     }
   });
 
@@ -1501,7 +1524,8 @@ describe('엔진 호출(Rust)', () => {
     // 텍스트 보기로 돌려 글을 받는 engine_run_views가 필요하다(53 → 54). 보기의 이름은 Rust가 정한 것('burst')만 받는다.
     // 계정 여러 개·도구 링크(P-033)의 둘: 계정을 목록에서 숨기기·다시 보이기(파일은 지우지 않는다)와, 목록에 있는 도구의 주소를
     // 기본 브라우저로 열기(54 → 56). 화면이 넘기는 것은 계정 이름과 목록의 id뿐이다 — 폴더·파일 이름도 주소도 넘기지 않는다.
-    expect(COMMANDS).toHaveLength(56);
+    // P-035: 실행 위치를 확인하는 읽기 명령 하나를 더했다.
+    expect(COMMANDS).toHaveLength(57);
     expect(DECK_COMMANDS).toEqual(['load_decks', 'save_decks', 'copy_text']);
     expect(libRs).toContain('async fn load_decks(name: Option<String>) -> Result<Option<Value>, String>');
     expect(libRs).toContain('async fn save_decks(name: Option<String>, decks: Value) -> Result<(), String>');
@@ -2157,6 +2181,7 @@ describe('도구 링크 — 여는 주소는 목록에 있는 것뿐이다', () 
   });
 
   it('셸·열기 플러그인을 쓰지 않는다 — 임의의 주소·프로그램을 열 권한이 어느 창에도 없다', () => {
+    // P-035: 설치 프로그램이 앱을 다시 띄우므로 화면에 프로세스 권한을 주지 않는다.
     expect(cargoToml).not.toMatch(/tauri-plugin-(shell|opener|http|fs|process)/);
     expect(libRs).not.toMatch(/tauri_plugin_(shell|opener|http|fs|process)/);
     for (const p of [...capability.permissions, ...appCapability.permissions]) expect(p).not.toMatch(/^(shell|opener|http|fs|process):/);

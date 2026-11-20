@@ -15,6 +15,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import AccountFailure from '../components/AccountFailure.vue';
 import { useAccountLink } from '../lib/accountLink';
 import { useExtensionLink } from '../lib/extensionLink';
+import { useUpdates, type AccountWork } from '../lib/updates';
 import { importFetchedProfile, type ImportedAccount } from '../lib/accountSync';
 import {
   accountFetchCancel,
@@ -38,8 +39,6 @@ const DEFAULT_NAME = 'me';
 /** 중단을 눌렀는데 수집이 아직 Rust에 닿기 전이면 다시 청하는 간격(밀리초). */
 const STOP_RETRY_MS = 100;
 
-/** 지금 하는 일. 한 번에 하나만 한다. */
-type Busy = '' | 'cookie' | 'login' | 'take' | 'clear' | 'claim' | 'fetch' | 'import';
 /** 실패가 난 단계 — 그 단계 아래에 안내를 보인다. */
 type Step = 1 | 2 | 3;
 
@@ -47,7 +46,9 @@ const name = ref(recall(LAST_NAME) || DEFAULT_NAME);
 const status = ref<SyncStatus | null>(null);
 /** 붙여넣기 칸. 저장을 누르면 Rust에 넘기고 곧바로 비운다. 어디에도 기억하지 않는다. */
 const pasted = ref('');
-const busy = ref<Busy>('');
+const updates = useUpdates();
+const busy = updates?.accountWork ?? ref<AccountWork>('');
+const blocked = computed(() => updates ? !updates.canStartAccount.value : busy.value !== '');
 /** 쿠키 단계에서 한 일을 알리는 줄(저장했다·세션을 지웠다). */
 const cookieNote = ref('');
 const failure = ref<{ step: Step; detail: SyncFailure } | null>(null);
@@ -106,8 +107,8 @@ function savedNote(saved: CookieSaved, how: string): string {
 }
 
 /** 쿠키 단계의 일 하나를 돌린다: 겹쳐 누르지 못하게 하고, 실패는 1단계 아래에 보인다. */
-async function cookieTask(kind: Busy, work: () => Promise<string>): Promise<void> {
-  if (busy.value) return;
+async function cookieTask(kind: AccountWork, work: () => Promise<string>): Promise<void> {
+  if (blocked.value) return;
   busy.value = kind;
   cookieNote.value = '';
   failure.value = null;
@@ -122,6 +123,7 @@ async function cookieTask(kind: Busy, work: () => Promise<string>): Promise<void
 }
 
 async function saveCookie(): Promise<void> {
+  if (blocked.value) return;
   // 넘길 글자를 꺼내고 입력 칸은 곧바로 비운다 — 저장에 실패해도 화면에 남기지 않는다.
   const text = pasted.value;
   pasted.value = '';
@@ -155,20 +157,20 @@ async function toggleExtension(event: Event): Promise<void> {
  * 다른 일을 하는 중이면 끝난 뒤에 잇는다(아래 watch가 다시 부른다). 차례는 한 번만 가져간다.
  */
 async function continueFromExtension(): Promise<void> {
-  if (!extension || busy.value || !extensionStatus.value?.pending) return;
+  if (!extension || blocked.value || !extensionStatus.value?.pending) return;
   busy.value = 'claim';
   const mine = await extension.claim();
+  if (mine) await refresh();
   busy.value = '';
   if (!mine) return;
   failure.value = null;
   cookieNote.value = '크롬 확장에서 쿠키를 받았다 — 계정을 새로 받는다.';
-  await refresh();
   await fetchAccount();
 }
 
 /** 계정 새로 받기: 수집 → 받은 프로필 읽기 → 변환 → 계정 파일 저장 → 다른 화면의 계정 칸에 넣기. */
 async function fetchAccount(): Promise<void> {
-  if (busy.value) return;
+  if (blocked.value) return;
   const target = account.value;
   busy.value = 'fetch';
   failure.value = null;
@@ -247,7 +249,7 @@ async function stop(): Promise<void> {
 onMounted(refresh);
 onBeforeUnmount(stopTimer);
 // 확장에서 쿠키를 받았을 때, 그리고 하던 일이 끝났을 때 본다. 이 화면을 처음 열 때 이미 받아 둔 것이 있어도 잇는다.
-watch([() => extensionStatus.value?.pending, busy], continueFromExtension, { immediate: true });
+watch([() => extensionStatus.value?.pending, blocked], continueFromExtension, { immediate: true });
 </script>
 
 <template>
@@ -282,7 +284,7 @@ watch([() => extensionStatus.value?.pending, busy], continueFromExtension, { imm
                 <input
                   type="checkbox"
                   :checked="extensionStatus?.enabled === true"
-                  :disabled="busy !== '' || extension.busy.value"
+                  :disabled="blocked || extension.busy.value"
                   data-testid="link-toggle"
                   @change="toggleExtension"
                 />
@@ -302,7 +304,7 @@ watch([() => extensionStatus.value?.pending, busy], continueFromExtension, { imm
                 class="step__quiet"
                 type="button"
                 title="코드를 새로 만든다 — 옛 코드는 곧바로 받지 않는다. 확장에 새 코드를 넣어야 한다"
-                :disabled="busy !== '' || extension.busy.value"
+                :disabled="blocked || extension.busy.value"
                 data-testid="link-new-code"
                 @click="extension.newCode()"
               >
@@ -345,10 +347,10 @@ watch([() => extensionStatus.value?.pending, busy], continueFromExtension, { imm
               spellcheck="false"
               placeholder="Cookie 헤더 값을 붙여넣는다 (가려져 보인다)"
               aria-label="붙여넣을 세션 쿠키"
-              :disabled="busy !== ''"
+              :disabled="blocked"
               data-testid="cookie-input"
             />
-            <button class="panel__button" type="submit" :disabled="busy !== '' || pasted.trim() === ''" data-testid="cookie-save">
+            <button class="panel__button" type="submit" :disabled="blocked || pasted.trim() === ''" data-testid="cookie-save">
               {{ busy === 'cookie' ? '저장 중…' : '쿠키 저장' }}
             </button>
           </form>
@@ -367,17 +369,17 @@ watch([() => extensionStatus.value?.pending, busy], continueFromExtension, { imm
         <div class="step__way" data-testid="way-login">
           <p class="step__way-title">방법 3 · 앱 안의 로그인 창 <span class="step__sub">비밀번호로 로그인하는 사용자용</span></p>
           <div class="panel__row">
-            <button class="panel__button" type="button" :disabled="busy !== ''" data-testid="login-open" @click="openLogin">
+            <button class="panel__button" type="button" :disabled="blocked" data-testid="login-open" @click="openLogin">
               blablalink 로그인
             </button>
-            <button class="panel__button" type="button" :disabled="busy !== ''" data-testid="login-take" @click="takeCookie">
+            <button class="panel__button" type="button" :disabled="blocked" data-testid="login-take" @click="takeCookie">
               {{ busy === 'take' ? '가져오는 중…' : '쿠키 가져오기' }}
             </button>
             <button
               class="step__quiet"
               type="button"
               title="로그인 창의 쿠키·저장 데이터를 지운다 — 다른 계정으로 바꾸거나 공용 PC에서 쓴 뒤에"
-              :disabled="busy !== ''"
+              :disabled="blocked"
               data-testid="login-clear"
               @click="clearSession"
             >
@@ -409,12 +411,12 @@ watch([() => extensionStatus.value?.pending, busy], continueFromExtension, { imm
             autocomplete="off"
             :placeholder="DEFAULT_NAME"
             aria-label="계정 이름"
-            :disabled="busy !== ''"
+            :disabled="blocked"
             data-testid="account-name"
             @change="refresh"
             @keydown.enter.prevent="fetchAccount"
           />
-          <button class="panel__button" type="button" :disabled="busy !== ''" data-testid="fetch-run" @click="fetchAccount">
+          <button class="panel__button" type="button" :disabled="blocked" data-testid="fetch-run" @click="fetchAccount">
             {{ fetching ? '받는 중…' : '계정 새로 받기' }}
           </button>
           <button v-if="busy === 'fetch'" class="step__stop" type="button" :disabled="stopping" data-testid="fetch-stop" @click="stop">

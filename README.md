@@ -1,14 +1,23 @@
 # 니케 컴패니언
 
 승리의 여신: 니케 PC판(한국 서버)용 **개인** 데스크톱 앱 — 데스크톱 앱 창 + 게임 위의 오버레이 위젯, 계정 맞춤
-편성 · 성장 추천(요격전 중심), 엔진 계산으로 만든 티어. 소스만 공개한 개인 도구다 — 실행 파일을 배포하지 않고,
-게임 이미지와 계정 데이터는 저장소에 없다.
+편성 · 성장 추천(요격전 중심), 엔진 계산으로 만든 티어. Windows 설치판은 공개 GitHub Releases에서 배포한다.
 
 - 무엇을 만드는가 · 결정 기록: [`docs/spec.md`](docs/spec.md)
 - 지금 상태: [`.harness/progress.md`](.harness/progress.md)
 - **다음에 할 일: [`docs/plan.md`](docs/plan.md)**
 - 명령 · 작업 원칙(에이전트용 안내이기도 하다): [`CLAUDE.md`](CLAUDE.md)
 - 앱의 자세한 설명: [`app/README.md`](app/README.md)
+
+## Windows 설치판
+
+[공개 릴리스](https://github.com/RoastFried-RF/nikke-companion/releases/latest)에서 최신 판의 `-setup.exe`를 받아 실행한다.
+관리자 권한 없이 현재 사용자에게 설치된다. 계산과 계정 연결에는 PC의 Python 3.12 이상이 필요하다. [Python 설치 프로그램](https://www.python.org/downloads/windows/)에서 **Add python.exe to PATH**를 선택하고 앱을 다시 연다.
+
+앱이 켜질 때 새 판을 확인한다. **설정 → 앱 정보·업데이트**에서 자동 확인을 끄거나 수동으로 확인할 수 있다. 계산이 끝난 뒤 **설치하고 다시 시작**을 누르면 서명을 확인하고 설치한다.
+설치판의 계정·캡처·받은 이미지·계산 도구는 각각 `%APPDATA%\nikke-companion`의 `accounts`, `captures`, `assets`, `engine`에 있다.
+앱을 제거할 때 「애플리케이션 데이터 삭제」를 선택하면 설치판의 계정·캡처·이미지·엔진을 함께 지운다. 선택하지 않거나 업데이트할 때는 데이터를 보존한다.
+엔진에 딸린 게임 이미지는 설치판에 포함된다. 개인 계정과 캡처는 각 PC에 보관한다.
 
 ## 다른 PC에서 이어 하기
 

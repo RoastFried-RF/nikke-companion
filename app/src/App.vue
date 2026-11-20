@@ -10,6 +10,7 @@ import { setFollowGame, startupReportPath } from './lib/backend';
 import { provideEngineOwner } from './lib/engineRun';
 import { provideExtensionLink } from './lib/extensionLink';
 import { pageOfRun, PAGES, provideNav } from './lib/nav';
+import { provideUpdates } from './lib/updates';
 import { providePlan } from './lib/plan';
 import { provideScreenTrack } from './lib/screenTrack';
 import { provideShared } from './lib/shared';
@@ -35,6 +36,8 @@ const nav = provideNav();
 const page = nav.page;
 /** 지금 계산을 돌리는 화면의 이름(없으면 null). 계산은 한 번에 한 화면에서만 돈다. */
 const computingRun = provideEngineOwner();
+const updates = provideUpdates(computingRun);
+onMounted(() => { void updates.start(); });
 /** 메뉴의 어느 화면에서 계산이 도는가. */
 const computingPage = computed(() => pageOfRun(computingRun.value));
 
@@ -116,6 +119,10 @@ onMounted(async () => {
 
     <main class="app__main" data-testid="app-main">
       <!-- 계정 여러 개(P-033): 고를 계정이 둘 이상이면 어느 화면에서든 위쪽에서 바꾼다. 계산 중에는 바꾸지 못한다. -->
+      <p v-if="updates.phase.value === 'available' && !(page === 'settings' && nav.section.value === 'updates')" class="nk-note" role="status">
+        새 판 {{ updates.available.value?.version }}을 받을 수 있다.
+        <button type="button" class="nk-button" @click="nav.openSettings('updates')">업데이트 보기</button>
+      </p>
       <AccountSwitch :computing="computingRun !== null" />
 
       <!-- 계산 중에는 자동 추적이 화면을 옮기지 않는다. 어느 화면을 보고 있든 보이게 맨 위에 둔다. -->

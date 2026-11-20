@@ -59,6 +59,7 @@ fn main() {
             "copy_text",
             "set_account_hidden",
             "open_tool_link",
+            "update_mode",
         ]),
     );
     tauri_build::try_build(attributes).expect("tauri-build 실패");

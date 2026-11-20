@@ -56,7 +56,7 @@ node src/cli.mjs tier build --json tier.json                                    
 ```bash
 npm --prefix app install                                  # 처음 한 번
 npm --prefix app run tauri dev                            # 개발 실행 (데스크톱 앱 창 + 오버레이 창 + Vite)
-npm --prefix app run tauri build                          # 실행 파일: app/src-tauri/target/release/nikke-companion.exe
+npm --prefix app run tauri build                          # 실행 파일 app/src-tauri/target/release/nikke-companion.exe + 현재 사용자용 NSIS 설치 프로그램(app/src-tauri/target/release/bundle/nsis/). 업데이트 서명 키를 TAURI_SIGNING_PRIVATE_KEY·TAURI_SIGNING_PRIVATE_KEY_PASSWORD 환경 변수로 준다(없으면 서명 단계에서 실패)
 npm --prefix app run build                                # 타입 검사 + 프런트 빌드
 npm --prefix app test                                     # 컴포넌트 테스트 (vitest)
 cargo test --manifest-path app/src-tauri/Cargo.toml       # Rust 단위 테스트
@@ -64,6 +64,15 @@ cargo build --manifest-path app/src-tauri/Cargo.toml
 cargo clippy --all-targets --manifest-path app/src-tauri/Cargo.toml   # 경고가 없어야 한다
 npm --prefix app run fixture                              # 컴포넌트 테스트용 샘플 결과 넷을 실제 CLI로 다시 만든다(몇 분). 고른 것만: `-- tier growth`
 ```
+
+설치판과 자동 업데이트(P-035 — `app/README.md` §설치판과 자동 업데이트): 설치판은 currentUser NSIS 이고 기본 위치는 `%LOCALAPPDATA%\Programs\nikke-companion`.
+저장소 밖에서 실행하면(설치판) 데이터는 `%APPDATA%\nikke-companion`(`accounts`·`captures`·`assets`·`engine`)에 둔다. 엔진은 앱 판이 바뀔 때 번들에서
+`engine`으로 복사하고 `scraper/.session_cookie`·`profiles/`는 보존한다 — 규칙 `app/src-tauri/src/install_paths.rs`. 저장소 안에서 실행하면 지금처럼
+`data/accounts`와 서브모듈을 쓰고 업데이트 확인을 건너뛴다. 업데이트는 공개 GitHub Releases 의 `latest.json`(서명 확인)이고 설정 > 앱 정보·업데이트에서
+사용자가 눌러 설치한다(화면 `app/src/pages/settings/UpdateSection.vue`, 규칙 `app/src/lib/updates.ts`). 낮은 판은 설치 프로그램이 거부한다(`allowDowngrades` false).
+앱 판의 원천은 `app/package.json` 하나다(`tauri.conf.json`의 `version`은 `"../package.json"`). 실행 Python 은 PC 의 Python 3.12 이상이다(내장하지 않는다).
+게시는 `v*` 태그 push 로 `.github/workflows/release.yml`이 한다 — 절차는 `docs/release.md`.
+**에이전트는 태그 push·Secrets 등록·릴리스 게시를 하지 않는다. 서명 개인 키·암호를 읽어 출력하거나 저장소에 넣지 않는다.**
 
 **창이 둘이다**(P-027 — `app/README.md` §창 둘 — 데스크톱 앱과 오버레이): **데스크톱 앱 창**(`app` — 테두리가 있는 보통 창, 1100×720,
 `app/src/App.vue`)이 전부 한다 — 왼쪽 메뉴의 홈 · 요격전 · 내 니케 · 편성 도구(추천 · 덱 빌더 · 육성 효율 · 레이드 5덱 · 비교 · 성장) · 티어 · 설정(계정 연결 · 오버레이 · 계산 도구 ·

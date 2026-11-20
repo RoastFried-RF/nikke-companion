@@ -36,6 +36,9 @@ vi.mock('../src/lib/backend', async (importOriginal) => ({
   accountSyncStatus: vi.fn(),
   accountSaveCookie: vi.fn(),
   accountFetchProfile: vi.fn(),
+  updateMode: vi.fn(),
+  checkUpdate: vi.fn(),
+  installUpdate: vi.fn(),
   accountFetchCancel: vi.fn(),
   accountReadProfile: vi.fn(),
   accountSaveFile: vi.fn(),
@@ -243,6 +246,47 @@ async function failFetch(w: Wrapper, failure: SyncFailure): Promise<void> {
   await vi.waitFor(() => expect(at(w, 'fetch-progress').exists()).toBe(false));
   await flushPromises();
 }
+
+describe('계정 연결과 업데이트 설치', () => {
+  it('구획을 옮겨도 수집과 저장이 모두 끝나야 설치할 수 있고 설치 중에는 새 수집을 막는다', async () => {
+    api.updateMode.mockResolvedValue(true);
+    api.checkUpdate.mockResolvedValue({ rid: 1, version: '1.2.3' });
+    let finishSave!: () => void;
+    api.accountSaveFile.mockImplementationOnce(() => new Promise(resolve => {
+      finishSave = () => resolve({ path: ACCOUNT_FILE, backup: null });
+    }));
+    let failInstall!: (e: Error) => void;
+    api.installUpdate.mockImplementationOnce(() => new Promise((_, reject) => { failInstall = reject; }));
+    const w = await render();
+    try {
+      await openTab(w, 'account');
+      await startFetch(w);
+      await click(w, 'section-updates');
+      const install = () => w.get('section[aria-label="앱 정보·업데이트"] button');
+      expect(install().attributes('disabled')).toBeDefined();
+      await install().trigger('click');
+      expect(api.installUpdate).not.toHaveBeenCalled();
+      pendingFetch!.resolve(OUTCOME);
+      await vi.waitFor(() => expect(api.accountSaveFile).toHaveBeenCalledOnce());
+      expect(install().attributes('disabled')).toBeDefined();
+      finishSave();
+      await flushPromises();
+      expect(install().attributes('disabled')).toBeUndefined();
+      await install().trigger('click');
+      expect(api.installUpdate).toHaveBeenCalledOnce();
+      await click(w, 'section-account');
+      expect(at(w, 'fetch-run').attributes('disabled')).toBeDefined();
+      await at(w, 'account-name').trigger('keydown.enter');
+      expect(api.accountFetchProfile).toHaveBeenCalledOnce();
+      expect(api.accountSaveFile).toHaveBeenCalledOnce();
+      failInstall(new Error('설치 실패'));
+      await flushPromises();
+      expect(at(w, 'fetch-run').attributes('disabled')).toBeUndefined();
+    } finally {
+      w.unmount();
+    }
+  });
+});
 
 describe('계정 화면의 모양', () => {
   it('계정 탭에 1·2·3 단계가 차례로 보인다', async () => {

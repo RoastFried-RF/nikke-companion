@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "nikke-companion",
-  "version": "0.1.0",
+  "version": "../package.json",
   "identifier": "local.nikke-companion.overlay",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -59,9 +59,48 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
     "icon": [
       "icons/icon.ico"
-    ]
+    ],
+    "targets": [
+      "nsis"
+    ],
+    "createUpdaterArtifacts": true,
+    "resources": {
+      "../../data/intercept/anomaly.json": "data/intercept/anomaly.json",
+      "../../vendor/nikke-calc/LICENSE": "engine/LICENSE",
+      "../../vendor/nikke-calc/baseline/*.json": "engine/baseline/",
+      "../../vendor/nikke-calc/calculator/*.py": "engine/calculator/",
+      "../../vendor/nikke-calc/data/*.json": "engine/data/",
+      "../../vendor/nikke-calc/data/base_stat_tables/*.json": "engine/data/base_stat_tables/",
+      "../../vendor/nikke-calc/data/boss_scripts/*.json": "engine/data/boss_scripts/",
+      "../../vendor/nikke-calc/image/*.webp": "engine/image/",
+      "../../vendor/nikke-calc/image/icon/*.png": "engine/image/icon/",
+      "../../vendor/nikke-calc/image/icon/*.webp": "engine/image/icon/",
+      "../../vendor/nikke-calc/runner/*.py": "engine/runner/",
+      "../../vendor/nikke-calc/scraper/*.py": "engine/scraper/",
+      "../../vendor/nikke-calc/scraper/nikke_scraped.json": "engine/scraper/nikke_scraped.json",
+      "../../vendor/nikke-calc/scraper/preview_skills.json": "engine/scraper/preview_skills.json"
+    },
+    "windows": {
+      "allowDowngrades": false,
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "Korean",
+          "English"
+        ],
+        "installerHooks": "src/installer.nsh"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/RoastFried-RF/nikke-companion/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFBMzFBODY4MTNBRjkyMUUKUldRZWtxOFRhS2d4cXBYaDJNT1pjMXpMeW5FY1lEV0loenpsaWF6akVobnVkK3JUc3RoVjMxMjcK"
+    }
   }
 }

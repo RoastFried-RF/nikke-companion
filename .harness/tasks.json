@@ -2179,6 +2179,48 @@
         "reverified_tree": "ca7f86632f2beed5c7715e92bca79ee619846cd2",
         "reverified_at": "2026-11-20T06:06:05.666Z"
       }
+    },
+    {
+      "id": "P-035",
+      "title": "Windows 설치판과 서명된 자동 업데이트",
+      "description": "현재 사용자용 NSIS 설치판, 설치판 전용 데이터·엔진 경로와 Python 안내, 앱 창 업데이트, 태그 배포를 연결한다.",
+      "deps": [
+        "P-033"
+      ],
+      "acceptance": [
+        "설치 자원에서 개인 자료를 제외하고 판 교체 때 계정 연결을 보존한다",
+        "앱 창에서 서명된 새 판을 확인하고 계산과 계정 수집·저장이 끝난 후 사용자가 설치한다. 설치 중에는 계정 받기를 막고 실패 후에는 새 판 정보를 다시 확인한다",
+        "app/package.json의 앱 판과 태그가 일치하고 공개 릴리스에 설치판·서명·변경 내용이 들어 있는 latest.json이 올라간다"
+      ],
+      "verify": [
+        {
+          "name": "unit",
+          "cmd": "node --test tests/unit/"
+        },
+        {
+          "name": "frontend-test",
+          "cmd": "npm --prefix app test"
+        },
+        {
+          "name": "frontend-build",
+          "cmd": "npm --prefix app run build"
+        },
+        {
+          "name": "rust-test",
+          "cmd": "cargo test --manifest-path app/src-tauri/Cargo.toml"
+        },
+        {
+          "name": "clippy",
+          "cmd": "cargo clippy --all-targets --manifest-path app/src-tauri/Cargo.toml -- -D warnings"
+        }
+      ],
+      "manual_checks": [
+        "실제 Release 게시 뒤 이전 설치판이 새 판을 받아 설치하는지",
+        "설치판에서 계정 받기와 계산이 되는지"
+      ],
+      "protected": [],
+      "status": "pending",
+      "attempts": 0
     }
   ]
 }

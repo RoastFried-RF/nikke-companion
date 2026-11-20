@@ -24,7 +24,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::capture::{find_repo_root, Stamp};
+use crate::capture::Stamp;
 use crate::cookie::{self, BrowserCookie, CookieError, Redactor, SessionCookie};
 use crate::engine::{self, EngineConfig, ProcessGroup, StopSignal, STOPPED_PREFIX};
 
@@ -382,27 +382,31 @@ pub struct SyncStatus {
     pub problems: Vec<String>,
 }
 
-/// python을 실행할 수 있는지 본다(`python --version`). 문제가 있으면 한국어 문장.
-fn python_problem(python: &str) -> Option<String> {
+const PYTHON_HELP: &str = "python.org에서 Python 3.12 이상을 설치하고 설치할 때 ‘Add python.exe to PATH’를 선택해 주세요.";
+
+fn supported_python(output: &str) -> bool {
+    let Some(version) = output.trim().strip_prefix("Python ") else { return false };
+    let mut parts = version.split('.');
+    let Some(major) = parts.next().and_then(|n| n.parse::<u32>().ok()) else { return false };
+    let Some(minor) = parts.next().and_then(|n| n.parse::<u32>().ok()) else { return false };
+    (major, minor) >= (3, 12)
+}
+
+/// 계산과 계정 받기가 같은 확인 결과를 쓴다. 설치 뒤에는 앱 안에서 바로 다시 시도할 수 있다.
+pub(crate) fn python_problem(python: &str) -> Option<String> {
+    static VERIFIED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    let mut verified = VERIFIED.lock().unwrap_or_else(|e| e.into_inner());
+    if verified.as_deref() == Some(python) { return None; }
     let mut cmd = Command::new(python);
-    cmd.arg("--version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    cmd.arg("--version").stdin(Stdio::null());
     engine::hide_console(&mut cmd);
-    match cmd.status() {
-        Ok(status) if status.success() => None,
-        Ok(status) => Some(format!(
-            "python이 오류로 끝났다 ({python}, 종료 코드 {})",
-            status.code().map_or_else(|| "없음".to_string(), |c| c.to_string())
-        )),
-        Err(e) => Some(
-            SyncError::Spawn {
-                python: python.to_string(),
-                detail: e.to_string(),
-            }
-            .to_string(),
-        ),
+    if cmd.output().is_ok_and(|out| out.status.success()
+        && (supported_python(&String::from_utf8_lossy(&out.stdout))
+            || supported_python(&String::from_utf8_lossy(&out.stderr)))) {
+        *verified = Some(python.to_owned());
+        None
+    } else {
+        Some(format!("{python} 실행 환경을 확인해 주세요. {PYTHON_HELP}"))
     }
 }
 
@@ -861,38 +865,18 @@ pub fn read_profile(engine_dir: &Path, name: &str) -> Result<Value, SyncError> {
 
 // ── 계정 파일 저장 ────────────────────────────────────────────────────────────
 
-fn non_empty(value: Option<String>) -> Option<String> {
-    value
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
 /// 계정 파일을 둘 폴더: 환경 변수 `NIKKE_ACCOUNTS_DIR` → 저장소의 `data/accounts`.
 pub fn resolve_accounts_dir(
     env: impl Fn(&str) -> Option<String>,
     search_from: &[PathBuf],
 ) -> Result<PathBuf, SyncError> {
-    if let Some(dir) = non_empty(env(ENV_ACCOUNTS_DIR)) {
-        return Ok(PathBuf::from(dir));
-    }
-    find_repo_root(search_from)
-        .map(|root| ACCOUNTS_SUBDIR.iter().fold(root, |dir, part| dir.join(part)))
+    crate::install_paths::data_folder(env, search_from, ENV_ACCOUNTS_DIR, ACCOUNTS_SUBDIR[1])
         .ok_or(SyncError::AccountsDirUnknown)
 }
 
 /// 이 프로세스의 기본 계정 폴더(실행 파일 위치와 현재 폴더에서 저장소를 찾는다).
 pub fn default_accounts_dir() -> Result<PathBuf, SyncError> {
-    let mut search_from: Vec<PathBuf> = Vec::new();
-    if let Some(dir) = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf))
-    {
-        search_from.push(dir);
-    }
-    if let Ok(dir) = std::env::current_dir() {
-        search_from.push(dir);
-    }
-    resolve_accounts_dir(|name| std::env::var(name).ok(), &search_from)
+    resolve_accounts_dir(|name| std::env::var(name).ok(), &crate::install_paths::search_dirs())
 }
 
 /// 계정 파일을 쓴 결과. 프런트의 `SavedAccount`(src/types.ts)와 같아야 한다.
@@ -956,6 +940,20 @@ pub fn save_account(dir: &Path, name: &str, account: &Value) -> Result<SavedAcco
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn python_minimum_version_ignores_patch_and_line_ending() {
+        for patch in 0..32 {
+            for end in ["", "\n", "\r\n"] {
+                assert!(supported_python(&format!("Python 3.12.{patch}{end}")));
+                assert!(!supported_python(&format!("Python 3.11.{patch}{end}")));
+            }
+        }
+        assert!(supported_python("Python 4.0.0"));
+        for bad in ["", "Python", "Python 3.x.2", "Python 2.99.0", "unknown 4.1.2"] {
+            assert!(!supported_python(bad));
+        }
+    }
 
     /// 테스트용 가짜 쿠키. 실제 계정의 값이 아니다.
     const TOKEN: &str = "FAKE-TOKEN-0a1b2c3d4e5f6071";

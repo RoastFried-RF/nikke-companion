@@ -302,12 +302,6 @@ pub fn capture_file_name(stamp: &Stamp, label: Option<&str>) -> String {
 
 // ── 저장 ─────────────────────────────────────────────────────────────────────
 
-fn non_empty(value: Option<String>) -> Option<String> {
-    value
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
 /// 주어진 폴더들에서 위로 올라가며 저장소 루트를 찾는다.
 pub fn find_repo_root(start_dirs: &[PathBuf]) -> Option<PathBuf> {
     start_dirs
@@ -322,27 +316,13 @@ pub fn resolve_capture_dir(
     env: impl Fn(&str) -> Option<String>,
     search_from: &[PathBuf],
 ) -> Result<PathBuf, GameError> {
-    if let Some(dir) = non_empty(env(ENV_CAPTURE_DIR)) {
-        return Ok(PathBuf::from(dir));
-    }
-    find_repo_root(search_from)
-        .map(|root| CAPTURE_SUBDIR.iter().fold(root, |dir, part| dir.join(part)))
+    crate::install_paths::data_folder(env, search_from, ENV_CAPTURE_DIR, CAPTURE_SUBDIR[1])
         .ok_or(GameError::CaptureDirUnknown)
 }
 
 /// 이 프로세스의 기본 캡처 폴더(실행 파일 위치와 현재 폴더에서 저장소를 찾는다).
 pub fn default_capture_dir() -> Result<PathBuf, GameError> {
-    let mut search_from: Vec<PathBuf> = Vec::new();
-    if let Some(dir) = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf))
-    {
-        search_from.push(dir);
-    }
-    if let Ok(dir) = std::env::current_dir() {
-        search_from.push(dir);
-    }
-    resolve_capture_dir(|name| std::env::var(name).ok(), &search_from)
+    resolve_capture_dir(|name| std::env::var(name).ok(), &crate::install_paths::search_dirs())
 }
 
 fn save_error(path: &Path, detail: impl ToString) -> GameError {

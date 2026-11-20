@@ -21,3 +21,6 @@ data/captures/
 data/assets/
 # 시뮬 결과 캐시 — 다시 계산하면 나오는 값이다(docs/data-model.md §시뮬 결과 캐시)
 data/cache/
+# 설치판 업데이트 서명 비밀
+*.key
+*.key.password
