@@ -1,7 +1,8 @@
 # 니케 컴패니언
 
 승리의 여신: 니케 PC판(한국 서버)용 **개인** 데스크톱 앱 — 데스크톱 앱 창 + 게임 위의 오버레이 위젯, 계정 맞춤
-편성 · 성장 추천(요격전 중심), 엔진 계산으로 만든 티어. 배포하지 않는 개인 도구다.
+편성 · 성장 추천(요격전 중심), 엔진 계산으로 만든 티어. 소스만 공개한 개인 도구다 — 실행 파일을 배포하지 않고,
+게임 이미지와 계정 데이터는 저장소에 없다.
 
 - 무엇을 만드는가 · 결정 기록: [`docs/spec.md`](docs/spec.md)
 - 지금 상태: [`.harness/progress.md`](.harness/progress.md)
@@ -27,7 +28,7 @@
 엔진(`vendor/nikke-calc`)이 서브모듈이라 함께 받아야 한다.
 
 ```bash
-git clone --recurse-submodules <저장소 주소> nikke-companion
+git clone --recurse-submodules https://github.com/RoastFried-RF/nikke-companion.git
 ```
 
 ```bash
