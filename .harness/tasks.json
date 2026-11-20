@@ -2219,8 +2219,19 @@
         "설치판에서 계정 받기와 계산이 되는지"
       ],
       "protected": [],
-      "status": "pending",
-      "attempts": 0
+      "status": "done",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": null,
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": {
+        "run": ".harness/runs/20261120T085058-P-035-a1-manual",
+        "verified_tree": "c7abb8ed0570e6eb1e19c0090e8417acaa644485",
+        "verified_at": "2026-11-20T08:53:36.668Z",
+        "commit": null
+      }
     }
   ]
 }

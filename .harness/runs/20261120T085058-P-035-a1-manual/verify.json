@@ -1,0 +1,56 @@
+{
+  "task": "P-035",
+  "started_at": "2026-11-20T08:50:58.071Z",
+  "head": "7ed9975518af838e9b51bd4656e4f9e14da29c4d",
+  "tree": "c7abb8ed0570e6eb1e19c0090e8417acaa644485",
+  "dirty": false,
+  "protected_violations": [],
+  "commands": [
+    {
+      "name": "unit",
+      "cmd": "node --test tests/unit/",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 11667,
+      "log": "verify-1-unit.log"
+    },
+    {
+      "name": "frontend-test",
+      "cmd": "npm --prefix app test",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 16169,
+      "log": "verify-2-frontend-test.log"
+    },
+    {
+      "name": "frontend-build",
+      "cmd": "npm --prefix app run build",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 9844,
+      "log": "verify-3-frontend-build.log"
+    },
+    {
+      "name": "rust-test",
+      "cmd": "cargo test --manifest-path app/src-tauri/Cargo.toml",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 75027,
+      "log": "verify-4-rust-test.log"
+    },
+    {
+      "name": "clippy",
+      "cmd": "cargo clippy --all-targets --manifest-path app/src-tauri/Cargo.toml -- -D warnings",
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 45380,
+      "log": "verify-5-clippy.log"
+    }
+  ],
+  "passed": true,
+  "reason": null,
+  "env_skipped": [],
+  "env_only": false,
+  "tree_after": "c7abb8ed0570e6eb1e19c0090e8417acaa644485",
+  "finished_at": "2026-11-20T08:53:36.668Z"
+}

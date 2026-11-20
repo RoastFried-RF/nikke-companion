@@ -1,0 +1,4 @@
+$ cargo clippy --all-targets --manifest-path app/src-tauri/Cargo.toml -- -D warnings
+
+   Compiling nikke-companion v0.1.0 (D:\01.Work\10.orca\nikke-companion\app\src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 45.13s
