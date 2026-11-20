@@ -50,6 +50,11 @@ export default defineConfig(({ command, mode }) => {
   test: {
     environment: 'happy-dom',
     include: ['tests/**/*.test.ts'],
+    // Node 25+의 전역 Web Storage가 happy-dom 저장소를 가리는 문제를 막는다.
+    // 이 플래그를 지원하는 Node에서만 테스트 워커에 전달한다.
+    execArgv: process.allowedNodeEnvironmentFlags.has('--no-experimental-webstorage')
+      ? ['--no-experimental-webstorage']
+      : [],
     // 테스트 실행기는 CSS 파일의 내용을 비워 버린다. 전역 스타일 둘(디자인 토큰·예전 변수)은 내용 그대로 읽게 한다 —
     // tests/DesignTokens.test.ts가 토큰의 이름·값을 확인하고, tests/contract.test.ts의 정적 검사도 이 내용을 본다.
     css: { include: [/src[\\/]styles[\\/]tokens\.css/, /src[\\/]style\.css/] },
