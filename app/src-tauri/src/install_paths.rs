@@ -43,6 +43,18 @@ impl Layout {
         self.data(|key| std::env::var(key).ok())
     }
 
+    pub fn extension_dir(&self, resources: Option<PathBuf>) -> Result<PathBuf, String> {
+        let root = match self {
+            Self::Repository(root) => root.clone(),
+            Self::Installed => resources.ok_or("앱 설치 폴더를 찾을 수 없다")?,
+        };
+        let folder = root.join("extension");
+        if !folder.join("manifest.json").is_file() {
+            return Err("확장 폴더에 설치 정보가 없다. 앱 설치 상태를 확인해 주세요.".into());
+        }
+        Ok(folder)
+    }
+
     pub fn data(&self, env: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
         match self {
             Self::Repository(root) => Some(root.join("data")),
@@ -198,6 +210,21 @@ pub fn installed_engine(resources: &Path, data: &Path, version: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn extension_folder_uses_the_selected_layout_and_checks_the_manifest() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        let resources = temp.path().join("bundle");
+        for root in [&repo, &resources] {
+            fs::create_dir_all(root.join("extension")).unwrap();
+        }
+        for (layout, root) in [(Layout::Repository(repo.clone()), repo), (Layout::Installed, resources.clone())] {
+            let resolve = || layout.extension_dir(Some(resources.clone()));
+            assert!(resolve().unwrap_err().contains("설치 정보"));
+            fs::write(root.join("extension/manifest.json"), "{}").unwrap();
+            assert_eq!(resolve().unwrap(), root.join("extension"));
+        }
+    }
     #[test]
     fn installation_uses_only_the_executable_location() {
         let root = PathBuf::from("repo");

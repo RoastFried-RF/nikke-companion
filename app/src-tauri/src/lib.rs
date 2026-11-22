@@ -1586,6 +1586,26 @@ async fn open_tool_link(id: String) -> Result<tool_links::ToolLink, String> {
     blocking(move || tool_links::open(&id).map_err(|e| e.to_string())).await
 }
 
+fn extension_folder(app: &AppHandle) -> Result<PathBuf, String> {
+    install_paths::Layout::detect(&install_paths::search_dirs())
+        .extension_dir(app.path().resource_dir().ok())
+}
+
+#[tauri::command]
+async fn extension_folder_path(app: AppHandle) -> Result<PathBuf, String> {
+    blocking(move || extension_folder(&app)).await
+}
+
+#[tauri::command]
+async fn open_extension_folder(app: AppHandle) -> Result<(), String> {
+    blocking(move || tool_links::open_folder(&extension_folder(&app)?)).await
+}
+
+#[tauri::command]
+async fn open_browser_login() -> Result<(), String> {
+    blocking(|| tool_links::open_login_page().map_err(|e| e.to_string())).await
+}
+
 /// 데스크톱 앱 창을 앞으로 가져온다(최소화돼 있으면 되돌린다). 오버레이의 「앱 열기」와 두 번째 실행이 부른다 —
 /// 둘 다 사용자가 방금 한 일이라 이 창이 활성화돼도 된다. 게임 창은 건드리지 않는다.
 fn focus_app_window(app: &AppHandle) -> Result<(), String> {
@@ -2140,6 +2160,9 @@ pub fn run() {
             copy_text,
             set_account_hidden,
             open_tool_link,
+            extension_folder_path,
+            open_extension_folder,
+            open_browser_login,
             update_mode
         ])
         .setup(|app| {

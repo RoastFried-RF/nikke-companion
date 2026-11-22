@@ -59,6 +59,9 @@ fn main() {
             "copy_text",
             "set_account_hidden",
             "open_tool_link",
+            "extension_folder_path",
+            "open_extension_folder",
+            "open_browser_login",
             "update_mode",
         ]),
     );

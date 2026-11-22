@@ -2,13 +2,25 @@
 // 쿠키를 읽는 것은 팝업의 단추를 눌렀을 때 한 번, 보내는 곳은 이 PC의 오버레이(127.0.0.1) 하나다.
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => readFileSync(join(root, file), 'utf8');
 const manifest = JSON.parse(read('manifest.json'));
+
+test('설치판의 extension 폴더에 실행용 파일과 안내가 빠짐없이 들어간다', () => {
+  const files = readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter(entry => entry.isFile())
+    .map(entry => relative(root, join(entry.parentPath ?? entry.path, entry.name)).split(sep).join('/'))
+    .filter(file => file !== 'package.json' && !file.startsWith('tests/'));
+  const expected = Object.fromEntries(files.map(file => [`../../extension/${file}`, `extension/${file}`]));
+  const { bundle } = JSON.parse(read('../app/src-tauri/tauri.conf.json'));
+  const actual = Object.entries(bundle.resources).filter(([src, dest]) =>
+    src.startsWith('../../extension/') || dest.startsWith('extension/'));
+  assert.deepEqual(Object.fromEntries(actual), expected);
+});
 
 /** 확장에 실리는 코드 파일(테스트는 뺀다). */
 const SHIPPED = ['popup.js', 'lib/cookie-header.js', 'lib/link.js'];

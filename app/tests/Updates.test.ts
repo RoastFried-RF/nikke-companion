@@ -129,7 +129,13 @@ it('설치 자원과 업데이트·서명 비밀의 출처를 제한한다', () 
   expect(conf.bundle.windows.nsis.languages).toContain('Korean');
   for (const [src, dest] of Object.entries(conf.bundle.resources)) {
     expect(src + dest).not.toMatch(/\.git|session_cookie|profiles|__pycache__|data\/(?:accounts|captures)|\*\*/i);
-    expect(src).toMatch(/(?:\.(?:py|webp|png|json)|\/LICENSE)$/);
+    if (src.startsWith('../../extension/')) {
+      expect(dest).toBe(src.slice('../../'.length));
+      expect(dest).toMatch(/^extension\/(?:manifest\.json|popup\.(?:html|css|js)|lib\/[\w-]+\.js|README\.md)$/);
+    } else {
+      expect(src).toMatch(/(?:\.(?:py|webp|png|json)|\/LICENSE)$/);
+      expect(dest).not.toMatch(/^extension\//);
+    }
   }
   const actions = [...workflow.matchAll(/^\s*(?:-\s+)?uses:\s*(.+)$/gm)].map(match => match[1].trim());
   expect(actions).toHaveLength(4);

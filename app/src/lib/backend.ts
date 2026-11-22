@@ -443,6 +443,18 @@ export function copyText(text: string): Promise<void> {
   return invoke<void>('copy_text', { text });
 }
 
+export function extensionFolderPath(): Promise<string> {
+  return invoke<string>('extension_folder_path');
+}
+
+export function openExtensionFolder(): Promise<void> {
+  return invoke<void>('open_extension_folder');
+}
+
+export function openBrowserLogin(): Promise<void> {
+  return invoke<void>('open_browser_login');
+}
+
 /** 위젯 상태가 바뀔 때마다 불린다(단축키·자동 표시·설정 변경). 돌려받은 함수로 구독을 끊는다. */
 export function onOverlayWidget(handler: (snapshot: WidgetSnapshot) => void): Promise<UnlistenFn> {
   return listen<WidgetSnapshot>(OVERLAY_WIDGET_EVENT, (event) => handler(event.payload));

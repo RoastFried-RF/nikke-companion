@@ -22,6 +22,11 @@ import {
   accountFetchProfile,
   accountSaveCookie,
   accountSyncStatus,
+  copyText,
+  errorMessage,
+  extensionFolderPath,
+  openBrowserLogin,
+  openExtensionFolder,
   loginWindowClear,
   loginWindowOpen,
   loginWindowTakeCookie,
@@ -38,6 +43,7 @@ const LAST_NAME = 'account.name';
 const DEFAULT_NAME = 'me';
 /** 중단을 눌렀는데 수집이 아직 Rust에 닿기 전이면 다시 청하는 간격(밀리초). */
 const STOP_RETRY_MS = 100;
+const BROWSER_LOGIN_WAIT_MS = 3 * 60 * 1000;
 
 /** 실패가 난 단계 — 그 단계 아래에 안내를 보인다. */
 type Step = 1 | 2 | 3;
@@ -66,6 +72,50 @@ const shared = useShared();
 /** 크롬 확장 연결(App.vue가 내려 준다 — 상태는 Rust가 들고 있다). 화면만 따로 띄우면 null이고 그 칸은 없다. */
 const extension = useExtensionLink();
 const extensionStatus = computed(() => extension?.status.value ?? null);
+const browserLoginBlocked = computed(() => blocked.value || extension?.busy.value);
+const browserNote = ref('');
+const folderNote = ref('');
+let browserTimer: ReturnType<typeof setTimeout> | undefined;
+let mounted = true;
+
+function endBrowserWait(): void {
+  clearTimeout(browserTimer);
+  browserNote.value = '';
+}
+
+async function startBrowserLogin(): Promise<void> {
+  if (!extension || browserLoginBlocked.value) return;
+  endBrowserWait();
+  await cookieTask('login', async () => {
+    if (!extensionStatus.value?.listening) await extension.setEnabled(true);
+    if (!extensionStatus.value?.listening) {
+      throw new Error(extension.problem.value || extensionStatus.value?.problem || '크롬 확장 연결을 켜지 못했다. 연결 상태를 확인해 주세요.');
+    }
+    if (!mounted) return '';
+    await openBrowserLogin();
+    if (mounted && !extensionStatus.value?.pending) {
+      browserNote.value = '기본 브라우저에서 로그인한 뒤 확장의 「오버레이로 보내기」를 누르세요.';
+      browserTimer = setTimeout(() => {
+        browserNote.value = '아직 받지 못했다. 기본 브라우저에서 열린 프로필에 확장이 설치돼 있고 연결 코드가 들어 있는지 확인해 주세요.';
+      }, BROWSER_LOGIN_WAIT_MS);
+    }
+    return '';
+  });
+}
+
+async function showFolder(copy: boolean): Promise<void> {
+  folderNote.value = '';
+  try {
+    if (copy) {
+      await copyText(await extensionFolderPath());
+      folderNote.value = '확장 폴더의 위치를 복사했다.';
+    } else {
+      await openExtensionFolder();
+    }
+  } catch (e) {
+    folderNote.value = errorMessage(e);
+  }
+}
 /** 크롬 확장 연결의 지금 상태를 한 줄로. */
 const extensionState = computed(() => {
   const s = extensionStatus.value;
@@ -157,7 +207,9 @@ async function toggleExtension(event: Event): Promise<void> {
  * 다른 일을 하는 중이면 끝난 뒤에 잇는다(아래 watch가 다시 부른다). 차례는 한 번만 가져간다.
  */
 async function continueFromExtension(): Promise<void> {
-  if (!extension || blocked.value || !extensionStatus.value?.pending) return;
+  if (!extension || !extensionStatus.value?.pending) return;
+  endBrowserWait();
+  if (blocked.value) return;
   busy.value = 'claim';
   const mine = await extension.claim();
   if (mine) await refresh();
@@ -247,7 +299,14 @@ async function stop(): Promise<void> {
 }
 
 onMounted(refresh);
-onBeforeUnmount(stopTimer);
+onBeforeUnmount(() => {
+  mounted = false;
+  endBrowserWait();
+  stopTimer();
+});
+watch(() => extensionStatus.value?.enabled, enabled => {
+  if (enabled === false) endBrowserWait();
+});
 // 확장에서 쿠키를 받았을 때, 그리고 하던 일이 끝났을 때 본다. 이 화면을 처음 열 때 이미 받아 둔 것이 있어도 잇는다.
 watch([() => extensionStatus.value?.pending, blocked], continueFromExtension, { immediate: true });
 </script>
@@ -279,6 +338,9 @@ watch([() => extensionStatus.value?.pending, blocked], continueFromExtension, { 
             <span class="step__sub">이미 로그인된 브라우저에서 단추 한 번 — 비밀번호를 몰라도 된다</span>
           </p>
           <template v-if="extension">
+            <button class="panel__button" type="button" :disabled="browserLoginBlocked" data-testid="browser-login" @click="startBrowserLogin">브라우저로 로그인</button>
+            <p class="step__hint">기본 브라우저에서 열린 프로필에 확장을 설치하고 연결 코드를 넣어 두세요. 패스키로 로그인한 뒤 확장 아이콘의 「오버레이로 보내기」를 누르면 계정 받기가 시작됩니다. 이미 로그인했다면 바로 누르세요.</p>
+            <p v-if="browserNote" class="step__hint" role="status" data-testid="browser-note">{{ browserNote }}</p>
             <div class="panel__row">
               <label class="link__switch">
                 <input
@@ -322,15 +384,25 @@ watch([() => extensionStatus.value?.pending, blocked], continueFromExtension, { 
               누르면 쿠키 저장부터 2·3단계까지 저절로 이어진다. 연결 코드는 쿠키가 아니다 — 확장에 한 번 넣어 두는 값이다.
             </p>
             <details class="fold" :open="extensionStatus?.enabled !== true" data-testid="link-howto">
-              <summary>확장을 설치하고 연결하는 순서 (처음 한 번)</summary>
+              <summary>확장 설치(한 번)</summary>
+              <div class="panel__row">
+                <button class="panel__button" type="button" data-testid="extension-folder" @click="showFolder(false)">확장 폴더 열기</button>
+                <button class="panel__button" type="button" data-testid="extension-copy" @click="showFolder(true)">경로 복사</button>
+              </div>
+              <p v-if="folderNote" class="step__hint" role="status">{{ folderNote }}</p>
               <ol class="step__list">
-                <li>크롬(엣지 등 크로뮴 계열)의 주소 칸에 <code>chrome://extensions</code>를 넣어 연다.</li>
+                <li>패스키로 로그인하는 크롬에서 <code>chrome://extensions</code>를 연다. 엣지는 <code>edge://extensions</code>를 연다.</li>
                 <li>오른쪽 위의 「개발자 모드」를 켠다.</li>
-                <li>「압축해제된 확장 프로그램을 로드합니다」를 눌러 이 앱 저장소(nikke-companion)의 <code>extension</code> 폴더를 고른다.</li>
+                <li>「압축해제된 확장 프로그램을 로드합니다」를 누르고 위에서 복사한 위치를 붙여 넣는다. 앱을 설치한 폴더(저장소에서 실행하면 저장소) 안의 <code>extension</code> 폴더를 고른다.</li>
                 <li>여기서 「크롬 확장 연결」을 켠다 — 연결 코드가 보인다.</li>
                 <li>브라우저 도구 모음의 확장 아이콘(니케 컴패니언 연결)을 눌러 「연결 코드」 칸에 그 코드를 넣는다.</li>
                 <li>같은 브라우저에서 blablalink.com에 로그인된 상태로 확장의 「오버레이로 보내기」를 누른다 — 이 화면에서 계정 받기가 이어진다.</li>
               </ol>
+              <p class="step__hint">앱을 업데이트한 뒤에는 같은 브라우저의 확장 관리에서 「니케 컴패니언 연결」의 새로 고침(↻)을 누른다.</p>
+            </details>
+            <details class="fold">
+              <summary>확장에서 전송을 눌러야 하는 이유</summary>
+              <p class="step__hint">확장이 받는 쪽이 니케 컴패니언인지 확인할 수 없어 자동 전달은 보류했다. 앱이 확장에 자신을 증명하는 방식을 사용자가 정하면 별도 작업으로 재개한다.</p>
             </details>
           </template>
         </div>

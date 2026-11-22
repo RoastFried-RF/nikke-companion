@@ -29,7 +29,8 @@ nikke-capture — 니케 PC판 게임 창의 정보를 읽거나 화면을 PNG�
   nikke-capture [--out <폴더>] [--name <라벨>]
       게임 화면(클라이언트 영역)을 PNG로 저장하고 결과를 JSON 한 줄로 출력한다:
       {path, width, height, captured_at, method, window}
-      --out     저장할 폴더. 기본은 저장소의 data/captures (환경 변수 NIKKE_CAPTURE_DIR로 바꿀 수 있다)
+      --out     저장할 폴더. 설치판 기본값은 %APPDATA%\\nikke-companion\\captures, 저장소에서는 data/captures
+                환경 변수 NIKKE_CAPTURE_DIR로 바꿀 수 있다
       --name    파일 이름에 붙일 라벨. 글자·숫자·-·_만 남긴다. 파일 이름은 <현지 시각>_<라벨>.png
       method는 캡처 방식이다(지금은 wgc — Windows.Graphics.Capture 하나뿐이다)
 
@@ -170,7 +171,13 @@ fn execute(command: Command, game: &dyn GameAccess) -> Result<String, GameError>
         })
     };
     match command {
-        Command::Help => Ok(USAGE.trim_end().to_string()),
+        Command::Help => {
+            let mut usage = USAGE.trim_end().to_owned();
+            if let Ok(dir) = game.default_dir() {
+                usage.push_str(&format!("\n\n현재 저장 폴더: {}", dir.display()));
+            }
+            Ok(usage)
+        }
         Command::Info => json(serde_json::to_string(&game.find()?)),
         Command::Capture { out, name } => {
             let dir = match out {
@@ -677,7 +684,21 @@ mod tests {
         assert_eq!(err, "");
         assert!(out.contains("nikke-capture --info"));
         assert!(out.contains("data/captures"));
+        assert!(out.contains(r"%APPDATA%\nikke-companion\captures"));
         assert!(out.contains("nikke-capture --recognize <PNG 파일>"));
         assert!(out.contains("nikke-capture --recognize-live"));
+    }
+
+    #[test]
+    fn help_shows_the_resolved_installed_capture_directory() {
+        let mut game = FakeGame::failing(GameError::NotRunning);
+        game.default_dir = crate::capture::resolve_capture_dir(
+            |key| (key == "APPDATA").then(|| r"R:\roaming".to_owned()),
+            &[],
+        );
+        let (code, out, _) = run_with(&game, &["--help"]);
+        let dir = Path::new(r"R:\roaming").join("nikke-companion").join("captures");
+        assert_eq!(code, EXIT_OK);
+        assert!(out.contains(&format!("현재 저장 폴더: {}", dir.display())));
     }
 }

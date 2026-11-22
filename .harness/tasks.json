@@ -2232,6 +2232,40 @@
         "verified_at": "2026-11-20T08:53:36.668Z",
         "commit": null
       }
+    },
+    {
+      "id": "P-036",
+      "title": "설치판에서 확장 찾기와 기본 브라우저 계정 연결",
+      "description": "설치판에서 확장을 찾아 기본 브라우저의 기존 로그인·패스키로 계정을 연결한다.",
+      "deps": ["P-035"],
+      "acceptance": [
+        "확장 실행 파일과 안내만 설치판에 포함하며 확장 폴더와 번들 목록을 대조한다",
+        "앱 창에서만 확장 폴더 열기·경로 복사·기본 브라우저 로그인 단추를 쓸 수 있다",
+        "수신부가 꺼져 있으면 켠 뒤 기본 브라우저를 열고, 3분 동안 수신이 없으면 열린 프로필과 연결 코드를 확인하도록 안내한다. 다른 계정 작업·업데이트 설치 중에는 브라우저 로그인을 잠그고, 일반 계산 중에는 로그인과 계정 받기를 허용한다",
+        "기본 브라우저에서 로그인한 뒤 확장의 「오버레이로 보내기」를 눌러 수신하면 해당 전송에 대해 계정 받기를 한 번 시작한다",
+        "캡처 도움말에 실행 환경에 맞는 기본 저장 폴더가 보인다"
+      ],
+      "verify": [
+        { "name": "extension", "cmd": "node --test extension/" },
+        { "name": "frontend-test", "cmd": "npm --prefix app test" },
+        { "name": "frontend-build", "cmd": "npm --prefix app run build" },
+        { "name": "rust-test", "cmd": "cargo test --manifest-path app/src-tauri/Cargo.toml" },
+        { "name": "clippy", "cmd": "cargo clippy --all-targets --manifest-path app/src-tauri/Cargo.toml -- -D warnings" },
+        { "name": "unit", "cmd": "node --test tests/unit/" }
+      ],
+      "manual_checks": [
+        "설치판에서 확장 폴더를 열고 크롬에 로드할 수 있는지",
+        "「브라우저로 로그인」을 눌러 열린 기본 브라우저에서 패스키로 로그인한 뒤 확장 아이콘의 「오버레이로 보내기」를 누르면 계정 받기가 이어지는지"
+      ],
+      "protected": [],
+      "status": "pending",
+      "attempts": 1,
+      "agent_errors": 0,
+      "blocked_reason": null,
+      "resume_condition": "확장이 받는 쪽이 니케 컴패니언인지 확인할 수 없어 자동 전달은 보류했다. 앱이 확장에 자신을 증명하는 방식을 사용자가 정하면 별도 작업으로 재개한다.",
+      "last_failure": null,
+      "manual_status": "pending",
+      "evidence": null
     }
   ]
 }

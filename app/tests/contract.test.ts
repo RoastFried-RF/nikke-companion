@@ -7,6 +7,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   installUpdate,
   updateMode,
+  extensionFolderPath,
+  openExtensionFolder,
+  openBrowserLogin,
   ACCOUNT_FETCH_EVENT,
   accountFetchCancel,
   accountFetchProfile,
@@ -191,6 +194,9 @@ const COMMANDS = [
   'open_tool_link',
   // P-035: 앱 창이 실행 위치에 따라 업데이트 확인을 결정한다.
   'update_mode',
+  'extension_folder_path',
+  'open_extension_folder',
+  'open_browser_login',
 ];
 
 /**
@@ -380,6 +386,7 @@ describe('Rust 명령 호출', () => {
       if (cmd === 'nikke_portrait' || cmd === 'boss_image' || cmd === 'game_icon') return missingImage;
       if (['shared_state', 'set_default_account', 'set_overlay_launch', 'save_intercept_result', 'set_account_hidden'].includes(cmd)) return sharedSnapshot;
       if (cmd === 'update_mode') return true;
+      if (cmd === 'extension_folder_path') return 'D:/apps/companion/extension';
       if (cmd === 'open_tool_link') return openedLink;
       if (cmd === 'read_account') return { name: 'me', modified_at: null, account: { schema_version: 1, nikkes: {} } };
       if (cmd === 'set_overlay_visible' || cmd === 'overlay_hide') return { visible: false, click_through: false, shortcut_problems: [] };
@@ -459,6 +466,10 @@ describe('Rust 명령 호출', () => {
     expect(calls[51].args).toEqual({ name: null, decks: deckBook });
     expect(calls[52].args).toEqual({ text: deckCopy });
     await expect(updateMode()).resolves.toBe(true);
+    await expect(extensionFolderPath()).resolves.toBe('D:/apps/companion/extension');
+    await openExtensionFolder();
+    await openBrowserLogin();
+    expect(calls.slice(-3).map(call => call.args)).toEqual([{}, {}, {}]);
     expect(calls.map((c) => c.cmd)).toEqual(COMMANDS);
     expect(WIDGET_COMMANDS).toHaveLength(9);
     expect(calls[0].args).toEqual({ path: 'D:\\r.json' });
@@ -1427,7 +1438,8 @@ describe('권한(capability)', () => {
     // P-032: 47 → 48(버스트 흐름 — 계산 도구의 버스트 보기를 돌려 글 받기).
     // P-033: 48 → 50(계정을 목록에서 숨기기·다시 보이기, 목록의 도구를 기본 브라우저로 열기).
     // P-035: 앱 창에만 설치판 판정 한 개를 더했다.
-    expect(forApp).toHaveLength(51);
+    // P-036: 확장 위치 조회·열기와 기본 브라우저 로그인은 앱 창에서만 쓴다.
+    expect(forApp).toHaveLength(54);
     // 끝내기 명령은 어느 창에도 없다 — 앱에 그런 명령이 없다.
     for (const p of [...capability.permissions, ...appCapability.permissions]) expect(p).not.toMatch(/quit|exit/);
     expect(COMMANDS).not.toContain('quit_app');
@@ -1525,7 +1537,8 @@ describe('엔진 호출(Rust)', () => {
     // 계정 여러 개·도구 링크(P-033)의 둘: 계정을 목록에서 숨기기·다시 보이기(파일은 지우지 않는다)와, 목록에 있는 도구의 주소를
     // 기본 브라우저로 열기(54 → 56). 화면이 넘기는 것은 계정 이름과 목록의 id뿐이다 — 폴더·파일 이름도 주소도 넘기지 않는다.
     // P-035: 실행 위치를 확인하는 읽기 명령 하나를 더했다.
-    expect(COMMANDS).toHaveLength(57);
+    // P-036에서 앱 창에 입력 인자가 없는 명령 셋을 더했다.
+    expect(COMMANDS).toHaveLength(60);
     expect(DECK_COMMANDS).toEqual(['load_decks', 'save_decks', 'copy_text']);
     expect(libRs).toContain('async fn load_decks(name: Option<String>) -> Result<Option<Value>, String>');
     expect(libRs).toContain('async fn save_decks(name: Option<String>, decks: Value) -> Result<(), String>');
@@ -2194,7 +2207,7 @@ describe('도구 링크 — 여는 주소는 목록에 있는 것뿐이다', () 
     }
   });
 
-  it('운영체제의 「열기」를 부르는 곳은 한 곳이고, 목록에서 찾은 주소만 넘긴다', () => {
+  it('운영체제의 「열기」에는 목록에서 찾은 도구 주소, 고정 로그인 주소, 앱에서 찾은 확장 폴더만 넘긴다', () => {
     const callers = Object.entries(allRust).filter(([, text]) => noComments(text.slice(0, text.includes('#[cfg(test)]') ? text.indexOf('#[cfg(test)]') : undefined)).includes('ShellExecute'));
     expect(callers.map(([file]) => file)).toEqual(['../src-tauri/src/tool_links.rs']);
     expect(linksCode.match(/ShellExecuteW\(/g)).toHaveLength(1);
@@ -2202,6 +2215,10 @@ describe('도구 링크 — 여는 주소는 목록에 있는 것뿐이다', () 
     // 여는 길은 하나다: id → 목록에서 찾기 → 그 주소.
     expect(linksCode).toMatch(/pub fn open\(id: &str\) -> Result<ToolLink, LinkError> \{\s*open_with\(links\(\), id, open_in_browser\)/);
     expect(linksCode).toMatch(/let link = resolve\(list, id\)\?;\s*opener\(&link\.url\)\?;/);
+    expect(linksCode).toContain('open_in_browser(crate::login_window::LOGIN_URL)');
+    expect(libRs).toContain('open_extension_folder(app: AppHandle) -> Result<(), String>');
+    expect(libRs).toContain('tool_links::open_folder(&extension_folder(&app)?)');
+    expect(libRs).toContain('open_browser_login() -> Result<(), String>');
     // 여는 함수도 주소를 한 번 더 본다.
     expect(linksCode).toMatch(/fn open_in_browser\(url: &str\) -> Result<\(\), LinkError> \{[\s\S]*?if !is_safe_url\(url\) \{\s*return Err\(LinkError::Unknown\);/);
     // 프로그램을 실행하거나 네트워크·파일을 쓰지 않는다.

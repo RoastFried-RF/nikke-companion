@@ -68,6 +68,13 @@
     ],
     "createUpdaterArtifacts": true,
     "resources": {
+      "../../extension/manifest.json": "extension/manifest.json",
+      "../../extension/popup.html": "extension/popup.html",
+      "../../extension/popup.css": "extension/popup.css",
+      "../../extension/popup.js": "extension/popup.js",
+      "../../extension/lib/cookie-header.js": "extension/lib/cookie-header.js",
+      "../../extension/lib/link.js": "extension/lib/link.js",
+      "../../extension/README.md": "extension/README.md",
       "../../data/intercept/anomaly.json": "data/intercept/anomaly.json",
       "../../vendor/nikke-calc/LICENSE": "engine/LICENSE",
       "../../vendor/nikke-calc/baseline/*.json": "engine/baseline/",

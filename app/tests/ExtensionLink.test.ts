@@ -50,6 +50,10 @@ vi.mock('../src/lib/backend', async (importOriginal) => ({
   extensionLinkSet: vi.fn(),
   extensionLinkNewCode: vi.fn(),
   extensionLinkTakePending: vi.fn(),
+  extensionFolderPath: vi.fn(),
+  openExtensionFolder: vi.fn(),
+  openBrowserLogin: vi.fn(),
+  copyText: vi.fn(),
   onExtensionLink: vi.fn(),
 }));
 
@@ -239,6 +243,86 @@ beforeEach(() => {
 });
 
 describe('계정 화면의 방법 순서와 설치 안내', () => {
+  it('앱이 확인한 확장 위치를 열거나 복사한다', async () => {
+    const w = await renderOn('account');
+    api.extensionFolderPath.mockResolvedValue('R:/사용자 지정/extension');
+    await click(w, 'extension-folder');
+    await click(w, 'extension-copy');
+    expect(api.openExtensionFolder.mock.calls).toEqual([[]]);
+    expect(api.extensionFolderPath.mock.calls).toEqual([[]]);
+    expect(api.copyText.mock.calls).toEqual([['R:/사용자 지정/extension']]);
+    w.unmount();
+  });
+
+  it('수신부를 켜고 기본 브라우저를 열며, 확장이 전송한 뒤 계정 받기를 한 번 시작한다', async () => {
+    const w = await renderOn('account');
+    await click(w, 'browser-login');
+    expect(api.extensionLinkSet.mock.calls).toEqual([[true]]);
+    expect(api.openBrowserLogin.mock.calls).toEqual([[]]);
+    expect(api.extensionLinkSet.mock.invocationCallOrder[0]).toBeLessThan(api.openBrowserLogin.mock.invocationCallOrder[0]);
+    await extensionSends();
+    await fetchStarted();
+    expect(api.accountFetchProfile).toHaveBeenCalledTimes(1);
+    expect(at(w, 'browser-login').attributes('disabled')).toBeDefined();
+    expect(at(w, 'browser-note').exists()).toBe(false);
+    await finishFetch(w);
+    w.unmount();
+  });
+
+  it('계정 작업 중 수신하면 대기 안내를 즉시 닫고 잠금이 풀린 뒤 한 번만 받는다', async () => {
+    const w = await renderOn('account');
+    let release!: () => void;
+    api.loginWindowOpen.mockReturnValueOnce(new Promise<void>(resolve => { release = resolve; }));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await click(w, 'browser-login');
+      expect(at(w, 'browser-note').exists()).toBe(true);
+      await click(w, 'login-open');
+      expect(at(w, 'browser-login').attributes('disabled')).toBeDefined();
+      await extensionSends();
+      expect(at(w, 'browser-note').exists()).toBe(false);
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(at(w, 'browser-note').exists()).toBe(false);
+      expect(api.extensionLinkTakePending).not.toHaveBeenCalled();
+      expect(api.accountFetchProfile).not.toHaveBeenCalled();
+
+      release();
+      await flushPromises();
+      expect(api.extensionLinkTakePending).toHaveBeenCalledTimes(1);
+      expect(api.accountFetchProfile).toHaveBeenCalledTimes(1);
+      await finishFetch(w);
+      expect(written).toHaveLength(1);
+      expect(api.accountFetchProfile).toHaveBeenCalledTimes(1);
+    } finally {
+      w.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('기본 브라우저에서 제때 받지 못하면 열린 프로필과 연결 코드를 확인하도록 안내한다', async () => {
+    rustLink = onStatus();
+    const w = await renderOn('account');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await click(w, 'browser-login');
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(at(w, 'browser-note').text()).toMatch(/받지 못했다.*기본 브라우저.*프로필.*연결 코드/);
+      expect(api.extensionLinkSet).not.toHaveBeenCalled();
+      expect(api.accountFetchProfile).not.toHaveBeenCalled();
+    } finally {
+      w.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('수신부가 열리지 않으면 브라우저를 열지 않는다', async () => {
+    const w = await renderOn('account');
+    api.extensionLinkSet.mockResolvedValue({ ...onStatus(), listening: false, problem: '이미 사용 중이다' });
+    await click(w, 'browser-login');
+    expect(api.openBrowserLogin).not.toHaveBeenCalled();
+    expect(at(w, 'link-problem').text()).toContain('이미 사용 중이다');
+    w.unmount();
+  });
   it('쿠키를 받는 방법이 1 크롬 확장(권장) → 2 쿠키 붙여넣기 → 3 앱 안의 로그인 창 순서로 보인다', async () => {
     const w = await renderOn('account');
     const ways = at(w, 'step-cookie').findAll('[data-testid^="way-"]');
@@ -266,6 +350,9 @@ describe('계정 화면의 방법 순서와 설치 안내', () => {
     const parts = ['chrome://extensions', '개발자 모드', '압축해제된 확장 프로그램을 로드합니다', '크롬 확장 연결', '연결 코드', '오버레이로 보내기'];
     parts.forEach((part, i) => expect(steps[i]).toContain(part));
     expect(steps[2]).toContain('extension');
+    expect(steps[0]).toContain('edge://extensions');
+    expect(steps[2]).toContain('앱을 설치한 폴더');
+    expect(howto.text()).toContain('새로 고침(↻)');
     expect(steps[5]).toContain('blablalink.com에 로그인된 상태');
     // 켜 두면(이미 설치한 사람) 접힌다.
     await setSwitch(w, true);
@@ -543,6 +630,24 @@ describe('계산 중에는 탭을 옮기지 않는다', () => {
     );
     await flushPromises();
   }
+
+  it('계산 중에도 기본 브라우저에서 로그인하고 수동 전송하면 계정 받기가 한 번 시작된다', async () => {
+    const engine = holdEngine();
+    const w = await renderOn('compare');
+    await startCompare(w);
+    await openTab(w, 'account');
+    expect(at(w, 'browser-login').attributes('disabled')).toBeUndefined();
+    await click(w, 'browser-login');
+    expect(api.openBrowserLogin).toHaveBeenCalledTimes(1);
+    await extensionSends();
+    await fetchStarted();
+    expect(at(w, 'nav-busy').exists()).toBe(true);
+    expect(api.accountFetchProfile).toHaveBeenCalledTimes(1);
+    await finishFetch(w);
+    await finishCompute(w, engine);
+    expect(api.accountFetchProfile).toHaveBeenCalledTimes(1);
+    w.unmount();
+  });
 
   it('계산이 도는 동안 받으면 보던 탭에 머물고 한 줄로 알린다 — 계산이 끝나면 계정 탭으로 옮겨 받는다', async () => {
     rustLink = onStatus();

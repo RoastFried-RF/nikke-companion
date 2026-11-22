@@ -156,15 +156,37 @@ pub fn open(id: &str) -> Result<ToolLink, LinkError> {
 /// 그래도 여기서 한 번 더 본다(이 함수가 다른 것을 여는 데 쓰이지 않게).
 #[cfg(windows)]
 fn open_in_browser(url: &str) -> Result<(), LinkError> {
-    use windows::core::{w, HSTRING};
+    if !is_safe_url(url) {
+        return Err(LinkError::Unknown);
+    }
+    shell_open(windows::core::HSTRING::from(url))
+}
+
+pub(crate) fn open_login_page() -> Result<(), LinkError> {
+    open_in_browser(crate::login_window::LOGIN_URL)
+}
+
+#[cfg(windows)]
+pub(crate) fn open_folder(path: &std::path::Path) -> Result<(), String> {
+    if !path.is_dir() {
+        return Err("확장 폴더를 찾을 수 없다".into());
+    }
+    shell_open(windows::core::HSTRING::from(path.as_os_str()))
+        .map_err(|_| "확장 폴더를 열 수 없다. 경로 복사를 사용해 주세요.".into())
+}
+
+#[cfg(not(windows))]
+pub(crate) fn open_folder(_path: &std::path::Path) -> Result<(), String> {
+    Err("이 운영체제에서는 확장 폴더 열기를 지원하지 않는다".into())
+}
+
+#[cfg(windows)]
+fn shell_open(target: windows::core::HSTRING) -> Result<(), LinkError> {
+    use windows::core::w;
     use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-    if !is_safe_url(url) {
-        return Err(LinkError::Unknown);
-    }
-    let target = HSTRING::from(url);
     // 셸의 「열기」는 단일 스레드 아파트를 기대한다 — 이 일만 하는 스레드를 따로 쓴다(앱의 다른 스레드의 COM 상태를 바꾸지 않는다).
     let outcome = std::thread::spawn(move || {
         // SAFETY: 이 스레드에서만 COM을 켜고, 끝나기 전에 끈다. ShellExecuteW에는 살아 있는 문자열만 넘긴다.
